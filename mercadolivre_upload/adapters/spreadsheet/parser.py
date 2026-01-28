@@ -20,7 +20,9 @@ logger = logging.getLogger(__name__)
 class SpreadsheetParser:
     """Parse Excel files into domain Product entities."""
 
-    REQUIRED_COLUMNS = ["sku", "title", "description", "price", "available_quantity", "condition"]
+    # Required columns for product creation
+    # Other columns (isbn, description, etc.) are optional and handled as attributes if present
+    REQUIRED_COLUMNS = ["sku", "title", "price", "condition"]
 
     def __init__(self):
         self.detector = HeaderDetector()
@@ -125,21 +127,32 @@ class SpreadsheetParser:
         raise ValueError(f"Invalid condition: {value}")
 
     def _extract_attributes(self, row: pd.Series) -> dict[str, str]:
-        """Extract additional attributes from non-mapped columns."""
+        """Extract additional attributes from non-mapped columns.
+
+        All columns not in the standard mapping (title, price, sku, etc.)
+        are treated as attributes for the Mercado Livre API.
+        """
         attributes = {}
+        # Get all mapped column names
         mapped_cols = set(self.column_mapping.values())
+
+        # Also exclude 'fotos' from attributes since it's handled separately
+        if "fotos" in self.column_mapping:
+            mapped_cols.add(self.column_mapping["fotos"])
 
         for col in row.index:
             if col not in mapped_cols:
                 value = row.get(col)
                 if pd.notna(value) and str(value).strip():
+                    # Clean the column name
                     col_str = str(col).strip()
-                    # Skip instructional headers
-                    if len(col_str) > 100 or "informe" in col_str.lower():
+                    # Skip instructional headers and long text
+                    if len(col_str) > 100:
                         continue
+                    # Clean to use as attribute name
                     clean_col = re.sub(r"[^a-zA-Z0-9_\s]", "", col_str).strip()
                     if clean_col:
-                        attributes[clean_col.lower().replace(" ", "_")] = str(value).strip()
+                        attributes[clean_col] = str(value).strip()
 
         return attributes
 
@@ -152,9 +165,13 @@ class SpreadsheetParser:
             return None
 
         price = self._parse_price(self._get_value(row, "price"))
-        quantity = self._parse_quantity(self._get_value(row, "available_quantity"))
+        # Default quantity to 1 if not specified
+        quantity = 1
+        if "available_quantity" in self.column_mapping:
+            quantity = self._parse_quantity(self._get_value(row, "available_quantity"))
         condition = self._parse_condition(self._get_value(row, "condition"))
-        description = str(self._get_value(row, "description", ""))
+        # Default description to title if not present
+        description = str(self._get_value(row, "description", title))
 
         fiscal = FiscalData(
             ncm=str(self._get_value(row, "ncm", "")),
@@ -163,13 +180,19 @@ class SpreadsheetParser:
             cest=str(self._get_value(row, "cest", "")) or None,
         )
 
+        # Extract attributes from other columns
         attributes = self._extract_attributes(row)
 
-        # Extract special attributes that are mapped but not in standard columns
+        # Handle ISBN/GTIN if present
         isbn = self._get_value(row, "isbn", "") or self._get_value(row, "gtin", "")
         if isbn:
             attributes["isbn"] = str(isbn).strip()
-            attributes["gtin"] = str(isbn).strip()  # ISBN is used as GTIN
+            attributes["gtin"] = str(isbn).strip()
+
+        # Handle Fotos column - store in attributes for image uploader
+        fotos = self._get_value(row, "fotos", "")
+        if fotos:
+            attributes["_fotos"] = str(fotos).strip()
 
         return Product(
             sku=sku,

@@ -12,30 +12,31 @@ logger = logging.getLogger(__name__)
 class HeaderDetector:
     """Detects header rows and maps columns dynamically."""
 
-    # Keywords to search for in column headers
+    # Keywords to search for in column headers (Mercado Livre template format)
     COLUMN_PATTERNS = {
-        "sku": [r"\bsku\b", r"c[óo]digo", r"\bcode\b"],
-        "title": [r"t[íi]tulo", r"\bnome\b", r"\bproduto\b"],
-        "description": [r"descri[çc][ãa]o", r"\bdesc\b"],
-        "price": [r"\bpre[çc]o\b", r"\bprice\b", r"\bvalor\b"],
-        "available_quantity": [r"\bestoque\b", r"\bstock\b"],
-        "condition": [r"condi[çc][ãa]o", r"\bestado\b"],
-        "ncm": [r"\bncm\b"],
-        "cfop": [r"\bcfop\b"],
-        "origin": [r"\borigem\b"],
-        "cest": [r"\bcest\b"],
-        "isbn": [r"\bisbn\b"],
-        "gtin": [r"\bgtin\b", r"\bisbn\b", r"\bc[óo]digo\s*de\s*barras\b"],
+        "sku": [r"\bsku\b"],
+        "title": [r"^t[íi]tulo(?!\s+do)"],  # Match "Título" at start, but not "Título do livro"
+        "description": [r"descri[çc][ãa]o"],
+        "price": [r"pre[çc]o"],
+        "available_quantity": [r"estoque"],
+        "condition": [r"condi[çc][ãa]o"],
+        "isbn": [r"isbn"],
+        "gtin": [r"gtin"],
+        "ncm": [r"ncm"],
+        "cfop": [r"cfop"],
+        "origin": [r"origem"],
+        "cest": [r"cest"],
+        "fotos": [r"fotos"],
     }
 
     # Row patterns to detect header row (multiple matches needed)
     HEADER_INDICATORS = [
-        (r"\bsku\b", 5),           # SKU is very strong indicator
-        (r"isbn", 4),              # ISBN is very strong (book category)
-        (r"t[íi]tulo", 3),         # Title is good indicator
-        (r"pre[çc]o", 3),          # Price is good indicator
+        (r"sku", 5),               # SKU is very strong indicator
+        (r"t[ií]tulo", 4),         # Title is strong indicator
+        (r"condi[cç][aã]o", 3),    # Condition is good indicator
+        (r"pre[cç]o", 3),          # Price is good indicator
         (r"estoque", 2),           # Stock is medium indicator
-        (r"descri[çc][ãa]o", 2),   # Description is medium indicator
+        (r"fotos", 2),             # Fotos is medium indicator
     ]
 
     # Maximum length for a valid header cell

@@ -18,6 +18,8 @@ from mercadolivre_upload.api.client import MLApiClient
 from mercadolivre_upload.application.publish_product import PublishProductUseCase
 from mercadolivre_upload.auth import AuthManager
 from mercadolivre_upload.domain.category.resolver import CategoryResolver
+from mercadolivre_upload.domain.shipping.resolver import ShippingResolver
+from mercadolivre_upload.infrastructure.cache.attribute_cache import AttributeCache
 
 logging.basicConfig(
     level=logging.INFO,
@@ -41,16 +43,47 @@ def main():
     )
     parser.add_argument(
         "--category",
-        default="Livros",
-        help="Category name (default: Livros)",
+        required=True,
+        help="Category name (e.g., 'Livros', 'Eletrônicos', 'Celulares e Smartphones')",
     )
     parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Validate only, don't publish",
     )
+    parser.add_argument(
+        "--cache-dir",
+        default="cache/categories",
+        help="Directory for attribute cache",
+    )
+    parser.add_argument(
+        "--cache-ttl",
+        type=int,
+        default=24,
+        help="Cache TTL in hours (0 = no expiration)",
+    )
+    parser.add_argument(
+        "--clear-cache",
+        action="store_true",
+        help="Clear attribute cache before running",
+    )
 
     args = parser.parse_args()
+
+    # Initialize cache
+    attribute_cache = AttributeCache(
+        cache_dir=args.cache_dir,
+        ttl_hours=args.cache_ttl,
+    )
+
+    # Handle clear cache option
+    if args.clear_cache:
+        attribute_cache.clear_cache()
+        logger.info("Cache cleared")
+
+    # Log cache info
+    cache_info = attribute_cache.get_cache_info()
+    logger.info(f"Cache: {cache_info['cached_categories']} categories cached")
 
     # Initialize infrastructure (outer layer)
     auth_manager = AuthManager()
@@ -61,13 +94,18 @@ def main():
     image_uploader = ImageUploader(api_client, Path(args.images))
 
     # Initialize domain (inner layer - business logic)
-    category_resolver = CategoryResolver(category_adapter)
+    category_resolver = CategoryResolver(
+        category_adapter,
+        attribute_cache=attribute_cache,
+    )
+    shipping_resolver = ShippingResolver(api_client)
 
     # Initialize application layer (orchestration)
     use_case = PublishProductUseCase(
         category_resolver=category_resolver,
         publisher=api_client,
         image_uploader=image_uploader,
+        shipping_resolver=shipping_resolver,
         dry_run=args.dry_run,
     )
 

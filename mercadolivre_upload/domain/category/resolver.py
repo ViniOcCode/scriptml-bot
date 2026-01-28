@@ -90,6 +90,18 @@ class CategoryApiPort(Protocol):
         ...
 
 
+class AttributeCachePort(Protocol):
+    """Port interface for attribute cache."""
+
+    def get_attributes(self, category_id: str) -> list[dict] | None:
+        """Get cached attributes if valid."""
+        ...
+
+    def save_attributes(self, category_id: str, attributes: list[dict]) -> None:
+        """Save attributes to cache."""
+        ...
+
+
 class CategoryResolver:
     """Resolves category names to IDs using API port.
 
@@ -97,13 +109,19 @@ class CategoryResolver:
     Supports hierarchical category resolution.
     """
 
-    def __init__(self, api_port: CategoryApiPort):
+    def __init__(
+        self,
+        api_port: CategoryApiPort,
+        attribute_cache: AttributeCachePort | None = None,
+    ):
         """Initialize with API port.
 
         Args:
             api_port: Implementation of category API operations
+            attribute_cache: Optional cache for category attributes
         """
         self._api = api_port
+        self._attribute_cache = attribute_cache
         self._categories: dict[str, str] = {}  # name -> id cache
         self._category_cache: dict[str, dict] = {}  # id -> data cache
         self._children_cache: dict[str, list] = {}  # id -> children cache
@@ -375,12 +393,26 @@ class CategoryResolver:
 
     def get_mandatory_attributes(self, category_id: str) -> list[dict]:
         """Get mandatory attributes for a category."""
-        attributes = self._api.get_category_attributes(category_id)
+        attributes = self.get_all_attributes(category_id)
         return [attr for attr in attributes if attr.get("tags", {}).get("required")]
 
     def get_all_attributes(self, category_id: str) -> list[dict]:
-        """Get all attributes for a category."""
-        return self._api.get_category_attributes(category_id)
+        """Get all attributes for a category (cached)."""
+        # Check cache first
+        if self._attribute_cache:
+            cached = self._attribute_cache.get_attributes(category_id)
+            if cached is not None:
+                logger.debug(f"Using cached attributes for {category_id}")
+                return cached
+
+        # Fetch from API
+        attributes = self._api.get_category_attributes(category_id)
+
+        # Save to cache
+        if self._attribute_cache:
+            self._attribute_cache.save_attributes(category_id, attributes)
+
+        return attributes
 
     def build_attribute_map(self, category_id: str) -> dict[str, dict]:
         """Build name -> attribute mapping."""

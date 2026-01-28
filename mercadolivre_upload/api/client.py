@@ -58,7 +58,9 @@ class MLApiClient:
 
         return response.json()
 
-    def post(self, endpoint: str, data: Optional[dict] = None, json: Optional[dict] = None) -> dict:
+    def post(
+        self, endpoint: str, data: Optional[dict] = None, json: Optional[dict] = None
+    ) -> dict:
         """Make POST request to API.
 
         Args:
@@ -77,12 +79,17 @@ class MLApiClient:
 
         logger.debug(f"POST {url}")
         response = self.session.post(
-            url,
-            headers=headers,
-            data=data,
-            json=json,
-            timeout=30
+            url, headers=headers, data=data, json=json, timeout=30
         )
+
+        # Special handling for validation endpoint - return error response
+        # so caller can distinguish warnings from actual errors
+        if endpoint.strip('/') == 'items/validate' and response.status_code == 400:
+            try:
+                return response.json()
+            except Exception:
+                pass
+
         response.raise_for_status()
 
         return response.json()
@@ -165,6 +172,15 @@ class MLApiClient:
             Created item data
         """
         return self.post("/items", json=item)
+
+    def get_users_me(self) -> dict:
+        """Get current authenticated user info.
+
+        Returns:
+            User data including shipping modes
+        """
+        return self.get("/users/me")
+
 
     def upload_image(self, image_path: str) -> dict:
         """Upload an image.

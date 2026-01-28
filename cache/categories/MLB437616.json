@@ -1,0 +1,2976 @@
+{
+  "cached_at": "2026-01-28T15:47:36.670308",
+  "category_id": "MLB437616",
+  "attributes": [
+    {
+      "id": "BOOK_TITLE",
+      "name": "Título do livro",
+      "tags": {
+        "catalog_required": true,
+        "required": true
+      },
+      "hierarchy": "PARENT_PK",
+      "relevance": 1,
+      "value_type": "string",
+      "value_max_length": 255,
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "BOOK_SUBTITLE",
+      "name": "Subtítulo do livro",
+      "tags": {},
+      "hierarchy": "PARENT_PK",
+      "relevance": 1,
+      "value_type": "string",
+      "value_max_length": 255,
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "BOOK_SERIE",
+      "name": "Série",
+      "tags": {},
+      "hierarchy": "PARENT_PK",
+      "relevance": 1,
+      "value_type": "string",
+      "value_max_length": 255,
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "AUTHOR",
+      "name": "Autor",
+      "tags": {
+        "catalog_required": true,
+        "required": true
+      },
+      "hierarchy": "PARENT_PK",
+      "relevance": 1,
+      "value_type": "string",
+      "value_max_length": 255,
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "LANGUAGE",
+      "name": "Idioma",
+      "tags": {},
+      "hierarchy": "PARENT_PK",
+      "relevance": 1,
+      "value_type": "list",
+      "values": [
+        {
+          "id": "313886",
+          "name": "Espanhol"
+        },
+        {
+          "id": "1258229",
+          "name": "Português"
+        },
+        {
+          "id": "313885",
+          "name": "Inglês"
+        },
+        {
+          "id": "313889",
+          "name": "Italiano"
+        },
+        {
+          "id": "3345055",
+          "name": "Grego"
+        },
+        {
+          "id": "12487275",
+          "name": "Latim"
+        },
+        {
+          "id": "313883",
+          "name": "Francês"
+        },
+        {
+          "id": "313884",
+          "name": "Alemão"
+        },
+        {
+          "id": "17013875",
+          "name": "Línguas germânicas"
+        },
+        {
+          "id": "17013876",
+          "name": "Provençal"
+        },
+        {
+          "id": "3345046",
+          "name": "Hebraico"
+        },
+        {
+          "id": "17013877",
+          "name": "Guarani"
+        },
+        {
+          "id": "17013878",
+          "name": "Inglês americano"
+        },
+        {
+          "id": "3345031",
+          "name": "Inglês internacional"
+        },
+        {
+          "id": "17013879",
+          "name": "Castelhano"
+        },
+        {
+          "id": "20104712",
+          "name": "Holandês"
+        },
+        {
+          "id": "313887",
+          "name": "Russo"
+        },
+        {
+          "id": "2466958",
+          "name": "Chinês"
+        },
+        {
+          "id": "17013880",
+          "name": "Basco"
+        },
+        {
+          "id": "17013881",
+          "name": "Albanês"
+        },
+        {
+          "id": "17013882",
+          "name": "Catalão"
+        },
+        {
+          "id": "3345047",
+          "name": "Árabe"
+        },
+        {
+          "id": "17013883",
+          "name": "Galego"
+        },
+        {
+          "id": "313888",
+          "name": "Japonês"
+        },
+        {
+          "id": "17013884",
+          "name": "Espanhol/Inglês"
+        },
+        {
+          "id": "17013885",
+          "name": "Espanhol/Francês"
+        },
+        {
+          "id": "17013886",
+          "name": "Espanhol/Português"
+        },
+        {
+          "id": "17013887",
+          "name": "Espanhol/Alemão"
+        },
+        {
+          "id": "17013888",
+          "name": "Espanhol/Italiano"
+        },
+        {
+          "id": "17013889",
+          "name": "Espanhol/Hebreu"
+        },
+        {
+          "id": "17013890",
+          "name": "Espanhol/Náuatle"
+        },
+        {
+          "id": "17013891",
+          "name": "Inglês/Chinês"
+        },
+        {
+          "id": "12500637",
+          "name": "Inglês/Alemão"
+        },
+        {
+          "id": "12535898",
+          "name": "Inglês/Francês"
+        },
+        {
+          "id": "17013892",
+          "name": "Português/Latim"
+        },
+        {
+          "id": "17013893",
+          "name": "Português/Grego"
+        },
+        {
+          "id": "17013894",
+          "name": "Português/Italiano"
+        },
+        {
+          "id": "17013895",
+          "name": "Português/Hebreu"
+        },
+        {
+          "id": "17013896",
+          "name": "Português/Inglês"
+        },
+        {
+          "id": "17013897",
+          "name": "Português/Francês"
+        },
+        {
+          "id": "12408596",
+          "name": "Português/Russo"
+        },
+        {
+          "id": "17013898",
+          "name": "Português/Japonês"
+        },
+        {
+          "id": "17013899",
+          "name": "Português/Árabe"
+        },
+        {
+          "id": "17013900",
+          "name": "Português/Aramaico"
+        },
+        {
+          "id": "17013901",
+          "name": "Português/Finlandês"
+        },
+        {
+          "id": "17013902",
+          "name": "Português/Faroês"
+        },
+        {
+          "id": "17013903",
+          "name": "Português/Chinês"
+        },
+        {
+          "id": "17013904",
+          "name": "Português/Coreano"
+        },
+        {
+          "id": "12868767",
+          "name": "Português/Sânscrito"
+        },
+        {
+          "id": "12663391",
+          "name": "Português/Hindi"
+        },
+        {
+          "id": "17013905",
+          "name": "Português/Blin"
+        },
+        {
+          "id": "17013906",
+          "name": "Português/Turco"
+        },
+        {
+          "id": "17013907",
+          "name": "Português/Guarani"
+        },
+        {
+          "id": "17013908",
+          "name": "Português/Alemão"
+        },
+        {
+          "id": "17013909",
+          "name": "Espanhol/Inglês/Alemão"
+        },
+        {
+          "id": "17013910",
+          "name": "Espanhol/Inglês/Francês"
+        },
+        {
+          "id": "17013911",
+          "name": "Espanhol/Inglês/Náuatle"
+        },
+        {
+          "id": "17013912",
+          "name": "Espanhol/Inglês/Otomi"
+        },
+        {
+          "id": "17013913",
+          "name": "Espanhol/Português/Italiano"
+        },
+        {
+          "id": "17013914",
+          "name": "Espanhol/Inglês/Italiano"
+        },
+        {
+          "id": "17013915",
+          "name": "Espanhol/Inglês/Português"
+        },
+        {
+          "id": "17013916",
+          "name": "Espanhol/Português/Hindi"
+        },
+        {
+          "id": "17013917",
+          "name": "Espanhol/Português/Provençal"
+        },
+        {
+          "id": "17013918",
+          "name": "Inglês/Alemão/Francês"
+        },
+        {
+          "id": "17013919",
+          "name": "Inglês/Alemão/Chinês"
+        },
+        {
+          "id": "17013920",
+          "name": "Português/Grego/Latim"
+        },
+        {
+          "id": "17013921",
+          "name": "Português/Alemão/Francês"
+        },
+        {
+          "id": "17013922",
+          "name": "Português/Inglês/Alemão"
+        },
+        {
+          "id": "17013923",
+          "name": "Português/Inglês/Francês"
+        },
+        {
+          "id": "17013924",
+          "name": "Português/Inglês/Japonês"
+        },
+        {
+          "id": "17013925",
+          "name": "Português/Blin/Grego"
+        },
+        {
+          "id": "17013926",
+          "name": "Espanhol/Inglês/Francês/Alemão"
+        },
+        {
+          "id": "17013927",
+          "name": "Espanhol/Português/Hebreu/Aramaico"
+        },
+        {
+          "id": "17013928",
+          "name": "Espanhol/inglês/Francês/Português"
+        },
+        {
+          "id": "17013929",
+          "name": "Espanhol/Português/Inglês/Italiano"
+        },
+        {
+          "id": "17013930",
+          "name": "Espanhol/Inglês/Português/Alemão"
+        },
+        {
+          "id": "17013931",
+          "name": "Espanhol/Inglês/Francês/Italiano"
+        },
+        {
+          "id": "17013932",
+          "name": "Espanhol/Francês/Alemão/Italiano"
+        },
+        {
+          "id": "17013933",
+          "name": "Português/Inglês/Francês/Alemão"
+        },
+        {
+          "id": "17013934",
+          "name": "Português/Francês/Alemão/Latim"
+        },
+        {
+          "id": "17013935",
+          "name": "Inglês/Árabe/Alemão/Russo"
+        },
+        {
+          "id": "17013936",
+          "name": "Inglês/Chinês/Alemão/Italiano"
+        },
+        {
+          "id": "17013937",
+          "name": "Espanhol/Maia/Otomi/Náuatle/Zapoteco"
+        },
+        {
+          "id": "17013938",
+          "name": "Espanhol/Francês/Alemão/Italiano/Neerlandês"
+        },
+        {
+          "id": "17013939",
+          "name": "Espanhol/Inglês/Português/Francês/Italiano"
+        },
+        {
+          "id": "17013940",
+          "name": "Espanhol/Inglês/Francês/Alemão/Italiano"
+        },
+        {
+          "id": "17013941",
+          "name": "Espanhol/Inglês/Português/Francês/Alemão"
+        },
+        {
+          "id": "17013942",
+          "name": "Espanhol/Inglês/Francês/Alemão/Japonês"
+        },
+        {
+          "id": "17013943",
+          "name": "Espanhol/Inglês/Português/Francês/Latim"
+        },
+        {
+          "id": "17013944",
+          "name": "Inglês/Chinês/Francês/Alemão/Russo"
+        },
+        {
+          "id": "17013945",
+          "name": "Espanhol/Inglês/Francês/Alemão/Italiano/Neerlandês"
+        },
+        {
+          "id": "17013946",
+          "name": "Espanhol/Inglês/Alemão/Francês/Árabe/Russo"
+        },
+        {
+          "id": "17013947",
+          "name": "Espanhol/Inglês/Francês/Alemão/Italiano/Português"
+        },
+        {
+          "id": "17013948",
+          "name": "Espanhol/Inglês/Português/Francês/Alemão/Italiano/Neerlandês"
+        },
+        {
+          "id": "17013949",
+          "name": "Espanhol/Inglês/Português/Neerlandês/Francês/Alemão/Italiano/Sueco"
+        }
+      ],
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "BOOK_PUBLISHER",
+      "name": "Editora do livro",
+      "tags": {
+        "catalog_required": true
+      },
+      "hierarchy": "PARENT_PK",
+      "relevance": 1,
+      "value_type": "string",
+      "value_max_length": 255,
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "BOOK_EDITION",
+      "name": "Edição do livro",
+      "tags": {},
+      "hierarchy": "PARENT_PK",
+      "relevance": 1,
+      "value_type": "string",
+      "value_max_length": 255,
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "IS_KIT",
+      "name": "É kit",
+      "tags": {
+        "hidden": true,
+        "read_only": true
+      },
+      "hierarchy": "PARENT_PK",
+      "relevance": 1,
+      "value_type": "boolean",
+      "values": [
+        {
+          "id": "242084",
+          "name": "Não",
+          "metadata": {
+            "value": false
+          }
+        },
+        {
+          "id": "242085",
+          "name": "Sim",
+          "metadata": {
+            "value": true
+          }
+        }
+      ],
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "COVER_COLOR",
+      "name": "Cor da capa",
+      "tags": {
+        "hidden": true,
+        "read_only": true
+      },
+      "hierarchy": "CHILD_PK",
+      "relevance": 1,
+      "value_type": "string",
+      "value_max_length": 255,
+      "values": [
+        {
+          "id": "52019",
+          "name": "Verde-escuro"
+        },
+        {
+          "id": "283160",
+          "name": "Azul-turquesa"
+        },
+        {
+          "id": "52022",
+          "name": "Água"
+        },
+        {
+          "id": "283162",
+          "name": "Índigo"
+        },
+        {
+          "id": "52036",
+          "name": "Lavanda"
+        },
+        {
+          "id": "283163",
+          "name": "Rosa-chiclete"
+        },
+        {
+          "id": "51998",
+          "name": "Bordô"
+        },
+        {
+          "id": "52003",
+          "name": "Nude"
+        },
+        {
+          "id": "52055",
+          "name": "Branco"
+        },
+        {
+          "id": "283161",
+          "name": "Azul-marinho"
+        },
+        {
+          "id": "52008",
+          "name": "Creme"
+        },
+        {
+          "id": "52045",
+          "name": "Rosa-pálido"
+        },
+        {
+          "id": "283153",
+          "name": "Palha"
+        },
+        {
+          "id": "283150",
+          "name": "Laranja-claro"
+        },
+        {
+          "id": "52028",
+          "name": "Azul"
+        },
+        {
+          "id": "52043",
+          "name": "Rosa-claro"
+        },
+        {
+          "id": "283148",
+          "name": "Coral-claro"
+        },
+        {
+          "id": "283149",
+          "name": "Coral"
+        },
+        {
+          "id": "52021",
+          "name": "Azul-celeste"
+        },
+        {
+          "id": "52031",
+          "name": "Azul-aço"
+        },
+        {
+          "id": "283156",
+          "name": "Cáqui"
+        },
+        {
+          "id": "52001",
+          "name": "Bege"
+        },
+        {
+          "id": "51993",
+          "name": "Vermelho"
+        },
+        {
+          "id": "51996",
+          "name": "Terracota"
+        },
+        {
+          "id": "283165",
+          "name": "Cinza"
+        },
+        {
+          "id": "52035",
+          "name": "Violeta"
+        },
+        {
+          "id": "283154",
+          "name": "Marrom-claro"
+        },
+        {
+          "id": "52049",
+          "name": "Preto"
+        },
+        {
+          "id": "283155",
+          "name": "Marrom-escuro"
+        },
+        {
+          "id": "52053",
+          "name": "Prateado"
+        },
+        {
+          "id": "52047",
+          "name": "Violeta-escuro"
+        },
+        {
+          "id": "51994",
+          "name": "Rosa"
+        },
+        {
+          "id": "52007",
+          "name": "Amarelo"
+        },
+        {
+          "id": "283157",
+          "name": "Verde-limão"
+        },
+        {
+          "id": "52012",
+          "name": "Dourado-escuro"
+        },
+        {
+          "id": "52015",
+          "name": "Verde-claro"
+        },
+        {
+          "id": "283151",
+          "name": "Laranja-escuro"
+        },
+        {
+          "id": "52024",
+          "name": "Azul-petróleo"
+        },
+        {
+          "id": "52051",
+          "name": "Cinza-escuro"
+        },
+        {
+          "id": "283152",
+          "name": "Chocolate"
+        },
+        {
+          "id": "52014",
+          "name": "Verde"
+        },
+        {
+          "id": "283164",
+          "name": "Dourado"
+        },
+        {
+          "id": "52000",
+          "name": "Laranja"
+        },
+        {
+          "id": "52033",
+          "name": "Azul-escuro"
+        },
+        {
+          "id": "52010",
+          "name": "Ocre"
+        },
+        {
+          "id": "283158",
+          "name": "Verde-musgo"
+        },
+        {
+          "id": "52005",
+          "name": "Marrom"
+        },
+        {
+          "id": "52038",
+          "name": "Lilás"
+        },
+        {
+          "id": "52042",
+          "name": "Fúcsia"
+        },
+        {
+          "id": "338779",
+          "name": "Ciano"
+        },
+        {
+          "id": "52029",
+          "name": "Azul-claro"
+        }
+      ],
+      "tooltip": "Este campo deve ser completado se o produto é uma Bíblia.",
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "BOOK_COVER",
+      "name": "Capa do livro",
+      "tags": {},
+      "hierarchy": "CHILD_PK",
+      "relevance": 1,
+      "value_type": "list",
+      "values": [
+        {
+          "id": "2132701",
+          "name": "Dura"
+        },
+        {
+          "id": "2132700",
+          "name": "Mole"
+        }
+      ],
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "BOOK_VOLUME",
+      "name": "Volume do livro",
+      "tags": {},
+      "hierarchy": "CHILD_PK",
+      "relevance": 1,
+      "value_type": "string",
+      "value_max_length": 255,
+      "tooltip": "Completar este campo com o número de volumes inclusos, por exemplo: 1/2/3. Se o seu produto é único, preencha com 1.",
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "LETTER_SIZE",
+      "name": "Tamanho da letra",
+      "tags": {
+        "hidden": true,
+        "read_only": true
+      },
+      "hierarchy": "CHILD_PK",
+      "relevance": 1,
+      "value_type": "string",
+      "value_max_length": 255,
+      "values": [
+        {
+          "id": "11997277",
+          "name": "Pequena"
+        },
+        {
+          "id": "11997278",
+          "name": "Padrão"
+        },
+        {
+          "id": "11997279",
+          "name": "Grande"
+        }
+      ],
+      "tooltip": "Este campo deve ser completado se o produto é uma Bíblia.",
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "WITH_INDEX",
+      "name": "Com índice",
+      "tags": {},
+      "hierarchy": "CHILD_PK",
+      "relevance": 1,
+      "value_type": "boolean",
+      "values": [
+        {
+          "id": "242084",
+          "name": "Não",
+          "metadata": {
+            "value": false
+          }
+        },
+        {
+          "id": "242085",
+          "name": "Sim",
+          "metadata": {
+            "value": true
+          }
+        }
+      ],
+      "tooltip": "Este atributo faz referência a uma das principais características das Bíblias.",
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "PUBLICATION_YEAR",
+      "name": "Ano de publicação",
+      "tags": {},
+      "hierarchy": "CHILD_PK",
+      "relevance": 1,
+      "value_type": "number",
+      "value_max_length": 18,
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "PAGES_NUMBER",
+      "name": "Quantidade de páginas",
+      "tags": {},
+      "hierarchy": "CHILD_DEPENDENT",
+      "relevance": 1,
+      "value_type": "number",
+      "value_max_length": 18,
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "HEIGHT",
+      "name": "Altura",
+      "tags": {},
+      "hierarchy": "CHILD_DEPENDENT",
+      "relevance": 1,
+      "value_type": "number_unit",
+      "value_max_length": 255,
+      "allowed_units": [
+        {
+          "id": "mm",
+          "name": "mm"
+        },
+        {
+          "id": "cm",
+          "name": "cm"
+        }
+      ],
+      "default_unit": "cm",
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "WIDTH",
+      "name": "Largura",
+      "tags": {},
+      "hierarchy": "CHILD_DEPENDENT",
+      "relevance": 1,
+      "value_type": "number_unit",
+      "value_max_length": 255,
+      "allowed_units": [
+        {
+          "id": "mm",
+          "name": "mm"
+        },
+        {
+          "id": "cm",
+          "name": "cm"
+        }
+      ],
+      "default_unit": "cm",
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "WEIGHT",
+      "name": "Peso",
+      "tags": {},
+      "hierarchy": "CHILD_DEPENDENT",
+      "relevance": 1,
+      "value_type": "number_unit",
+      "value_max_length": 255,
+      "allowed_units": [
+        {
+          "id": "g",
+          "name": "g"
+        },
+        {
+          "id": "kg",
+          "name": "kg"
+        }
+      ],
+      "default_unit": "g",
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "PACKAGE_HEIGHT",
+      "name": "Altura da embalagem",
+      "tags": {
+        "hidden": true,
+        "read_only": true,
+        "variation_attribute": true
+      },
+      "hierarchy": "CHILD_DEPENDENT",
+      "relevance": 1,
+      "value_type": "number_unit",
+      "value_max_length": 255,
+      "allowed_units": [
+        {
+          "id": "\"",
+          "name": "\""
+        },
+        {
+          "id": "cm",
+          "name": "cm"
+        },
+        {
+          "id": "ft",
+          "name": "ft"
+        },
+        {
+          "id": "m",
+          "name": "m"
+        },
+        {
+          "id": "mm",
+          "name": "mm"
+        }
+      ],
+      "default_unit": "cm",
+      "tooltip": "Este campo deve ser completado com a medida da embalagem/pacote e não do produto em si.",
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "PACKAGE_WIDTH",
+      "name": "Largura da embalagem",
+      "tags": {
+        "hidden": true,
+        "read_only": true,
+        "variation_attribute": true
+      },
+      "hierarchy": "CHILD_DEPENDENT",
+      "relevance": 1,
+      "value_type": "number_unit",
+      "value_max_length": 255,
+      "allowed_units": [
+        {
+          "id": "\"",
+          "name": "\""
+        },
+        {
+          "id": "cm",
+          "name": "cm"
+        },
+        {
+          "id": "ft",
+          "name": "ft"
+        },
+        {
+          "id": "m",
+          "name": "m"
+        },
+        {
+          "id": "mm",
+          "name": "mm"
+        }
+      ],
+      "default_unit": "cm",
+      "tooltip": "Este campo deve ser completado com a medida da embalagem/pacote e não do produto em si.",
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "PACKAGE_LENGTH",
+      "name": "Comprimento da embalagem",
+      "tags": {
+        "hidden": true,
+        "read_only": true,
+        "variation_attribute": true
+      },
+      "hierarchy": "CHILD_DEPENDENT",
+      "relevance": 1,
+      "value_type": "number_unit",
+      "value_max_length": 255,
+      "allowed_units": [
+        {
+          "id": "\"",
+          "name": "\""
+        },
+        {
+          "id": "cm",
+          "name": "cm"
+        },
+        {
+          "id": "ft",
+          "name": "ft"
+        },
+        {
+          "id": "m",
+          "name": "m"
+        },
+        {
+          "id": "mm",
+          "name": "mm"
+        }
+      ],
+      "default_unit": "cm",
+      "tooltip": "Este campo deve ser completado com a medida da embalagem/pacote e não do produto em si.",
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "PACKAGE_WEIGHT",
+      "name": "Peso da embalagem",
+      "tags": {
+        "hidden": true,
+        "read_only": true,
+        "variation_attribute": true
+      },
+      "hierarchy": "CHILD_DEPENDENT",
+      "relevance": 1,
+      "value_type": "number_unit",
+      "value_max_length": 255,
+      "allowed_units": [
+        {
+          "id": "g",
+          "name": "g"
+        },
+        {
+          "id": "kg",
+          "name": "kg"
+        },
+        {
+          "id": "lb",
+          "name": "lb"
+        },
+        {
+          "id": "mg",
+          "name": "mg"
+        },
+        {
+          "id": "oz",
+          "name": "oz"
+        }
+      ],
+      "default_unit": "g",
+      "tooltip": "Este campo deve ser completado com a medida da embalagem/pacote e não do produto em si.",
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "BOOK_COVER_MATERIAL",
+      "name": "Material da capa do livro",
+      "tags": {},
+      "hierarchy": "CHILD_DEPENDENT",
+      "relevance": 1,
+      "value_type": "string",
+      "value_max_length": 255,
+      "values": [
+        {
+          "id": "11997280",
+          "name": "Couro"
+        },
+        {
+          "id": "11997281",
+          "name": "Couro sintético"
+        },
+        {
+          "id": "11997282",
+          "name": "Vinil"
+        }
+      ],
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "WITH_COLORING_PAGES",
+      "name": "Com páginas para colorir",
+      "tags": {},
+      "hierarchy": "FAMILY",
+      "relevance": 1,
+      "value_type": "boolean",
+      "values": [
+        {
+          "id": "242084",
+          "name": "Não",
+          "metadata": {
+            "value": false
+          }
+        },
+        {
+          "id": "242085",
+          "name": "Sim",
+          "metadata": {
+            "value": true
+          }
+        }
+      ],
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "WITH_AUGMENTED_REALITY",
+      "name": "Com realidade aumentada",
+      "tags": {},
+      "hierarchy": "FAMILY",
+      "relevance": 1,
+      "value_type": "boolean",
+      "values": [
+        {
+          "id": "242084",
+          "name": "Não",
+          "metadata": {
+            "value": false
+          }
+        },
+        {
+          "id": "242085",
+          "name": "Sim",
+          "metadata": {
+            "value": true
+          }
+        }
+      ],
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "WITH_CONCORDANCE",
+      "name": "Com concordância",
+      "tags": {
+        "hidden": true,
+        "read_only": true
+      },
+      "hierarchy": "FAMILY",
+      "relevance": 1,
+      "value_type": "boolean",
+      "values": [
+        {
+          "id": "242084",
+          "name": "Não",
+          "metadata": {
+            "value": false
+          }
+        },
+        {
+          "id": "242085",
+          "name": "Sim",
+          "metadata": {
+            "value": true
+          }
+        }
+      ],
+      "tooltip": "Este campo deve ser completado se o produto é uma Bíblia.",
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "CO_AUTHORS",
+      "name": "Coautores",
+      "tags": {
+        "multivalued": true
+      },
+      "hierarchy": "FAMILY",
+      "relevance": 1,
+      "value_type": "string",
+      "value_max_length": 255,
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "TRANSLATORS",
+      "name": "Tradutores",
+      "tags": {
+        "multivalued": true
+      },
+      "hierarchy": "FAMILY",
+      "relevance": 1,
+      "value_type": "string",
+      "value_max_length": 255,
+      "tooltip": "Este atributo faz referência a uma das principais características das Bíblias.",
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "BOOK_GENRE",
+      "name": "Gênero do livro",
+      "tags": {
+        "catalog_required": true,
+        "required": true
+      },
+      "hierarchy": "FAMILY",
+      "relevance": 1,
+      "value_type": "list",
+      "values": [
+        {
+          "id": "13061813",
+          "name": "Acadêmico"
+        },
+        {
+          "id": "19569198",
+          "name": "Arquitetura e design"
+        },
+        {
+          "id": "37719365",
+          "name": "Arte, cinema e fotografia"
+        },
+        {
+          "id": "13061814",
+          "name": "Artesanato, casa e estilo de vida"
+        },
+        {
+          "id": "7538148",
+          "name": "Autoajuda"
+        },
+        {
+          "id": "13611960",
+          "name": "Biografia e histórias reais"
+        },
+        {
+          "id": "13061816",
+          "name": "Histórias em quadrinhos, mangá e graphic novel"
+        },
+        {
+          "id": "26182202",
+          "name": "Família e criação"
+        },
+        {
+          "id": "16188909",
+          "name": "Esporte"
+        },
+        {
+          "id": "13061819",
+          "name": "Direito, política e ciências sociais"
+        },
+        {
+          "id": "7538149",
+          "name": "Enciclopédia, dicionário e linguística"
+        },
+        {
+          "id": "23663384",
+          "name": "Escolar"
+        },
+        {
+          "id": "7538147",
+          "name": "Esoterismo"
+        },
+        {
+          "id": "21378338",
+          "name": "Filosofia e psicologia"
+        },
+        {
+          "id": "13061821",
+          "name": "Gastronomia"
+        },
+        {
+          "id": "13464376",
+          "name": "História"
+        },
+        {
+          "id": "25743212",
+          "name": "Humor e entretenimento"
+        },
+        {
+          "id": "7538151",
+          "name": "Infantil"
+        },
+        {
+          "id": "17357789",
+          "name": "Informática e tecnologia"
+        },
+        {
+          "id": "14885398",
+          "name": "Engenharia"
+        },
+        {
+          "id": "13061823",
+          "name": "Juvenil"
+        },
+        {
+          "id": "7538039",
+          "name": "Literatura e ficção"
+        },
+        {
+          "id": "13061824",
+          "name": "Moda e design"
+        },
+        {
+          "id": "13485350",
+          "name": "Música"
+        },
+        {
+          "id": "13061825",
+          "name": "Negócios, finanças e economia"
+        },
+        {
+          "id": "19912211",
+          "name": "Religião e espiritualidade"
+        },
+        {
+          "id": "13061828",
+          "name": "Saúde e bem-estar"
+        },
+        {
+          "id": "14973077",
+          "name": "Viagem e turismo"
+        }
+      ],
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "BOOK_SUBGENRES",
+      "name": "Subgêneros do livro",
+      "tags": {
+        "multivalued": true
+      },
+      "hierarchy": "FAMILY",
+      "relevance": 1,
+      "value_type": "string",
+      "value_max_length": 255,
+      "values": [
+        {
+          "id": "13061831",
+          "name": "Tecnologia e engenharia"
+        },
+        {
+          "id": "13061832",
+          "name": "Computadores"
+        },
+        {
+          "id": "13061833",
+          "name": "Não ficção juvenil"
+        },
+        {
+          "id": "13061834",
+          "name": "Arte"
+        },
+        {
+          "id": "13061835",
+          "name": "Coleções literárias"
+        },
+        {
+          "id": "13061836",
+          "name": "Ciência"
+        },
+        {
+          "id": "13061837",
+          "name": "Estudo de língua estrangeira"
+        },
+        {
+          "id": "13061838",
+          "name": "Arte e disciplinas da linguagem"
+        },
+        {
+          "id": "7538249",
+          "name": "Direito"
+        },
+        {
+          "id": "13061839",
+          "name": "Não ficção infantil"
+        },
+        {
+          "id": "13061840",
+          "name": "Crítica literária"
+        },
+        {
+          "id": "13061841",
+          "name": "Literatura juvenil"
+        },
+        {
+          "id": "7538242",
+          "name": "Filosofia"
+        },
+        {
+          "id": "13061842",
+          "name": "Esportes e recreação"
+        },
+        {
+          "id": "13755078",
+          "name": "Livros para colorir"
+        },
+        {
+          "id": "13061843",
+          "name": "Literatura infantil"
+        },
+        {
+          "id": "13061844",
+          "name": "Família e relacionamentos"
+        },
+        {
+          "id": "13061846",
+          "name": "Religião"
+        },
+        {
+          "id": "13061847",
+          "name": "Animais de estimação"
+        },
+        {
+          "id": "13061848",
+          "name": "Antiguidades e coleções"
+        },
+        {
+          "id": "7538241",
+          "name": "Psicologia"
+        },
+        {
+          "id": "13061849",
+          "name": "Negócios e economia"
+        },
+        {
+          "id": "7538350",
+          "name": "Música"
+        },
+        {
+          "id": "13061850",
+          "name": "Biografia e autobiografia"
+        },
+        {
+          "id": "13061851",
+          "name": "Ficção"
+        },
+        {
+          "id": "13061852",
+          "name": "Ciências políticas"
+        },
+        {
+          "id": "13061853",
+          "name": "Artes cênicas"
+        },
+        {
+          "id": "13061854",
+          "name": "Apostilas e guias de estudos"
+        },
+        {
+          "id": "13061855",
+          "name": "Medicina"
+        },
+        {
+          "id": "13061856",
+          "name": "Cozinha"
+        },
+        {
+          "id": "13061857",
+          "name": "Saúde e bem-estar"
+        },
+        {
+          "id": "13061858",
+          "name": "Crimes reais"
+        },
+        {
+          "id": "7538177",
+          "name": "Humor"
+        },
+        {
+          "id": "7538356",
+          "name": "Fotografia"
+        },
+        {
+          "id": "7538165",
+          "name": "Bíblias"
+        },
+        {
+          "id": "13061859",
+          "name": "Transporte"
+        },
+        {
+          "id": "13061860",
+          "name": "Viagens"
+        },
+        {
+          "id": "13061861",
+          "name": "Artesanato e hobbies"
+        },
+        {
+          "id": "13061862",
+          "name": "Ciências sociais"
+        },
+        {
+          "id": "13061863",
+          "name": "Casa e lar"
+        },
+        {
+          "id": "13061864",
+          "name": "Natureza"
+        },
+        {
+          "id": "7538181",
+          "name": "Teatro"
+        },
+        {
+          "id": "7538347",
+          "name": "Arquitetura"
+        },
+        {
+          "id": "7538253",
+          "name": "História"
+        },
+        {
+          "id": "7538323",
+          "name": "Jardinagem"
+        },
+        {
+          "id": "7538319",
+          "name": "Jogos e atividades"
+        },
+        {
+          "id": "13061865",
+          "name": "Educação"
+        },
+        {
+          "id": "13061866",
+          "name": "Corpo, mente e espírito"
+        },
+        {
+          "id": "13061867",
+          "name": "Autoajuda"
+        },
+        {
+          "id": "26179307",
+          "name": "Referência"
+        },
+        {
+          "id": "13061869",
+          "name": "Poesia"
+        },
+        {
+          "id": "13851493",
+          "name": "Matemáticas"
+        },
+        {
+          "id": "13061870",
+          "name": "Design"
+        },
+        {
+          "id": "13061871",
+          "name": "Não classificável"
+        }
+      ],
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "SYNOPSIS",
+      "name": "Sinopse",
+      "tags": {
+        "hidden": true,
+        "read_only": true
+      },
+      "hierarchy": "FAMILY",
+      "relevance": 1,
+      "value_type": "string",
+      "value_max_length": 255,
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "NARRATION_TYPE",
+      "name": "Tipo de narração",
+      "tags": {},
+      "hierarchy": "FAMILY",
+      "relevance": 1,
+      "value_type": "string",
+      "value_max_length": 255,
+      "values": [
+        {
+          "id": "7488905",
+          "name": "Conto"
+        },
+        {
+          "id": "7488906",
+          "name": "Novela"
+        },
+        {
+          "id": "7488907",
+          "name": "Manual"
+        },
+        {
+          "id": "7488908",
+          "name": "Poesia"
+        }
+      ],
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "BOOK_VERSION",
+      "name": "Versão do livro",
+      "tags": {},
+      "hierarchy": "FAMILY",
+      "relevance": 1,
+      "value_type": "string",
+      "value_max_length": 255,
+      "values": [
+        {
+          "id": "13061872",
+          "name": "Reina Valera del 1995"
+        },
+        {
+          "id": "13061873",
+          "name": "Biblia de las Américas"
+        },
+        {
+          "id": "13061874",
+          "name": "Reina Valera Contemporánea"
+        }
+      ],
+      "tooltip": "Este campo deve ser completado se o produto é uma Bíblia.",
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "BOOK_SIZE",
+      "name": "Tamanho do livro",
+      "tags": {},
+      "hierarchy": "FAMILY",
+      "relevance": 1,
+      "value_type": "string",
+      "value_max_length": 255,
+      "values": [
+        {
+          "id": "11997283",
+          "name": "Mini bolso"
+        },
+        {
+          "id": "11997284",
+          "name": "Bolso"
+        },
+        {
+          "id": "11997285",
+          "name": "Médio"
+        },
+        {
+          "id": "11997286",
+          "name": "Grande"
+        }
+      ],
+      "tooltip": "Este campo deve ser completado se o produto é uma Bíblia.",
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "WITH_ZIPPER",
+      "name": "Com zíper",
+      "tags": {
+        "hidden": true,
+        "read_only": true
+      },
+      "hierarchy": "FAMILY",
+      "relevance": 1,
+      "value_type": "boolean",
+      "values": [
+        {
+          "id": "242084",
+          "name": "Não",
+          "metadata": {
+            "value": false
+          }
+        },
+        {
+          "id": "242085",
+          "name": "Sim",
+          "metadata": {
+            "value": true
+          }
+        }
+      ],
+      "tooltip": "Este campo deve ser completado se o produto é uma Bíblia.",
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "EDGEWISE_COLOR",
+      "name": "Cor da borda",
+      "tags": {
+        "hidden": true,
+        "read_only": true
+      },
+      "hierarchy": "FAMILY",
+      "relevance": 1,
+      "value_type": "string",
+      "value_max_length": 255,
+      "values": [
+        {
+          "id": "52019",
+          "name": "Verde-escuro"
+        },
+        {
+          "id": "283160",
+          "name": "Azul-turquesa"
+        },
+        {
+          "id": "52022",
+          "name": "Água"
+        },
+        {
+          "id": "283162",
+          "name": "Índigo"
+        },
+        {
+          "id": "52036",
+          "name": "Lavanda"
+        },
+        {
+          "id": "283163",
+          "name": "Rosa-chiclete"
+        },
+        {
+          "id": "51998",
+          "name": "Bordô"
+        },
+        {
+          "id": "52003",
+          "name": "Nude"
+        },
+        {
+          "id": "52055",
+          "name": "Branco"
+        },
+        {
+          "id": "283161",
+          "name": "Azul-marinho"
+        },
+        {
+          "id": "52008",
+          "name": "Creme"
+        },
+        {
+          "id": "52045",
+          "name": "Rosa-pálido"
+        },
+        {
+          "id": "283153",
+          "name": "Palha"
+        },
+        {
+          "id": "283150",
+          "name": "Laranja-claro"
+        },
+        {
+          "id": "52028",
+          "name": "Azul"
+        },
+        {
+          "id": "52043",
+          "name": "Rosa-claro"
+        },
+        {
+          "id": "283148",
+          "name": "Coral-claro"
+        },
+        {
+          "id": "283149",
+          "name": "Coral"
+        },
+        {
+          "id": "52021",
+          "name": "Azul-celeste"
+        },
+        {
+          "id": "52031",
+          "name": "Azul-aço"
+        },
+        {
+          "id": "283156",
+          "name": "Cáqui"
+        },
+        {
+          "id": "52001",
+          "name": "Bege"
+        },
+        {
+          "id": "51993",
+          "name": "Vermelho"
+        },
+        {
+          "id": "51996",
+          "name": "Terracota"
+        },
+        {
+          "id": "283165",
+          "name": "Cinza"
+        },
+        {
+          "id": "52035",
+          "name": "Violeta"
+        },
+        {
+          "id": "283154",
+          "name": "Marrom-claro"
+        },
+        {
+          "id": "52049",
+          "name": "Preto"
+        },
+        {
+          "id": "283155",
+          "name": "Marrom-escuro"
+        },
+        {
+          "id": "52053",
+          "name": "Prateado"
+        },
+        {
+          "id": "52047",
+          "name": "Violeta-escuro"
+        },
+        {
+          "id": "51994",
+          "name": "Rosa"
+        },
+        {
+          "id": "52007",
+          "name": "Amarelo"
+        },
+        {
+          "id": "283157",
+          "name": "Verde-limão"
+        },
+        {
+          "id": "52012",
+          "name": "Dourado-escuro"
+        },
+        {
+          "id": "52015",
+          "name": "Verde-claro"
+        },
+        {
+          "id": "283151",
+          "name": "Laranja-escuro"
+        },
+        {
+          "id": "52024",
+          "name": "Azul-petróleo"
+        },
+        {
+          "id": "52051",
+          "name": "Cinza-escuro"
+        },
+        {
+          "id": "283152",
+          "name": "Chocolate"
+        },
+        {
+          "id": "52014",
+          "name": "Verde"
+        },
+        {
+          "id": "283164",
+          "name": "Dourado"
+        },
+        {
+          "id": "52000",
+          "name": "Laranja"
+        },
+        {
+          "id": "52033",
+          "name": "Azul-escuro"
+        },
+        {
+          "id": "52010",
+          "name": "Ocre"
+        },
+        {
+          "id": "283158",
+          "name": "Verde-musgo"
+        },
+        {
+          "id": "52005",
+          "name": "Marrom"
+        },
+        {
+          "id": "52038",
+          "name": "Lilás"
+        },
+        {
+          "id": "52042",
+          "name": "Fúcsia"
+        },
+        {
+          "id": "338779",
+          "name": "Ciano"
+        },
+        {
+          "id": "52029",
+          "name": "Azul-claro"
+        }
+      ],
+      "tooltip": "Este campo deve ser completado se o produto é uma Bíblia.",
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "BOOK_COLLECTION",
+      "name": "Coleção do livro",
+      "tags": {},
+      "hierarchy": "FAMILY",
+      "relevance": 1,
+      "value_type": "string",
+      "value_max_length": 255,
+      "tooltip": "Completar este campo com o nome da coleção à qual toda a série de livros pertence.",
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "MIN_RECOMMENDED_AGE",
+      "name": "Idade mínima recomendada",
+      "tags": {},
+      "hierarchy": "FAMILY",
+      "relevance": 1,
+      "value_type": "number_unit",
+      "value_max_length": 255,
+      "allowed_units": [
+        {
+          "id": "anos",
+          "name": "anos"
+        },
+        {
+          "id": "meses",
+          "name": "meses"
+        }
+      ],
+      "default_unit": "anos",
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "IS_WRITTEN_IN_CAPITAL_LETTERS",
+      "name": "Escrito em letra maiúscula",
+      "tags": {},
+      "hierarchy": "FAMILY",
+      "relevance": 1,
+      "value_type": "boolean",
+      "values": [
+        {
+          "id": "242084",
+          "name": "Não",
+          "metadata": {
+            "value": false
+          }
+        },
+        {
+          "id": "242085",
+          "name": "Sim",
+          "metadata": {
+            "value": true
+          }
+        }
+      ],
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "BOOKS_NUMBER_PER_SET",
+      "name": "Quantidade de livros por kit",
+      "tags": {},
+      "hierarchy": "FAMILY",
+      "relevance": 1,
+      "value_type": "number",
+      "value_max_length": 18,
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "GTIN",
+      "name": "ISBN",
+      "tags": {
+        "catalog_required": true,
+        "multivalued": true,
+        "required": true,
+        "variation_attribute": true,
+        "validate": true
+      },
+      "hierarchy": "PRODUCT_IDENTIFIER",
+      "relevance": 1,
+      "type": "product_identifier",
+      "value_type": "string",
+      "value_max_length": 255,
+      "tooltip": "Como o identifico?\n\nÉ um número de 10 a 13 dígitos, agrupados e separados por traços, localizados na contracapa do livro ou na página onde consta a edição.\n\n!",
+      "example": "9788995317471",
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros",
+      "hint": "Pode ser um ISBN10 ou ISBN13."
+    },
+    {
+      "id": "INCLUDES_ACCESSORIES",
+      "name": "Inclui acessórios",
+      "tags": {
+        "hidden": true,
+        "read_only": true
+      },
+      "hierarchy": "FAMILY",
+      "relevance": 1,
+      "value_type": "boolean",
+      "values": [
+        {
+          "id": "242084",
+          "name": "Não",
+          "metadata": {
+            "value": false
+          }
+        },
+        {
+          "id": "242085",
+          "name": "Sim",
+          "metadata": {
+            "value": true
+          }
+        }
+      ],
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "ILLUSTRATORS",
+      "name": "Ilustradores",
+      "tags": {
+        "hidden": true,
+        "multivalued": true
+      },
+      "hierarchy": "FAMILY",
+      "relevance": 2,
+      "value_type": "string",
+      "value_max_length": 255,
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "PUBLISHING_PLACE",
+      "name": "Lugar de publicação ",
+      "tags": {
+        "hidden": true
+      },
+      "hierarchy": "FAMILY",
+      "relevance": 2,
+      "value_type": "string",
+      "value_max_length": 255,
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "IBIC_CODE",
+      "name": "Código IBIC",
+      "tags": {
+        "hidden": true
+      },
+      "hierarchy": "FAMILY",
+      "relevance": 2,
+      "value_type": "string",
+      "value_max_length": 255,
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "IBIC",
+      "name": "IBIC",
+      "tags": {
+        "hidden": true
+      },
+      "hierarchy": "FAMILY",
+      "relevance": 2,
+      "value_type": "string",
+      "value_max_length": 255,
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "MPN",
+      "name": "MPN",
+      "tags": {
+        "hidden": true,
+        "multivalued": true,
+        "variation_attribute": true
+      },
+      "hierarchy": "PRODUCT_IDENTIFIER",
+      "relevance": 2,
+      "type": "product_identifier",
+      "value_type": "string",
+      "value_max_length": 255,
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "ITEM_CONDITION",
+      "name": "Condição do item",
+      "tags": {
+        "hidden": true
+      },
+      "hierarchy": "ITEM",
+      "relevance": 2,
+      "value_type": "list",
+      "values": [
+        {
+          "id": "2230284",
+          "name": "Novo"
+        },
+        {
+          "id": "2230581",
+          "name": "Usado"
+        },
+        {
+          "id": "2230582",
+          "name": "Recondicionado"
+        }
+      ],
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "IS_TOM_BRAND",
+      "name": "É marca TOM",
+      "tags": {
+        "hidden": true,
+        "read_only": true
+      },
+      "hierarchy": "ITEM",
+      "relevance": 2,
+      "value_type": "boolean",
+      "values": [
+        {
+          "id": "242084",
+          "name": "Não",
+          "metadata": {
+            "value": false
+          }
+        },
+        {
+          "id": "242085",
+          "name": "Sim",
+          "metadata": {
+            "value": true
+          }
+        }
+      ],
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "GIFTABLE",
+      "name": "Regalavel",
+      "tags": {
+        "hidden": true,
+        "multivalued": true,
+        "read_only": true
+      },
+      "hierarchy": "ITEM",
+      "relevance": 2,
+      "value_type": "string",
+      "value_max_length": 255,
+      "values": [
+        {
+          "id": "54973163",
+          "name": "vppbasic"
+        },
+        {
+          "id": "54973164",
+          "name": "vppfull"
+        },
+        {
+          "id": "54973165",
+          "name": "cart"
+        },
+        {
+          "id": "54973166",
+          "name": "checkout"
+        }
+      ],
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "BRAND",
+      "name": "Marca",
+      "tags": {
+        "hidden": true
+      },
+      "hierarchy": "PARENT_PK",
+      "relevance": 1,
+      "value_type": "string",
+      "value_max_length": 255,
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros",
+      "hint": "Informe a marca verdadeira do produto ou 'Genérica' se não tiver marca."
+    },
+    {
+      "id": "MODEL",
+      "name": "Modelo",
+      "tags": {
+        "hidden": true
+      },
+      "hierarchy": "PARENT_PK",
+      "relevance": 1,
+      "value_type": "string",
+      "value_max_length": 255,
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "VALUE_ADDED_TAX",
+      "name": "Imposto sobre o valor acrescentado",
+      "tags": {
+        "hidden": true,
+        "read_only": true
+      },
+      "hierarchy": "ITEM",
+      "relevance": 1,
+      "value_type": "string",
+      "value_max_length": 255,
+      "tooltip": "O imposto sobre valor agregado é aplicado sobre o preço de venda das compras de bens ou serviços.",
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "IMPORT_DUTY",
+      "name": "Imposto de importação",
+      "tags": {
+        "hidden": true,
+        "read_only": true
+      },
+      "hierarchy": "ITEM",
+      "relevance": 1,
+      "value_type": "list",
+      "values": [
+        {
+          "id": "49553239",
+          "name": "0 %"
+        },
+        {
+          "id": "49553240",
+          "name": "1 %"
+        },
+        {
+          "id": "49553241",
+          "name": "2.5 %"
+        },
+        {
+          "id": "49553242",
+          "name": "4 %"
+        },
+        {
+          "id": "49553243",
+          "name": "5 %"
+        },
+        {
+          "id": "49553244",
+          "name": "8 %"
+        },
+        {
+          "id": "49553245",
+          "name": "9.5 %"
+        },
+        {
+          "id": "49553246",
+          "name": "10 %"
+        },
+        {
+          "id": "49553247",
+          "name": "14 %"
+        },
+        {
+          "id": "49553248",
+          "name": "15 %"
+        },
+        {
+          "id": "49553249",
+          "name": "18 %"
+        },
+        {
+          "id": "49553250",
+          "name": "19 %"
+        },
+        {
+          "id": "49553251",
+          "name": "20 %"
+        },
+        {
+          "id": "49553252",
+          "name": "23 %"
+        },
+        {
+          "id": "49553253",
+          "name": "25 %"
+        },
+        {
+          "id": "49553254",
+          "name": "26 %"
+        },
+        {
+          "id": "49553255",
+          "name": "70 %"
+        }
+      ],
+      "tooltip": "O imposto interno é aplicado apenas a produtos específicos considerados supérfluos ou de luxo, como bebidas alcohólicas, fornos de micro-ondas, entre outros.",
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "SELLER_SKU",
+      "name": "SKU",
+      "tags": {
+        "hidden": true,
+        "variation_attribute": true
+      },
+      "hierarchy": "ITEM",
+      "relevance": 1,
+      "value_type": "string",
+      "value_max_length": 255,
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "SELLER_PACKAGE_DATA_SOURCE",
+      "name": "Origem do dado do pacote de envio",
+      "tags": {
+        "hidden": true,
+        "read_only": true
+      },
+      "hierarchy": "ITEM",
+      "relevance": 1,
+      "value_type": "string",
+      "value_max_length": 255,
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "SELLER_PACKAGE_WIDTH",
+      "name": "Largura da embalagem do vendor",
+      "tags": {
+        "hidden": true
+      },
+      "hierarchy": "ITEM",
+      "relevance": 1,
+      "value_type": "number_unit",
+      "value_max_length": 255,
+      "allowed_units": [
+        {
+          "id": "cm",
+          "name": "cm"
+        }
+      ],
+      "default_unit": "cm",
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "SELLER_PACKAGE_LENGTH",
+      "name": "Comprimento da embalagem do vendor",
+      "tags": {
+        "hidden": true
+      },
+      "hierarchy": "ITEM",
+      "relevance": 1,
+      "value_type": "number_unit",
+      "value_max_length": 255,
+      "allowed_units": [
+        {
+          "id": "cm",
+          "name": "cm"
+        }
+      ],
+      "default_unit": "cm",
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "SELLER_PACKAGE_HEIGHT",
+      "name": "Altura da embalagem do vendor",
+      "tags": {
+        "hidden": true
+      },
+      "hierarchy": "ITEM",
+      "relevance": 1,
+      "value_type": "number_unit",
+      "value_max_length": 255,
+      "allowed_units": [
+        {
+          "id": "cm",
+          "name": "cm"
+        }
+      ],
+      "default_unit": "cm",
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "SELLER_PACKAGE_WEIGHT",
+      "name": "Peso da embalagem do vendor",
+      "tags": {
+        "hidden": true
+      },
+      "hierarchy": "ITEM",
+      "relevance": 1,
+      "value_type": "number_unit",
+      "value_max_length": 255,
+      "allowed_units": [
+        {
+          "id": "g",
+          "name": "g"
+        }
+      ],
+      "default_unit": "g",
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "HAZMAT_TRANSPORTABILITY",
+      "name": "Transportabilidade Hazmat",
+      "tags": {
+        "hidden": true,
+        "read_only": true
+      },
+      "hierarchy": "ITEM",
+      "relevance": 2,
+      "value_type": "list",
+      "values": [
+        {
+          "id": "13414677",
+          "name": "Livre"
+        },
+        {
+          "id": "13414678",
+          "name": "Limitado"
+        },
+        {
+          "id": "13414679",
+          "name": "Excedido"
+        },
+        {
+          "id": "13414680",
+          "name": "Indeterminado"
+        }
+      ],
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "DESCRIPTIVE_TAGS",
+      "name": "Tags descritivos",
+      "tags": {
+        "hidden": true,
+        "multivalued": true,
+        "read_only": true
+      },
+      "hierarchy": "ITEM",
+      "relevance": 2,
+      "value_type": "string",
+      "value_max_length": 255,
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "PRODUCT_CHEMICAL_FEATURES",
+      "name": "Características químicas do produto",
+      "tags": {
+        "hidden": true,
+        "multivalued": true,
+        "read_only": true
+      },
+      "hierarchy": "ITEM",
+      "relevance": 2,
+      "value_type": "list",
+      "values": [
+        {
+          "id": "7651070",
+          "name": "Inflamável"
+        },
+        {
+          "id": "7651071",
+          "name": "Aerosol"
+        },
+        {
+          "id": "7651072",
+          "name": "Oxidante"
+        },
+        {
+          "id": "7651073",
+          "name": "Corrosivo"
+        },
+        {
+          "id": "7651074",
+          "name": "Explosivo"
+        },
+        {
+          "id": "7651075",
+          "name": "Tóxico ou infeccioso"
+        }
+      ],
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "FOODS_AND_DRINKS",
+      "name": "Alimentos e bebidas",
+      "tags": {
+        "hidden": true,
+        "multivalued": true,
+        "read_only": true
+      },
+      "hierarchy": "ITEM",
+      "relevance": 2,
+      "value_type": "list",
+      "values": [
+        {
+          "id": "7575926",
+          "name": "Para humanos"
+        },
+        {
+          "id": "7575927",
+          "name": "Para animais"
+        }
+      ],
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "MEDICINES",
+      "name": "Medicamentos",
+      "tags": {
+        "hidden": true,
+        "multivalued": true,
+        "read_only": true
+      },
+      "hierarchy": "ITEM",
+      "relevance": 2,
+      "value_type": "list",
+      "values": [
+        {
+          "id": "7575930",
+          "name": "Para humanos com receita médica"
+        },
+        {
+          "id": "7575931",
+          "name": "Para humanos sem receita médica"
+        },
+        {
+          "id": "7575932",
+          "name": "Para animais com receita médica"
+        },
+        {
+          "id": "7575933",
+          "name": "Para animais sem receita médica"
+        }
+      ],
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "BATTERIES_FEATURES",
+      "name": "Características das baterias",
+      "tags": {
+        "hidden": true,
+        "multivalued": true,
+        "read_only": true
+      },
+      "hierarchy": "ITEM",
+      "relevance": 2,
+      "value_type": "list",
+      "values": [
+        {
+          "id": "7575934",
+          "name": "Lítio stand-alone (separadas ou isolado)"
+        },
+        {
+          "id": "7575935",
+          "name": "De lítio instaladas"
+        },
+        {
+          "id": "7575936",
+          "name": "Para carros (ácido-chumbo)"
+        }
+      ],
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "SHIPMENT_PACKING",
+      "name": "Embalagem do envío",
+      "tags": {
+        "hidden": true,
+        "multivalued": true,
+        "read_only": true
+      },
+      "hierarchy": "ITEM",
+      "relevance": 2,
+      "value_type": "list",
+      "values": [
+        {
+          "id": "7435891",
+          "name": "Flyer"
+        },
+        {
+          "id": "7435892",
+          "name": "Caixa"
+        },
+        {
+          "id": "7575937",
+          "name": "Envelope"
+        },
+        {
+          "id": "7575939",
+          "name": "Auto-expedível"
+        },
+        {
+          "id": "27037932",
+          "name": "BEX"
+        }
+      ],
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "ADDITIONAL_INFO_REQUIRED",
+      "name": "Informação adicional requerida",
+      "tags": {
+        "hidden": true,
+        "multivalued": true,
+        "read_only": true
+      },
+      "hierarchy": "ITEM",
+      "relevance": 2,
+      "value_type": "list",
+      "values": [
+        {
+          "id": "7435893",
+          "name": "Possui código IMEI"
+        },
+        {
+          "id": "7435894",
+          "name": "Possui número de série"
+        }
+      ],
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "EXCLUDED_PLATFORMS",
+      "name": "Plataformas excluídas",
+      "tags": {
+        "hidden": true,
+        "multivalued": true,
+        "read_only": true
+      },
+      "hierarchy": "ITEM",
+      "relevance": 2,
+      "value_type": "list",
+      "values": [
+        {
+          "id": "9936777",
+          "name": "Android"
+        },
+        {
+          "id": "9936778",
+          "name": "iOS"
+        },
+        {
+          "id": "9936779",
+          "name": "Desktop"
+        },
+        {
+          "id": "9936780",
+          "name": "Mobile"
+        }
+      ],
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "IS_SUITABLE_FOR_SHIPMENT",
+      "name": "É adequado para envío",
+      "tags": {
+        "hidden": true,
+        "read_only": true
+      },
+      "hierarchy": "ITEM",
+      "relevance": 2,
+      "value_type": "boolean",
+      "values": [
+        {
+          "id": "242084",
+          "name": "Não",
+          "metadata": {
+            "value": false
+          }
+        },
+        {
+          "id": "242085",
+          "name": "Sim",
+          "metadata": {
+            "value": true
+          }
+        }
+      ],
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "PRODUCT_DATA_SOURCE",
+      "name": "Fonte do produto",
+      "tags": {
+        "hidden": true
+      },
+      "hierarchy": "ITEM",
+      "relevance": 2,
+      "value_type": "string",
+      "value_max_length": 255,
+      "tooltip": "Indique o país de origem do produto.",
+      "example": "Brasil",
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "LIMITED_MARKETPLACE_VISIBILITY_REASONS",
+      "name": "Razões de visibilidade limitada no Marketplace",
+      "tags": {
+        "hidden": true,
+        "multivalued": true,
+        "read_only": true
+      },
+      "hierarchy": "ITEM",
+      "relevance": 2,
+      "value_type": "string",
+      "value_max_length": 255,
+      "values": [
+        {
+          "id": "24219544",
+          "name": "Pharma"
+        }
+      ],
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "HAS_COMPATIBILITIES",
+      "name": "Tem compatibilidades",
+      "tags": {
+        "hidden": true,
+        "read_only": true
+      },
+      "hierarchy": "ITEM",
+      "relevance": 2,
+      "value_type": "boolean",
+      "values": [
+        {
+          "id": "242084",
+          "name": "Não",
+          "metadata": {
+            "value": false
+          }
+        },
+        {
+          "id": "242085",
+          "name": "Sim",
+          "metadata": {
+            "value": true
+          }
+        }
+      ],
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "CATALOG_TITLE",
+      "name": "Título de catálogo",
+      "tags": {
+        "hidden": true,
+        "read_only": true
+      },
+      "hierarchy": "ITEM",
+      "relevance": 2,
+      "value_type": "string",
+      "value_max_length": 255,
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "SEARCH_ENHANCEMENT_FIELDS",
+      "name": "Campos de aprimoramento de pesquisa",
+      "tags": {
+        "hidden": true,
+        "multivalued": true,
+        "read_only": true
+      },
+      "hierarchy": "ITEM",
+      "relevance": 2,
+      "value_type": "string",
+      "value_max_length": 255,
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "PRODUCT_FEATURES",
+      "name": "Características do produto",
+      "tags": {
+        "hidden": true,
+        "multivalued": true,
+        "read_only": true
+      },
+      "hierarchy": "ITEM",
+      "relevance": 2,
+      "value_type": "list",
+      "values": [
+        {
+          "id": "7435885",
+          "name": "Contém líquido"
+        },
+        {
+          "id": "7435883",
+          "name": "Frágil"
+        },
+        {
+          "id": "7435888",
+          "name": "Com validade"
+        },
+        {
+          "id": "8847339",
+          "name": "Sem validade"
+        },
+        {
+          "id": "7575917",
+          "name": "Desinfetante e saneante"
+        },
+        {
+          "id": "7575924",
+          "name": "MAPA"
+        },
+        {
+          "id": "7575923",
+          "name": "Saúde e correlatos"
+        },
+        {
+          "id": "8721108",
+          "name": "Volumoso"
+        },
+        {
+          "id": "10490116",
+          "name": "Não voável"
+        },
+        {
+          "id": "12928414",
+          "name": "Não rotacionável"
+        },
+        {
+          "id": "41722098",
+          "name": "Dobrável"
+        },
+        {
+          "id": "52092586",
+          "name": "Magnético"
+        },
+        {
+          "id": "52233302",
+          "name": "Pode rolar"
+        }
+      ],
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "IS_NEW_OFFER",
+      "name": "É nova oferta",
+      "tags": {
+        "hidden": true,
+        "read_only": true
+      },
+      "hierarchy": "ITEM",
+      "relevance": 2,
+      "value_type": "boolean",
+      "values": [
+        {
+          "id": "242084",
+          "name": "Não",
+          "metadata": {
+            "value": false
+          }
+        },
+        {
+          "id": "242085",
+          "name": "Sim",
+          "metadata": {
+            "value": true
+          }
+        }
+      ],
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "SYI_PYMES_ID",
+      "name": "syi pymes id",
+      "tags": {
+        "hidden": true,
+        "read_only": true
+      },
+      "hierarchy": "ITEM",
+      "relevance": 2,
+      "value_type": "string",
+      "value_max_length": 255,
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "IS_FLAMMABLE",
+      "name": "É inflamável",
+      "tags": {
+        "hidden": true,
+        "read_only": true
+      },
+      "hierarchy": "FAMILY",
+      "relevance": 2,
+      "value_type": "boolean",
+      "values": [
+        {
+          "id": "242084",
+          "name": "Não",
+          "metadata": {
+            "value": false
+          }
+        },
+        {
+          "id": "242085",
+          "name": "Sim",
+          "metadata": {
+            "value": true
+          }
+        }
+      ],
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "WITH_POSITIVE_IMPACT",
+      "name": "Com impacto positivo",
+      "tags": {
+        "hidden": true,
+        "read_only": true
+      },
+      "hierarchy": "FAMILY",
+      "relevance": 2,
+      "value_type": "boolean",
+      "values": [
+        {
+          "id": "242084",
+          "name": "Não",
+          "metadata": {
+            "value": false
+          }
+        },
+        {
+          "id": "242085",
+          "name": "Sim",
+          "metadata": {
+            "value": true
+          }
+        }
+      ],
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    },
+    {
+      "id": "PACKAGE_DATA_SOURCE",
+      "name": "Origem do dado do pacote de fábrica",
+      "tags": {
+        "hidden": true,
+        "read_only": true
+      },
+      "hierarchy": "FAMILY",
+      "relevance": 2,
+      "value_type": "string",
+      "value_max_length": 255,
+      "attribute_group_id": "OTHERS",
+      "attribute_group_name": "Outros"
+    }
+  ]
+}
