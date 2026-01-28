@@ -9,7 +9,10 @@ logger = logging.getLogger(__name__)
 
 
 class CategoryResolver:
-    """Resolves category names to ML category IDs."""
+    """Resolves category names to ML category IDs.
+
+    Supports hierarchical category resolution by traversing the category tree.
+    """
 
     def __init__(self, client: MLApiClient):
         """Initialize resolver.
@@ -19,10 +22,11 @@ class CategoryResolver:
         """
         self.client = client
         self._categories: dict[str, str] = {}  # name -> id cache
-        self._category_cache: dict[str, dict] = {}  # id -> category data
+        self._category_cache: dict[str, dict] = {}  # id -> category data cache
+        self._children_cache: dict[str, list] = {}  # id -> children cache
 
     def _load_all_categories(self, site_id: str = "MLB") -> None:
-        """Load all categories for a site."""
+        """Load all categories for a site (root level only)."""
         logger.info(f"Loading categories for site {site_id}")
         categories = self.client.get_site_categories(site_id)
 
@@ -30,30 +34,107 @@ class CategoryResolver:
             name_lower = cat["name"].lower().strip()
             self._categories[name_lower] = cat["id"]
 
+    def _get_category_children(self, category_id: str) -> list[dict]:
+        """Get children of a category.
+
+        Args:
+            category_id: Parent category ID
+
+        Returns:
+            List of child categories
+        """
+        if category_id not in self._children_cache:
+            try:
+                children = self.client.get_category_children(category_id)
+                self._children_cache[category_id] = children
+            except Exception as e:
+                logger.warning(f"Could not get children for {category_id}: {e}")
+                self._children_cache[category_id] = []
+        return self._children_cache[category_id]
+
+    def _search_in_hierarchy(
+        self, name: str, parent_id: str, visited: Optional[set] = None
+    ) -> Optional[str]:
+        """Search for category name in hierarchy starting from parent.
+
+        Args:
+            name: Category name to search for
+            parent_id: Starting category ID
+            visited: Set of already visited category IDs (to prevent cycles)
+
+        Returns:
+            Category ID or None
+        """
+        if visited is None:
+            visited = set()
+
+        if parent_id in visited:
+            return None
+
+        visited.add(parent_id)
+        name_lower = name.lower().strip()
+
+        # Get children of this category
+        children = self._get_category_children(parent_id)
+
+        for child in children:
+            child_name = child["name"].lower().strip()
+            child_id = child["id"]
+
+            # Cache this child
+            self._categories[child_name] = child_id
+
+            # Exact match
+            if child_name == name_lower:
+                return child_id
+
+            # Partial match
+            if name_lower in child_name or child_name in name_lower:
+                logger.debug(f"Partial match: '{name}' -> '{child_name}'")
+                return child_id
+
+            # Recursively search in child's children
+            result = self._search_in_hierarchy(name, child_id, visited)
+            if result:
+                return result
+
+        return None
+
     def find_category(self, name: str, site_id: str = "MLB") -> Optional[str]:
         """Find category ID by name.
 
+        Searches through the category hierarchy (root categories and their children).
+
         Args:
-            name: Category name (partial match supported)
+            name: Category name (e.g., "Livros Físicos")
             site_id: Site ID (default: MLB)
 
         Returns:
             Category ID or None
         """
+        # First try to find in cached categories
         if not self._categories:
             self._load_all_categories(site_id)
 
         name_lower = name.lower().strip()
 
-        # Exact match
+        # Exact match in root categories
         if name_lower in self._categories:
             return self._categories[name_lower]
 
-        # Partial match
-        for cat_name, cat_id in self._categories.items():
+        # Partial match in root categories
+        for cat_name, cat_id in list(self._categories.items()):
             if name_lower in cat_name or cat_name in name_lower:
-                logger.debug(f"Partial match: '{name}' -> '{cat_name}'")
+                logger.debug(f"Partial match in root: '{name}' -> '{cat_name}'")
                 return cat_id
+
+        # Search in hierarchy - try each root category
+        logger.info(f"Searching category hierarchy for '{name}'")
+        for root_id in list(self._categories.values()):
+            result = self._search_in_hierarchy(name, root_id)
+            if result:
+                logger.info(f"Found '{name}' -> {result}")
+                return result
 
         return None
 

@@ -51,7 +51,19 @@ class ImageUploader:
             if image_file.suffix.lower() in [".jpg", ".jpeg", ".png", ".gif"]:
                 try:
                     result = self.client.upload_image(str(image_file))
-                    urls.append(result["secure_url"])
+                    # ML API returns secure_url inside variations array
+                    if "variations" in result and result["variations"]:
+                        url = result["variations"][0].get("secure_url") or result["variations"][0].get("url")
+                        if url:
+                            urls.append(url)
+                        else:
+                            logger.error(f"No URL found in response for {image_file}")
+                    elif "secure_url" in result:
+                        urls.append(result["secure_url"])
+                    elif "url" in result:
+                        urls.append(result["url"])
+                    else:
+                        logger.error(f"Unexpected response format for {image_file}: {result}")
                 except Exception as e:
                     logger.error(f"Failed to upload {image_file}: {e}")
 

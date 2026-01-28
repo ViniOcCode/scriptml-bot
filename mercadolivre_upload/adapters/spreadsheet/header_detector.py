@@ -25,38 +25,68 @@ class HeaderDetector:
         "origin": [r"\borigem\b"],
         "cest": [r"\bcest\b"],
         "isbn": [r"\bisbn\b"],
+        "gtin": [r"\bgtin\b", r"\bisbn\b", r"\bc[óo]digo\s*de\s*barras\b"],
     }
 
-    # Row patterns to detect header row
+    # Row patterns to detect header row (multiple matches needed)
     HEADER_INDICATORS = [
-        r"t[íi]tulo",
-        r"sku",
-        r"pre[çc]o",
-        r"descri",
+        (r"\bsku\b", 5),           # SKU is very strong indicator
+        (r"isbn", 4),              # ISBN is very strong (book category)
+        (r"t[íi]tulo", 3),         # Title is good indicator
+        (r"pre[çc]o", 3),          # Price is good indicator
+        (r"estoque", 2),           # Stock is medium indicator
+        (r"descri[çc][ãa]o", 2),   # Description is medium indicator
     ]
+
+    # Maximum length for a valid header cell
+    MAX_CELL_LENGTH = 100
+    # Maximum total row length
+    MAX_ROW_LENGTH = 800
 
     def __init__(self):
         self.header_row: Optional[int] = None
         self.column_mapping: dict[str, str] = {}
 
     def detect_header_row(self, df: pd.DataFrame, max_rows: int = 10) -> int:
-        """Detect which row contains the actual headers."""
+        """Detect which row contains the actual headers.
+
+        Skips rows that look like instructions (very long text)
+        and weights strong indicators like SKU higher.
+        """
         best_row = 0
         best_score = 0
 
         for idx in range(min(max_rows, len(df))):
-            row_text = " ".join(df.iloc[idx].astype(str).dropna()).lower()
+            row_values = df.iloc[idx].astype(str).dropna()
 
-            unique_matches = set()
-            for pattern in self.HEADER_INDICATORS:
-                if re.search(pattern, row_text, re.I):
-                    unique_matches.add(pattern)
+            # Skip rows that are too long (likely instructions)
+            row_text = " ".join(row_values)
+            if len(row_text) > self.MAX_ROW_LENGTH:
+                continue
 
-            score = len(unique_matches)
+            # Skip rows with mostly numeric values (likely data, not headers)
+            numeric_count = sum(1 for v in row_values if re.match(r'^\d+(\.\d+)?$', str(v).strip()))
+            if numeric_count > len(row_values) / 2:
+                continue
+
+            # Calculate score based on individual cells (not entire row text)
+            # This prevents matching partial words in long instruction cells
+            score = 0
+            for cell in row_values:
+                cell_str = str(cell).strip()
+                # Skip very long cells (likely instructions)
+                if len(cell_str) > self.MAX_CELL_LENGTH:
+                    continue
+                cell_lower = cell_str.lower()
+                for pattern, weight in self.HEADER_INDICATORS:
+                    if re.search(pattern, cell_lower, re.I):
+                        score += weight
+
             if score > best_score:
                 best_score = score
                 best_row = idx
 
+        logger.info(f"Detected header row at index {best_row} (score: {best_score})")
         return best_row
 
     def build_column_mapping(self, headers: list[str]) -> dict[str, str]:

@@ -108,7 +108,14 @@ dev = [
 
 1. Go to [Mercado Livre Developers](https://developers.mercadolivre.com.br/)
 2. Create an application to get `client_id` and `client_secret`
-3. Generate OAuth tokens and save to `tokens.json`:
+3. Copy `.env.example` to `.env` and fill in your credentials:
+
+```bash
+cp .env.example .env
+# Edit .env with your credentials
+```
+
+4. Generate OAuth tokens and save to `tokens.json`:
 
 ```json
 {
@@ -258,7 +265,12 @@ pytest --cov=mercadolivre_upload
 
 | Variable | Description | Default |
 |----------|-------------|---------|
+| `MERCADO_LIVRE_CLIENT_ID` | Mercado Livre app client ID | Required |
+| `MERCADO_LIVRE_CLIENT_SECRET` | Mercado Livre app client secret | Required |
+| `MERCADO_LIVRE_REDIRECT_URI` | OAuth callback URL | `http://localhost:8000/callback` |
 | `MERCADO_LIVRE_TOKEN_PATH` | Path to tokens.json | `tokens.json` |
+
+Credentials can be set via environment variables or in a `.env` file.
 
 ## License
 

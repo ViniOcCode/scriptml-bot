@@ -4,8 +4,45 @@ Domain layer defines the interface (port) for category resolution.
 Infrastructure layer provides the implementation (adapter).
 """
 
-from abc import ABC, abstractmethod
+import unicodedata
+from difflib import SequenceMatcher
 from typing import Optional, Protocol
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+def normalize_text(text: str) -> str:
+    """Normalize text for comparison.
+
+    - Lowercase
+    - Remove accents
+    - Strip whitespace
+
+    Args:
+        text: Input text
+
+    Returns:
+        Normalized text
+    """
+    text = text.lower().strip()
+    # Remove accents (é -> e, ã -> a, etc.)
+    text = unicodedata.normalize('NFKD', text)
+    text = ''.join(c for c in text if not unicodedata.combining(c))
+    return text
+
+
+def similarity(a: str, b: str) -> float:
+    """Calculate string similarity ratio.
+
+    Args:
+        a: First string
+        b: Second string
+
+    Returns:
+        Similarity ratio (0.0 to 1.0)
+    """
+    return SequenceMatcher(None, normalize_text(a), normalize_text(b)).ratio()
 
 
 class CategoryApiPort(Protocol):
@@ -16,6 +53,10 @@ class CategoryApiPort(Protocol):
 
     def get_site_categories(self, site_id: str) -> list[dict]:
         """Get all categories for a site."""
+        ...
+
+    def get_category(self, category_id: str) -> dict:
+        """Get category details including children_categories."""
         ...
 
     def get_category_attributes(self, category_id: str) -> list[dict]:
@@ -36,11 +77,24 @@ class CategoryApiPort(Protocol):
         """
         ...
 
+    def predict_category(self, title: str, site_id: str) -> list[dict]:
+        """Predict category based on product title.
+
+        Args:
+            title: Product title
+            site_id: Site ID
+
+        Returns:
+            List of predicted categories with confidence scores
+        """
+        ...
+
 
 class CategoryResolver:
     """Resolves category names to IDs using API port.
 
     Pure domain logic - no external dependencies.
+    Supports hierarchical category resolution.
     """
 
     def __init__(self, api_port: CategoryApiPort):
@@ -52,20 +106,157 @@ class CategoryResolver:
         self._api = api_port
         self._categories: dict[str, str] = {}  # name -> id cache
         self._category_cache: dict[str, dict] = {}  # id -> data cache
+        self._children_cache: dict[str, list] = {}  # id -> children cache
 
     def load_categories(self, site_id: str = "MLB") -> None:
-        """Load all categories for a site."""
+        """Load all categories for a site.
+
+        Stores normalized category names (lowercase, no accents) for better matching.
+        """
         categories = self._api.get_site_categories(site_id)
 
         for cat in categories:
-            name_lower = cat["name"].lower().strip()
-            self._categories[name_lower] = cat["id"]
+            name_normalized = normalize_text(cat["name"])
+            self._categories[name_normalized] = cat["id"]
 
-    def find_category(self, name: str, site_id: str = "MLB") -> Optional[str]:
-        """Find category ID by name.
+    def _get_category_children(self, category_id: str) -> list[dict]:
+        """Get children of a category from category data."""
+        if category_id not in self._children_cache:
+            try:
+                # Use get_category which returns children_categories in response
+                category_data = self._api.get_category(category_id)
+                children = category_data.get("children_categories", [])
+                self._children_cache[category_id] = children
+            except Exception:
+                self._children_cache[category_id] = []
+        return self._children_cache[category_id]
+
+    def _search_in_hierarchy(
+        self, name: str, parent_id: str, parent_name: str = "",
+        visited: Optional[set] = None, depth: int = 0, max_depth: int = 5,
+        min_similarity: float = 0.8
+    ) -> Optional[str]:
+        """Search for category name in hierarchy starting from parent.
 
         Args:
-            name: Category name
+            name: Category name to search for
+            parent_id: Parent category ID
+            parent_name: Parent category name (for logging)
+            visited: Set of visited category IDs
+            depth: Current recursion depth
+            max_depth: Maximum recursion depth
+            min_similarity: Minimum similarity for fuzzy matching (0.0-1.0)
+
+        Returns:
+            Category ID or None
+        """
+        if visited is None:
+            visited = set()
+
+        # Prevent infinite recursion
+        if depth > max_depth:
+            return None
+
+        if parent_id in visited:
+            return None
+
+        visited.add(parent_id)
+        name_normalized = normalize_text(name)
+
+        # Get children of this category
+        children = self._get_category_children(parent_id)
+
+        best_match = None
+        best_similarity = 0.0
+
+        for child in children:
+            child_name = child["name"]
+            child_id = child["id"]
+            child_normalized = normalize_text(child_name)
+
+            # Cache this child
+            self._categories[child_normalized] = child_id
+
+            # Exact normalized match
+            if child_normalized == name_normalized:
+                logger.info(f"Found exact match: '{child_name}' ({child_id})")
+                return child_id
+
+            # Contains check
+            if name_normalized in child_normalized or child_normalized in name_normalized:
+                logger.info(f"Found substring match: '{child_name}' ({child_id})")
+                return child_id
+
+            # Fuzzy similarity check
+            sim = similarity(child_name, name)
+            if sim > best_similarity:
+                best_similarity = sim
+                best_match = (child_id, child_name)
+
+            # Recursively search in child's children
+            result = self._search_in_hierarchy(
+                name, child_id, child_name, visited, depth + 1, max_depth,
+                min_similarity
+            )
+            if result:
+                return result
+
+        # If we found a good fuzzy match, return it
+        if best_match and best_similarity >= min_similarity:
+            logger.info(
+                f"Found fuzzy match (similarity={best_similarity:.2f}): "
+                f"'{best_match[1]}' ({best_match[0]})"
+            )
+            return best_match[0]
+
+        return None
+
+    def resolve_to_leaf(self, category_id: str) -> str:
+        """Ensure we reach a leaf category (no children).
+
+        If the category has children, navigate down to find a leaf.
+
+        Args:
+            category_id: Starting category ID
+
+        Returns:
+            Leaf category ID
+        """
+        data = self._api.get_category(category_id)
+
+        # CRITICAL FIX: Prevent 'str' object error
+        if not isinstance(data, dict):
+            logger.error(f"Invalid API response for {category_id}: {data}")
+            return category_id
+
+        children = data.get("children_categories", [])
+        if not children:
+            return category_id  # It's a leaf!
+
+        # Pick the child with most items as the best guess
+        # Sort by total_items_in_this_category (descending)
+        sorted_children = sorted(
+            children,
+            key=lambda x: x.get("total_items_in_this_category", 0),
+            reverse=True
+        )
+        best_child = sorted_children[0]
+        logger.info(
+            f"Category {category_id} has children, selecting "
+            f"'{best_child['name']}' ({best_child['id']})"
+        )
+
+        # Recursively resolve to leaf
+        return self.resolve_to_leaf(best_child["id"])
+
+    def find_category(self, name: str, site_id: str = "MLB") -> Optional[str]:
+        """Find category ID by name using predictor-first strategy.
+
+        Tries fuzzy matching on root categories first (fast),
+        then falls back to hierarchical search if needed.
+
+        Args:
+            name: Category name (e.g., "Livros Físicos")
             site_id: Site ID
 
         Returns:
@@ -74,16 +265,111 @@ class CategoryResolver:
         if not self._categories:
             self.load_categories(site_id)
 
-        name_lower = name.lower().strip()
+        name_normalized = normalize_text(name)
+        logger.info(f"Looking for category: '{name}' (normalized: '{name_normalized}')")
 
-        # Exact match
-        if name_lower in self._categories:
-            return self._categories[name_lower]
+        # Fast path: Check root categories with fuzzy matching
+        best_root_match = None
+        best_root_sim = 0.0
 
-        # Partial match
-        for cat_name, cat_id in self._categories.items():
-            if name_lower in cat_name or cat_name in name_lower:
+        for cat_name, cat_id in list(self._categories.items()):
+            # Direct normalized match
+            if cat_name == name_normalized:
+                logger.info(f"Found exact match in root: '{name}' -> '{cat_name}' ({cat_id})")
                 return cat_id
+
+            # Substring match
+            if name_normalized in cat_name or cat_name in name_normalized:
+                logger.info(f"Found substring match in root: '{name}' -> '{cat_name}' ({cat_id})")
+                return cat_id
+
+            # Track best fuzzy match
+            sim = similarity(cat_name, name)
+            if sim > best_root_sim:
+                best_root_sim = sim
+                best_root_match = (cat_name, cat_id)
+
+        # If good fuzzy match in root, return it
+        if best_root_match and best_root_sim >= 0.8:
+            logger.info(
+                f"Found fuzzy match in root (similarity={best_root_sim:.2f}): "
+                f"'{name}' -> '{best_root_match[0]}' ({best_root_match[1]})"
+            )
+            return best_root_match[1]
+
+        logger.info(f"Category '{name}' not in root categories")
+        return None
+
+    def predict_category_from_title(
+        self, title: str, site_id: str = "MLB"
+    ) -> Optional[str]:
+        """Predict category based on product title using ML domain discovery.
+
+        Args:
+            title: Product title
+            site_id: Site ID
+
+        Returns:
+            Category ID or None
+        """
+        if not title or not isinstance(title, str):
+            logger.warning(f"Invalid title for domain discovery: {title}")
+            return None
+
+        title = title.strip()
+        if len(title) < 3:
+            logger.warning(f"Title too short for domain discovery: '{title}'")
+            return None
+
+        try:
+            logger.info(f"Calling domain discovery for: '{title[:60]}...'")
+            predictions = self._api.predict_category(title, site_id)
+            logger.debug(f"Domain discovery response: {predictions}")
+
+            if predictions and len(predictions) > 0:
+                # Get the first (highest confidence) prediction
+                best_match = predictions[0]
+                category_id = best_match.get("category_id")
+                category_name = best_match.get("category_name", "unknown")
+                logger.info(
+                    f"Domain discovery found: '{category_name}' ({category_id}) "
+                    f"for title"
+                )
+                return category_id
+            else:
+                logger.warning(f"Domain discovery returned empty for: '{title}'")
+        except Exception as e:
+            logger.warning(f"Domain discovery failed: {e}")
+
+        return None
+
+    def find_category_by_name_or_title(
+        self, name: Optional[str] = None,
+        title: Optional[str] = None,
+        site_id: str = "MLB"
+    ) -> Optional[str]:
+        """Find category by name, falling back to title-based prediction.
+
+        Args:
+            name: Category name to search for
+            title: Product title for ML prediction fallback
+            site_id: Site ID
+
+        Returns:
+            Category ID or None
+        """
+        # First try by name
+        if name:
+            result = self.find_category(name, site_id)
+            if result:
+                return result
+
+        # Fallback to title-based prediction
+        if title:
+            logger.info(f"Category name not found, trying domain discovery with title...")
+            result = self.predict_category_from_title(title, site_id)
+            if result:
+                return result
 
         return None
 
@@ -123,10 +409,18 @@ class CategoryResolver:
             List of conditional attributes
         """
         try:
-            return self._api.get_category_conditional_attributes(
+            result = self._api.get_category_conditional_attributes(
                 category_id, current_attributes
             )
-        except Exception as e:
+            # Handle case where API returns error message or non-list
+            if isinstance(result, dict) and "error" in result:
+                return []
+            if isinstance(result, str):
+                return []
+            if not isinstance(result, list):
+                return []
+            return result
+        except Exception:
             # Log error but don't fail - conditional attrs are optional
             return []
 

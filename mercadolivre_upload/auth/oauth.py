@@ -4,9 +4,13 @@ import os
 from typing import Optional
 from urllib.parse import urlencode
 
+from dotenv import find_dotenv, load_dotenv
 import requests
 
 from .exceptions import OAuthError
+
+# Load environment variables from .env file (searches up from this file)
+load_dotenv(find_dotenv(usecwd=True))
 
 
 class OAuthHandler:
@@ -40,8 +44,7 @@ class OAuthHandler:
         self.client_id = client_id or os.getenv("MERCADO_LIVRE_CLIENT_ID")
         self.client_secret = client_secret or os.getenv("MERCADO_LIVRE_CLIENT_SECRET")
         self.redirect_uri = redirect_uri or os.getenv(
-            "MERCADO_LIVRE_REDIRECT_URI",
-            "http://localhost:8000/callback"
+            "MERCADO_LIVRE_REDIRECT_URI", "http://localhost:8000/callback"
         )
 
     def get_authorization_url(self, state: Optional[str] = None) -> str:
@@ -57,7 +60,9 @@ class OAuthHandler:
             OAuthError: If client_id is not configured
         """
         if not self.client_id:
-            raise OAuthError("Client ID is required. Set MERCADO_LIVRE_CLIENT_ID environment variable.")
+            raise OAuthError(
+                "Client ID is required. Set MERCADO_LIVRE_CLIENT_ID environment variable."
+            )
 
         params = {
             "response_type": "code",
@@ -144,6 +149,7 @@ class OAuthHandler:
             raise OAuthError(f"Invalid token response: {error_msg}")
 
         import time
+
         expires_at = int(time.time()) + data.get("expires_in", 21600)
 
         return {
@@ -152,7 +158,9 @@ class OAuthHandler:
             "expires_at": expires_at,
         }
 
-    def add_auth_header(self, headers: Optional[dict] = None, token: Optional[str] = None) -> dict:
+    def add_auth_header(
+        self, headers: Optional[dict] = None, token: Optional[str] = None
+    ) -> dict:
         """Add Bearer token authorization header to request headers.
 
         Args:

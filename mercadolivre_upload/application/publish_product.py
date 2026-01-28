@@ -71,13 +71,36 @@ class PublishProductUseCase:
         Returns:
             Execution results
         """
-        # Find category ID
+        # Find category ID using predictor-first strategy
         category_id = self.category_resolver.find_category(category_name)
+
+        # Fallback: try domain discovery with product titles
+        if not category_id and products:
+            logger.info(f"Category not found by name, trying domain discovery...")
+            for product in products:
+                if product.title:
+                    category_id = self.category_resolver.predict_category_from_title(
+                        product.title
+                    )
+                    if category_id:
+                        logger.info(f"Found category from title '{product.title[:30]}...'")
+                        break
+
         if not category_id:
+            error_msg = f"Category not found: {category_name}"
+            logger.error(error_msg)
             return {
                 "success": False,
-                "error": f"Category not found: {category_name}",
+                "published": 0,
+                "failed": len(products),
+                "errors": [error_msg],
             }
+
+        # Ensure we have a leaf category (no children)
+        leaf_category_id = self.category_resolver.resolve_to_leaf(category_id)
+        if leaf_category_id != category_id:
+            logger.info(f"Resolved to leaf category: {leaf_category_id}")
+            category_id = leaf_category_id
 
         logger.info(f"Publishing {len(products)} products to category {category_id}")
 
@@ -100,16 +123,51 @@ class PublishProductUseCase:
         ml_attributes = []
         mapped_attr_ids = {}  # id -> value mapping for conditional check
 
+        # Also map the main product fields to attributes
+        field_mappings = {
+            "title": ["BOOK_TITLE", "TÍTULO DO LIVRO", "TITULO DO LIVRO"],
+            "autor": ["AUTHOR", "AUTOR"],
+            "gnero_do_livro": ["BOOK_GENRE", "GÊNERO DO LIVRO", "GENERO DO LIVRO"],
+            "isbn": ["GTIN", "ISBN"],
+            "gtin": ["GTIN", "ISBN"],
+            "editora_do_livro": ["BOOK_PUBLISHER", "EDITORA DO LIVRO"],
+        }
+
+        # Add main product fields as attributes if they map to required ML attrs
+        for field_name, ml_attr_names in field_mappings.items():
+            value = None
+            if field_name == "title":
+                value = product.title
+            elif field_name in product.attributes:
+                value = product.attributes[field_name]
+
+            if value:
+                # Find matching ML attribute
+                for ml_name in ml_attr_names:
+                    ml_name_lower = ml_name.lower()
+                    if ml_name_lower in attribute_map:
+                        attr_def = attribute_map[ml_name_lower]
+                        if attr_def["id"] not in mapped_attr_ids:
+                            ml_attributes.append({
+                                "id": attr_def["id"],
+                                "name": attr_def["name"],
+                                "value_name": value,
+                            })
+                            mapped_attr_ids[attr_def["id"]] = value
+                            break
+
+        # Map other product attributes
         for raw_name, raw_value in product.attributes.items():
             if raw_name.lower() in attribute_map:
                 attr_def = attribute_map[raw_name.lower()]
-                ml_attrs_entry = {
-                    "id": attr_def["id"],
-                    "name": attr_def["name"],
-                    "value_name": raw_value,
-                }
-                ml_attributes.append(ml_attrs_entry)
-                mapped_attr_ids[attr_def["id"]] = raw_value
+                if attr_def["id"] not in mapped_attr_ids:
+                    ml_attrs_entry = {
+                        "id": attr_def["id"],
+                        "name": attr_def["name"],
+                        "value_name": raw_value,
+                    }
+                    ml_attributes.append(ml_attrs_entry)
+                    mapped_attr_ids[attr_def["id"]] = raw_value
 
         # Get conditional attributes based on current attribute values
         try:
@@ -146,6 +204,14 @@ class PublishProductUseCase:
         # Upload images
         picture_urls = self.image_uploader.upload_images(product.sku)
 
+        # Build pictures list
+        pictures = [{"source": url} for url in picture_urls]
+
+        # If no pictures, use empty placeholder (will fail for gold_special)
+        # or use a different listing type
+        if not pictures:
+            logger.warning(f"No pictures for {product.sku}")
+
         # Build item
         item = {
             "title": product.title,
@@ -155,9 +221,9 @@ class PublishProductUseCase:
             "available_quantity": product.available_quantity,
             "buying_mode": "buy_it_now",
             "condition": product.condition,
-            "listing_type_id": "gold_special",
+            "listing_type_id": "free" if not pictures else "gold_special",
             "description": {"plain_text": product.description},
-            "pictures": [{"source": url} for url in picture_urls],
+            "pictures": pictures,
             "attributes": ml_attributes,
         }
 
@@ -170,11 +236,24 @@ class PublishProductUseCase:
         try:
             validation = self.publisher.validate_item(item)
             if not validation.get("valid", True):
-                self.errors.append(f"{product.sku}: {validation.get('errors')}")
+                errors = validation.get('errors', validation)
+                logger.error(f"Validation failed for {product.sku}: {errors}")
+                self.errors.append(f"{product.sku}: {errors}")
                 self.failed += 1
                 return False
         except Exception as e:
-            logger.warning(f"Validation error for {product.sku}: {e}")
+            # Try to extract error details from exception
+            error_msg = str(e)
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    error_detail = e.response.json()
+                    error_msg = f"{error_msg} - {error_detail}"
+                except:
+                    error_msg = f"{error_msg} - {e.response.text[:200]}"
+            logger.error(f"Validation error for {product.sku}: {error_msg}")
+            self.errors.append(f"{product.sku}: {error_msg}")
+            self.failed += 1
+            return False
 
         # Publish
         try:

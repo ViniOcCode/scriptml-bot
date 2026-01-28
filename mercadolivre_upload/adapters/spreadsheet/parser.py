@@ -165,6 +165,12 @@ class SpreadsheetParser:
 
         attributes = self._extract_attributes(row)
 
+        # Extract special attributes that are mapped but not in standard columns
+        isbn = self._get_value(row, "isbn", "") or self._get_value(row, "gtin", "")
+        if isbn:
+            attributes["isbn"] = str(isbn).strip()
+            attributes["gtin"] = str(isbn).strip()  # ISBN is used as GTIN
+
         return Product(
             sku=sku,
             title=title,

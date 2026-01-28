@@ -102,6 +102,21 @@ class MLApiClient:
         """
         return self.get(f"/sites/{site_id}/categories")
 
+    def predict_category(self, title: str, site_id: str = "MLB") -> list[dict]:
+        """Predict category based on product title.
+
+        Uses ML domain discovery to predict the best category for a title.
+
+        Args:
+            title: Product title
+            site_id: Site ID (default: MLB for Brazil)
+
+        Returns:
+            List of predicted categories with confidence scores
+        """
+        endpoint = f"/sites/{site_id}/domain_discovery/search"
+        return self.get(endpoint, params={"q": title})
+
     def get_category(self, category_id: str) -> dict:
         """Get category details."""
         return self.get(f"/categories/{category_id}")
@@ -158,10 +173,13 @@ class MLApiClient:
             image_path: Path to image file
 
         Returns:
-            Upload result with URL
+            Upload result with picture ID and URLs
         """
-        with open(image_path, "rb") as f:
-            files = {"file": f}
+        from pathlib import Path
+
+        path = Path(image_path)
+        with open(path, "rb") as f:
+            files = {"file": (path.name, f, "image/jpeg")}
             headers = {}
             if self.auth:
                 token = self.auth.get_access_token()
