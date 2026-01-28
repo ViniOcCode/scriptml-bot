@@ -5,7 +5,8 @@ Automated bulk product publication system for Mercado Livre (Brazil) using Excel
 ## Features
 
 - **Dynamic Excel Parsing**: Handles messy ML bulk templates with instructional headers
-- **Category Resolution**: Auto-resolves category IDs from names
+- **Dynamic Attribute Mapping**: Fuzzy matches Excel columns to ML API attributes (name and ID)
+- **Category Resolution**: Auto-resolves category IDs from names using predictor-first strategy
 - **Conditional Attributes**: Handles ML's conditional attribute requirements
 - **Image Upload**: Uploads product images from SKU-based folders
 - **Pre-validation**: Validates items before publishing
@@ -17,22 +18,38 @@ Clean Architecture implementation:
 
 ```
 mercadolivre_upload/
-├── domain/              # Pure business logic
-│   ├── category/        # Category resolver
-│   ├── fiscal/          # Fiscal data models
-│   └── product/         # Product models
-├── application/         # Use cases
-│   └── publish_product.py
-├── adapters/            # Input/output
+├── domain/                 # Pure business logic
+│   ├── category/           # Category resolution
+│   │   └── resolver.py
+│   ├── product/            # Product models
+│   │   └── model.py
+│   ├── fiscal/             # Fiscal data (NCM, CFOP, etc.)
+│   │   └── data.py
+│   └── attribute_mapper.py # Dynamic fuzzy attribute mapping
+├── application/            # Use cases
+│   └── publish_product.py  # PublishProductUseCase
+├── adapters/               # Input/output adapters
 │   ├── image_uploader.py
 │   └── spreadsheet/
-│       └── parser.py
-├── api/                 # External APIs
+│       ├── parser.py       # SpreadsheetParser
+│       └── header_detector.py
+├── api/                    # External API adapters
+│   ├── client.py           # MLApiClient
 │   ├── category_adapter.py
-│   └── client.py
-└── auth/                # Authentication
-    └── token_manager.py
+│   └── category_resolver.py
+├── auth/                   # Authentication
+│   ├── oauth.py
+│   ├── token_manager.py
+│   └── exceptions.py
+├── parser/                 # Legacy parser module
+│   ├── dynamic_parser.py
+│   ├── excel_parser.py
+│   └── models.py
+├── pipeline.py             # 3-layer pipeline (see note below)
+└── main.py                 # CLI entry point
 ```
+
+**Note**: The `pipeline.py` file implements a 3-layer pipeline architecture but references a `publisher.publisher` module that doesn't exist yet. Use `main.py` as the primary entry point.
 
 ## Installation
 
@@ -79,6 +96,7 @@ Create `requirements.txt`:
 pandas>=2.0.0
 openpyxl>=3.1.0
 requests>=2.31.0
+rapidfuzz>=3.0.0
 pytest>=7.4.0
 pytest-mock>=3.11.0
 ```
@@ -93,6 +111,7 @@ dependencies = [
     "pandas>=2.0.0",
     "openpyxl>=3.1.0",
     "requests>=2.31.0",
+    "rapidfuzz>=3.0.0",
 ]
 
 [project.optional-dependencies]

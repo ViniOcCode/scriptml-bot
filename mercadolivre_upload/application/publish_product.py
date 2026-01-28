@@ -4,11 +4,13 @@ Orchestrates domain logic and adapters to publish products.
 """
 
 import logging
+import re
 from pathlib import Path
 from typing import Optional, Protocol
 
 from mercadolivre_upload.domain.category.resolver import CategoryResolver
 from mercadolivre_upload.domain.product.model import Product
+from mercadolivre_upload.domain.attribute_mapper import AttributeMapper
 from mercadolivre_upload.adapters.spreadsheet.parser import SpreadsheetParser
 
 logger = logging.getLogger(__name__)
@@ -117,57 +119,22 @@ class PublishProductUseCase:
     def _publish_one(self, product: Product, category_id: str) -> bool:
         """Publish a single product."""
         # Get base attributes for category
-        attribute_map = self.category_resolver.build_attribute_map(category_id)
+        ml_attributes_list = self.category_resolver.get_all_attributes(category_id)
 
-        # Map product attributes to ML format
-        ml_attributes = []
-        mapped_attr_ids = {}  # id -> value mapping for conditional check
+        # Initialize attribute mapper with default threshold
+        attribute_mapper = AttributeMapper(similarity_threshold=0.7)
 
-        # Also map the main product fields to attributes
-        field_mappings = {
-            "title": ["BOOK_TITLE", "TÍTULO DO LIVRO", "TITULO DO LIVRO"],
-            "autor": ["AUTHOR", "AUTOR"],
-            "gnero_do_livro": ["BOOK_GENRE", "GÊNERO DO LIVRO", "GENERO DO LIVRO"],
-            "isbn": ["GTIN", "ISBN"],
-            "gtin": ["GTIN", "ISBN"],
-            "editora_do_livro": ["BOOK_PUBLISHER", "EDITORA DO LIVRO"],
+        # Map product attributes to ML format using fuzzy matching
+        ml_attributes = attribute_mapper.map_product_attributes(
+            product.attributes,
+            ml_attributes_list
+        )
+
+        # Build mapped_attr_ids for conditional attribute lookup
+        mapped_attr_ids = {
+            attr["id"]: attr["value_name"]
+            for attr in ml_attributes
         }
-
-        # Add main product fields as attributes if they map to required ML attrs
-        for field_name, ml_attr_names in field_mappings.items():
-            value = None
-            if field_name == "title":
-                value = product.title
-            elif field_name in product.attributes:
-                value = product.attributes[field_name]
-
-            if value:
-                # Find matching ML attribute
-                for ml_name in ml_attr_names:
-                    ml_name_lower = ml_name.lower()
-                    if ml_name_lower in attribute_map:
-                        attr_def = attribute_map[ml_name_lower]
-                        if attr_def["id"] not in mapped_attr_ids:
-                            ml_attributes.append({
-                                "id": attr_def["id"],
-                                "name": attr_def["name"],
-                                "value_name": value,
-                            })
-                            mapped_attr_ids[attr_def["id"]] = value
-                            break
-
-        # Map other product attributes
-        for raw_name, raw_value in product.attributes.items():
-            if raw_name.lower() in attribute_map:
-                attr_def = attribute_map[raw_name.lower()]
-                if attr_def["id"] not in mapped_attr_ids:
-                    ml_attrs_entry = {
-                        "id": attr_def["id"],
-                        "name": attr_def["name"],
-                        "value_name": raw_value,
-                    }
-                    ml_attributes.append(ml_attrs_entry)
-                    mapped_attr_ids[attr_def["id"]] = raw_value
 
         # Get conditional attributes based on current attribute values
         try:
@@ -192,12 +159,7 @@ class PublishProductUseCase:
                         "name": cond_attr["name"],
                         "value_name": product.attributes[attr_name],
                     })
-                elif attr_id in mapped_attr_ids:
-                    ml_attributes.append({
-                        "id": attr_id,
-                        "name": cond_attr["name"],
-                        "value_name": mapped_attr_ids[attr_id],
-                    })
+                    mapped_attr_ids[attr_id] = product.attributes[attr_name]
         except Exception as e:
             logger.warning(f"Could not get conditional attributes for {product.sku}: {e}")
 
@@ -231,6 +193,9 @@ class PublishProductUseCase:
             logger.info(f"DRY RUN: Would publish {product.sku}")
             self.published += 1
             return True
+
+        # Normalize attributes before validation/publish (ensure units and required attrs)
+        self._normalize_item_attributes(item, product.title)
 
         # Validate
         try:
@@ -274,3 +239,48 @@ class PublishProductUseCase:
             "total": self.published + self.failed,
             "errors": self.errors,
         }
+
+    def _normalize_item_attributes(self, item: dict, product_title: str) -> None:
+        """Ensure numeric dimensions have units and inject required attributes.
+
+        - Appends ' cm' to pure-numeric dimension attributes (height/width/length/depth).
+        - Injects `BOOK_TITLE` attribute with the product title if missing.
+        Operates in-place on `item['attributes']`.
+        """
+        attrs = item.get("attributes")
+        if not isinstance(attrs, list):
+            return
+
+        has_book_title = False
+
+        # Patterns
+        numeric_only = re.compile(r"^\s*\d+(?:[\.,]\d+)?\s*$")
+        unit_marker = re.compile(r"\b(cm|mm|m|in|pouce|polegadas)\b", re.IGNORECASE)
+
+        for attr in attrs:
+            # Detect BOOK_TITLE presence by id or name
+            try:
+                if str(attr.get("id", "")).upper() == "BOOK_TITLE":
+                    has_book_title = True
+                name = str(attr.get("name", "")).lower()
+            except Exception:
+                name = ""
+
+            # Normalize dimension-like attributes
+            if name and any(k in name for k in ("height", "altura", "width", "largura", "length", "comprimento", "depth", "profundidade")):
+                val = attr.get("value_name")
+                if isinstance(val, (int, float)):
+                    attr["value_name"] = f"{val} cm"
+                elif isinstance(val, str):
+                    if numeric_only.match(val) and not unit_marker.search(val):
+                        # Convert comma decimals to dot (ML accepts dot) then append cm
+                        normalized = val.strip().replace(",", ".")
+                        attr["value_name"] = f"{normalized} cm"
+
+        # Inject BOOK_TITLE if missing
+        if not has_book_title and product_title:
+            attrs.append({
+                "id": "BOOK_TITLE",
+                "name": "BOOK_TITLE",
+                "value_name": product_title,
+            })
