@@ -1,0 +1,18 @@
+[
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-28T19:15:11.221074",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-28T19:15:11.221316",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  }
+]

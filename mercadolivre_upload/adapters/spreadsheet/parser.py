@@ -6,7 +6,7 @@ Adapts external Excel input to domain Product entities.
 import logging
 import re
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import pandas as pd
 
@@ -73,7 +73,7 @@ class SpreadsheetParser:
         logger.info(f"Parsed {len(products)} products")
         return products
 
-    def _get_value(self, row: pd.Series, canonical_name: str, default: any = None) -> any:
+    def _get_value(self, row: pd.Series, canonical_name: str, default: Any = None) -> Any:
         """Get value from row using canonical column name."""
         if canonical_name not in self.column_mapping:
             return default
@@ -82,7 +82,7 @@ class SpreadsheetParser:
         value = row.get(actual_col, default)
         return None if pd.isna(value) else value
 
-    def _parse_price(self, value: any) -> float:
+    def _parse_price(self, value: Any) -> float:
         """Parse price value."""
         if isinstance(value, (int, float)):
             return float(value)
@@ -103,7 +103,7 @@ class SpreadsheetParser:
 
         return float(value_str)
 
-    def _parse_quantity(self, value: any) -> int:
+    def _parse_quantity(self, value: Any) -> int:
         """Parse quantity value."""
         if isinstance(value, (int, float)):
             return int(value)
@@ -115,7 +115,53 @@ class SpreadsheetParser:
 
         raise ValueError(f"Cannot parse quantity: {value}")
 
-    def _parse_condition(self, value: any) -> str:
+    def _parse_int(self, value: Any) -> int | None:
+        """Parse integer value, returning None if empty."""
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            return None
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+
+        value_str = str(value).strip()
+        if not value_str:
+            return None
+
+        # Remove any non-numeric characters except minus
+        value_str = re.sub(r"[^\d-]", "", value_str)
+        if value_str:
+            return int(value_str)
+        return None
+
+    def _parse_float(self, value: Any) -> float | None:
+        """Parse float value, returning None if empty."""
+        if value is None or (isinstance(value, float) and pd.isna(value)):
+            return None
+        if isinstance(value, (int, float)):
+            return float(value)
+
+        value_str = str(value).strip()
+        if not value_str:
+            return None
+
+        # Handle Brazilian format
+        if "," in value_str and "." in value_str:
+            last_comma = value_str.rfind(",")
+            last_dot = value_str.rfind(".")
+            if last_comma > last_dot:
+                value_str = value_str.replace(".", "").replace(",", ".")
+            else:
+                value_str = value_str.replace(",", "")
+        elif "," in value_str:
+            value_str = value_str.replace(",", ".")
+
+        try:
+            return float(value_str)
+        except ValueError:
+            return None
+
+    def _parse_condition(self, value: Any) -> str:
         """Parse condition value."""
         value_str = str(value).lower().strip()
 
@@ -173,11 +219,28 @@ class SpreadsheetParser:
         # Default description to title if not present
         description = str(self._get_value(row, "description", title))
 
+        # Parse fiscal data with all available fields
+        cost_value = self._get_value(row, "cost")
+        cost = self._parse_price(cost_value) if cost_value else 0.0
+
         fiscal = FiscalData(
+            sku=sku,
+            title=title,
+            cost=cost,
             ncm=str(self._get_value(row, "ncm", "")),
-            cfop=str(self._get_value(row, "cfop", "")),
-            origin=str(self._get_value(row, "origin", "")),
+            cfop=str(self._get_value(row, "cfop", "")) or None,
+            origin_detail=str(self._get_value(row, "origin_detail", self._get_value(row, "origin", ""))),
             cest=str(self._get_value(row, "cest", "")) or None,
+            origin_type=str(self._get_value(row, "origin_type", "reseller")),
+            csosn=str(self._get_value(row, "csosn", "")) or None,
+            tax_rule_id=self._parse_int(self._get_value(row, "tax_rule_id")),
+            fci=str(self._get_value(row, "fci", "")) or None,
+            ex_tipi=str(self._get_value(row, "ex_tipi", "")) or None,
+            ean=str(self._get_value(row, "ean", "")) or self._get_value(row, "gtin", "") or None,
+            med_anvisa_code=str(self._get_value(row, "med_anvisa_code", "")) or None,
+            med_exemption_reason=str(self._get_value(row, "med_exemption_reason", "")) or None,
+            net_weight=self._parse_float(self._get_value(row, "net_weight")),
+            gross_weight=self._parse_float(self._get_value(row, "gross_weight")),
         )
 
         # Extract attributes from other columns

@@ -6,11 +6,19 @@ Orchestrates domain logic and adapters to publish products.
 import logging
 import re
 from pathlib import Path
-from typing import Optional, Protocol
+from typing import Any, Optional, Protocol
 
 from mercadolivre_upload.domain.category.resolver import CategoryResolver
 from mercadolivre_upload.domain.product.model import Product
+from mercadolivre_upload.domain.fiscal.data import FiscalData
+from mercadolivre_upload.domain.fiscal.service import FiscalService, FiscalSubmissionResult
 from mercadolivre_upload.domain.attribute_mapper import AttributeMapper
+from mercadolivre_upload.domain.validation import (
+    StructuralValidator,
+    SemanticScorer,
+    AttributeSanitizer,
+    ValidationFeedback,
+)
 from mercadolivre_upload.adapters.spreadsheet.parser import SpreadsheetParser
 
 logger = logging.getLogger(__name__)
@@ -53,7 +61,11 @@ class PublishProductUseCase:
         publisher: ItemPublisherPort,
         image_uploader: ImageUploaderPort,
         shipping_resolver: Optional[ShippingResolverPort] = None,
+        fiscal_service: Optional[FiscalService] = None,
         dry_run: bool = False,
+        min_attribute_score: int = 50,
+        enable_feedback: bool = True,
+        enable_fiscal_submission: bool = True,
     ):
         """Initialize use case.
 
@@ -62,17 +74,31 @@ class PublishProductUseCase:
             publisher: Item publisher (API adapter)
             image_uploader: Image uploader service
             shipping_resolver: Shipping mode resolver (optional)
+            fiscal_service: Fiscal data submission service (optional)
             dry_run: If True, only validate
+            min_attribute_score: Minimum score for attributes (0-100)
+            enable_feedback: Enable validation feedback tracking
+            enable_fiscal_submission: Whether to submit fiscal data after publishing
         """
         self.category_resolver = category_resolver
         self.publisher = publisher
         self.image_uploader = image_uploader
         self.shipping_resolver = shipping_resolver
+        self.fiscal_service = fiscal_service
         self.dry_run = dry_run
+        self.min_attribute_score = min_attribute_score
+        self.enable_fiscal_submission = enable_fiscal_submission
 
         self.published = 0
         self.failed = 0
         self.errors: list[str] = []
+        self.fiscal_results: list[FiscalSubmissionResult] = []
+
+        # Initialize feedback system
+        self.feedback = ValidationFeedback() if enable_feedback else None
+
+        # Cache for attribute metadata
+        self._attr_metadata_cache: dict[str, list] = {}
 
     def execute(self, products: list[Product], category_name: str) -> dict:
         """Execute publishing use case.
@@ -127,54 +153,123 @@ class PublishProductUseCase:
             "errors": self.errors,
         }
 
-    def _publish_one(self, product: Product, category_id: str) -> bool:
-        """Publish a single product."""
-        logger.info(f"Publishing product: {product.sku} (title: {product.title[:50]}...)")
+    def _build_attributes(
+        self, product: Product, category_id: str
+    ) -> tuple[list[dict], list[str], list[str]]:
+        """Build sanitized attributes using semantic validation pipeline.
 
-        # Get base attributes for category
-        ml_attributes_list = self.category_resolver.get_all_attributes(category_id)
+        Returns:
+            Tuple of (attributes, warnings, errors)
+        """
+        warnings = []
+        errors = []
 
-        # Initialize attribute mapper with default threshold
+        # 1. Get attribute metadata for structural validation
+        try:
+            attr_metadata = self.category_resolver.get_attribute_metadata(category_id)
+            self._attr_metadata_cache[category_id] = attr_metadata
+        except Exception as e:
+            logger.error(f"Failed to get attribute metadata: {e}")
+            errors.append(f"attribute_metadata: {e}")
+            return [], warnings, errors
+
+        # 2. Map product attributes to ML format using fuzzy matching
         attribute_mapper = AttributeMapper(similarity_threshold=0.7)
-
-        # Map product attributes to ML format using fuzzy matching
         ml_attributes = attribute_mapper.map_product_attributes(
             product.attributes,
-            ml_attributes_list
+            [meta.__dict__ for meta in attr_metadata]
         )
 
-        # Build mapped_attr_ids for conditional attribute lookup
-        mapped_attr_ids = {
-            attr["id"]: attr["value_name"]
-            for attr in ml_attributes
-        }
+        # 3. Structural validation
+        validator = StructuralValidator(attr_metadata)
+        struct_result = validator.validate(ml_attributes)
 
-        # Get conditional attributes based on current attribute values
+        warnings.extend(struct_result.warnings)
+        if struct_result.blocking_errors:
+            errors.extend(struct_result.blocking_errors)
+            logger.error(f"Structural validation failed: {struct_result.blocking_errors}")
+
+        if not struct_result.valid:
+            logger.warning("Proceeding with sanitized attributes despite errors")
+
+        # 4. Semantic scoring
+        scorer = SemanticScorer(attr_metadata)
+        scored_attrs = []
+        for attr in struct_result.sanitized_attrs:
+            scored = scorer.score_attribute(attr["id"], attr["value_name"])
+            scored_attrs.append(scored)
+            logger.debug(f"Attribute {scored.id}: score={scored.score}, class={scored.classification}")
+
+        # 5. Apply feedback adjustments if available
+        if self.feedback:
+            scored_attrs = self.feedback.adjust_scores(scored_attrs)
+
+        # 6. Sanitization
+        sanitizer = AttributeSanitizer(min_score=self.min_attribute_score)
+        final_attrs = sanitizer.sanitize(scored_attrs)
+
+        # Log dropped attributes
+        dropped = set(a.id for a in scored_attrs) - set(a.id for a in final_attrs)
+        for attr_id in dropped:
+            logger.warning(f"Dropped attribute {attr_id} due to low score or redundancy")
+
+        # 7. Get conditional attributes
+        attr_dict = {a.id: a.value for a in final_attrs}
         try:
             conditional_attrs = self.category_resolver.get_conditional_attributes(
-                category_id, mapped_attr_ids
+                category_id, attr_dict
             )
 
-            # Add any conditional attributes that are provided by the product
+            # Check if any conditional attributes should be added
             for cond_attr in conditional_attrs:
                 attr_id = cond_attr.get("id")
                 attr_name = cond_attr.get("name", "").lower()
 
-                # Check if this attribute is provided in product attributes
-                if attr_id in mapped_attr_ids:
-                    # Already added above
+                if attr_id in attr_dict:
                     continue
 
-                # Check by name
                 if attr_name in product.attributes:
-                    ml_attributes.append({
-                        "id": attr_id,
-                        "name": cond_attr["name"],
-                        "value_name": product.attributes[attr_name],
-                    })
-                    mapped_attr_ids[attr_id] = product.attributes[attr_name]
+                    meta = next((m for m in attr_metadata if m.id == attr_id), None)
+                    if meta:
+                        final_attrs.append(
+                            scorer.score_attribute(attr_id, product.attributes[attr_name])
+                        )
+                    else:
+                        # Create meta from API data and score
+                        from ..domain.attribute_metadata import AttributeMeta
+                        meta = AttributeMeta.from_ml_api(cond_attr)
+                        final_attrs.append(
+                            scorer.score_attribute(attr_id, product.attributes[attr_name])
+                        )
         except Exception as e:
-            logger.warning(f"Could not get conditional attributes for {product.sku}: {e}")
+            logger.warning(f"Could not get conditional attributes: {e}")
+
+        # Convert to dict format
+        result_attrs = [{"id": a.id, "value_name": a.value} for a in final_attrs]
+
+        return result_attrs, warnings, errors
+
+    def _publish_one(self, product: Product, category_id: str) -> bool:
+        """Publish a single product."""
+        logger.info(f"Publishing product: {product.sku} (title: {product.title[:50]}...)")
+
+        # Build attributes using semantic validation pipeline
+        ml_attributes, attr_warnings, attr_errors = self._build_attributes(
+            product, category_id
+        )
+
+        # Handle blocking attribute errors
+        if attr_errors:
+            logger.error(f"Attribute validation failed for {product.sku}: {attr_errors}")
+            self.errors.append(f"{product.sku}: {attr_errors}")
+            self.failed += 1
+            return False
+
+        # Log attribute processing results
+        if attr_warnings:
+            logger.warning(f"Attribute warnings for {product.sku}: {attr_warnings}")
+
+        logger.info(f"Final attribute count for {product.sku}: {len(ml_attributes)}")
 
         # Upload images
         picture_urls = self.image_uploader.upload_images(product.sku)
@@ -182,8 +277,6 @@ class PublishProductUseCase:
         # Build pictures list
         pictures = [{"source": url} for url in picture_urls]
 
-        # If no pictures, use empty placeholder (will fail for gold_special)
-        # or use a different listing type
         if not pictures:
             logger.warning(f"No pictures for {product.sku}")
 
@@ -196,19 +289,14 @@ class PublishProductUseCase:
         # Build shipping config
         shipping_config = {"mode": shipping_mode}
         if shipping_mode == "not_specified":
-            # For accounts without Mercado Envios, enable local pickup
             shipping_config["local_pick_up"] = True
             logger.info("Enabled local_pick_up for not_specified shipping")
         elif shipping_mode in ("me1", "me2"):
-            # For Mercado Envios modes
-            # Do NOT set free_shipping=True - account has mandatory free shipping
-            # Explicit declaration triggers legacy validator bug referencing ME1
             shipping_config["logistic_type"] = "drop_off"
             shipping_config["local_pick_up"] = False
             shipping_config["methods"] = []
-            logger.info(f"Shipping config for {shipping_mode} mode (free shipping automatic)")
+            logger.info(f"Shipping config for {shipping_mode} mode")
 
-        # DEBUG: Log full shipping config
         logger.debug(f"Shipping config for {product.sku}: {shipping_config}")
 
         # Build item
@@ -247,6 +335,7 @@ class PublishProductUseCase:
         logger.debug(f"Full item payload for {product.sku}: {debug_item}")
 
         # Validate
+        validation_result = None
         try:
             validation = self.publisher.validate_item(item)
             logger.debug(f"Validation response for {product.sku}: {validation}")
@@ -281,11 +370,19 @@ class PublishProductUseCase:
             if warnings:
                 logger.warning(f"Validation warnings for {product.sku}: {warnings}")
 
+            # Record validation result for feedback
+            validation_result = validation
+
             # Only fail if there are actual errors
             if errors:
                 logger.error(f"Validation failed for {product.sku}: {errors}")
                 self.errors.append(f"{product.sku}: {errors}")
                 self.failed += 1
+                # Record feedback
+                if self.feedback:
+                    self.feedback.record_validation_result(
+                        product.sku, ml_attributes, validation
+                    )
                 return False
         except Exception as e:
             # Try to extract error details from exception
@@ -310,10 +407,42 @@ class PublishProductUseCase:
             return False
 
         # Publish
+        published_item_id: str | None = None
         try:
             result = self.publisher.create_item(item)
-            logger.info(f"Published {product.sku}: {result.get('id')}")
+            published_item_id = result.get('id')
+            logger.info(f"Published {product.sku}: {published_item_id}")
             self.published += 1
+
+            # Record successful validation feedback
+            if self.feedback and validation_result:
+                self.feedback.record_validation_result(
+                    product.sku, ml_attributes, validation_result
+                )
+
+            # Submit fiscal data if available and service is configured
+            if (
+                self.enable_fiscal_submission
+                and self.fiscal_service
+                and published_item_id
+                and product.fiscal
+                and product.fiscal.is_valid
+            ):
+                logger.info(f"Submitting fiscal data for {product.sku} (item: {published_item_id})")
+                fiscal_result = self.fiscal_service.submit_fiscal_data(
+                    published_item_id,
+                    product.fiscal
+                )
+                self.fiscal_results.append(fiscal_result)
+                
+                if fiscal_result.success:
+                    logger.info(f"Fiscal data submitted successfully for {product.sku}")
+                else:
+                    logger.warning(
+                        f"Fiscal data submission failed for {product.sku}: "
+                        f"{fiscal_result.error_message}"
+                    )
+
             return True
         except Exception as e:
             error_msg = str(e)
@@ -323,6 +452,11 @@ class PublishProductUseCase:
                     error_msg = f"{error_msg} - {error_detail}"
                     # Check for shipping-specific errors
                     causes = error_detail.get("cause", []) if isinstance(error_detail, dict) else []
+                    # Record publish failure feedback
+                    if self.feedback:
+                        self.feedback.record_validation_result(
+                            product.sku, ml_attributes, error_detail if isinstance(error_detail, dict) else {}
+                        )
                     for cause in causes:
                         cause_code = cause.get("code", "").lower()
                         cause_message = cause.get("message", "").lower()
@@ -337,12 +471,38 @@ class PublishProductUseCase:
 
     def get_stats(self) -> dict:
         """Get publishing statistics."""
-        return {
+        stats: dict[str, Any] = {
             "published": self.published,
             "failed": self.failed,
             "total": self.published + self.failed,
             "errors": self.errors,
         }
+
+        # Add feedback summary if available
+        if self.feedback:
+            stats["feedback"] = self.feedback.get_feedback_summary()
+
+        # Add fiscal submission results
+        if self.fiscal_results:
+            fiscal_success = sum(1 for r in self.fiscal_results if r.success)
+            fiscal_failed = len(self.fiscal_results) - fiscal_success
+            stats["fiscal"] = {
+                "submitted": len(self.fiscal_results),
+                "success": fiscal_success,
+                "failed": fiscal_failed,
+            }
+
+        return stats
+
+    def get_problematic_attributes(self) -> dict[str, int]:
+        """Get attributes that frequently cause errors.
+
+        Returns:
+            Dictionary mapping attribute IDs to error counts
+        """
+        if self.feedback:
+            return self.feedback.get_problematic_attributes()
+        return {}
 
     def _normalize_item_attributes(self, item: dict) -> None:
         """Ensure numeric dimensions have units.

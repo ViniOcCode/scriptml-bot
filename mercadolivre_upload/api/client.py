@@ -207,3 +207,19 @@ class MLApiClient:
             response.raise_for_status()
 
         return response.json()
+
+    def submit_fiscal_info(self, item_id: str, fiscal_data: dict) -> dict:
+        """Submit fiscal information for an item.
+
+        Args:
+            item_id: Mercado Livre item ID (e.g., MLB1234567890)
+            fiscal_data: Fiscal data payload following ML API format
+
+        Returns:
+            API response
+
+        Raises:
+            requests.HTTPError: On API error
+        """
+        endpoint = f"/items/{item_id}/fiscal_info"
+        return self.post(endpoint, json=fiscal_data)

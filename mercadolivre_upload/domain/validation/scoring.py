@@ -1,0 +1,171 @@
+"""Semantic scoring engine for attributes."""
+
+import logging
+import re
+from dataclasses import dataclass
+
+from ..attribute_metadata import AttributeMeta
+from ..attribute_classifier import (
+    AttributeClassifier,
+    CLASS_LOGISTICS,
+    classify_attribute,
+)
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ScoredAttribute:
+    """Attribute with semantic score."""
+
+    id: str
+    value: str
+    score: int
+    classification: str
+    meta: AttributeMeta
+
+
+class SemanticScorer:
+    """Estimates how safe an attribute is to send."""
+
+    def __init__(self, attribute_metadata: list[AttributeMeta]):
+        self.metadata = {attr.id: attr for attr in attribute_metadata}
+        self.classifier = AttributeClassifier()
+
+    def score_attribute(self, attr_id: str, value: str) -> ScoredAttribute:
+        """Calculate semantic score for an attribute.
+
+        Args:
+            attr_id: Attribute ID
+            value: Attribute value
+
+        Returns:
+            ScoredAttribute with score and classification
+        """
+        meta = self.metadata.get(attr_id)
+
+        if not meta:
+            # Unknown attribute
+            return ScoredAttribute(
+                id=attr_id,
+                value=value,
+                score=0,
+                classification="unknown",
+                meta=AttributeMeta(
+                    id=attr_id,
+                    name=attr_id,
+                    value_type="string",
+                    required=False,
+                ),
+            )
+
+        score = 100
+        classification = self.classifier.classify(meta)
+
+        # Penalty: Optional attribute
+        if not meta.required:
+            score -= 10
+
+        # Penalty: Low relevance
+        if meta.relevance and meta.relevance < 0.3:
+            score -= 20
+
+        # Penalty: Value outside allowed domain
+        if meta.allowed_values and value not in meta.allowed_values:
+            score -= 30
+            logger.warning(
+                f"Value '{value}' not in allowed values for {attr_id}, score -30"
+            )
+
+        # Penalty: Free-text semantic leakage
+        if self._is_free_text(value) and self._looks_out_of_context(value, meta):
+            score -= 40
+            logger.warning(f"Possible semantic leakage in {attr_id}, score -40")
+
+        # Penalty: Aggressive logistics data
+        if classification == CLASS_LOGISTICS:
+            score -= 50
+            logger.debug(f"Logistics attribute {attr_id}, score -50")
+
+        # Bonus: Required attribute
+        if meta.required:
+            score += 20
+
+        # Bonus: High relevance
+        if meta.relevance and meta.relevance > 0.8:
+            score += 10
+
+        final_score = max(0, min(100, score))
+
+        return ScoredAttribute(
+            id=attr_id,
+            value=value,
+            score=final_score,
+            classification=classification,
+            meta=meta,
+        )
+
+    def _is_free_text(self, value: str) -> bool:
+        """Check if value looks like free text (not enum)."""
+        if not value:
+            return False
+
+        # Long values suggest free text
+        if len(value) > 50:
+            return True
+
+        # Multiple sentences
+        sentences = value.split(".")
+        if len(sentences) > 1:
+            return True
+
+        # Contains descriptive words
+        descriptive_words = [
+            "com", "para", "em", "de", "para", "como",
+            "with", "for", "in", "on", "and", "or"
+        ]
+        words = value.lower().split()
+        if sum(1 for w in words if w in descriptive_words) > 2:
+            return True
+
+        return False
+
+    def _looks_out_of_context(self, value: str, meta: AttributeMeta) -> bool:
+        """Check if free text value looks out of context for attribute."""
+        value_lower = value.lower()
+        attr_name = meta.name.lower()
+
+        # Check for obvious mismatches
+        # Example: value describing a TV when attribute is about headphones
+        category_keywords = {
+            "display", "tela", "screen", "tv", "televisão",
+            "mouse", "teclado", "keyboard", "monitor",
+        }
+
+        # If value contains many category-specific words not related to attr
+        if len(value) > 30:
+            # Long descriptions in non-editorial attributes
+            if "marca" not in attr_name and "modelo" not in attr_name:
+                if meta.value_type == "string":
+                    return True
+
+        return False
+
+    def score_all(
+        self, attributes: list[dict]
+    ) -> list[ScoredAttribute]:
+        """Score all attributes.
+
+        Args:
+            attributes: List of attribute dicts with 'id' and 'value_name' keys
+
+        Returns:
+            List of ScoredAttribute objects
+        """
+        return [
+            self.score_attribute(
+                attr.get("id", ""),
+                attr.get("value_name", "")
+            )
+            for attr in attributes
+        ]

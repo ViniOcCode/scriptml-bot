@@ -195,7 +195,107 @@ Product(
 
 ---
 
-### 6. Shipping Resolution (`domain/shipping/resolver.py`)
+### 6. Semantic Validation Pipeline (`domain/validation/`)
+
+**New in this version:** A comprehensive semantic validation system that ensures attributes are high-quality and relevant before publishing.
+
+#### 6.1 Attribute Metadata (`domain/attribute_metadata.py`)
+
+**Input:** Raw ML API attribute definitions
+
+**Process:**
+1. Parse API response into normalized `AttributeMeta` objects
+2. Extract metadata:
+   - `id` - Attribute identifier
+   - `name` - Display name
+   - `value_type` - string/number/boolean/list
+   - `required` - Whether mandatory
+   - `tags` - ML tags (required, variation, etc.)
+   - `allowed_values` - Valid enum values
+   - `relevance` - Importance score (0.0-1.0)
+   - `max_length` - Maximum length
+   - `validation_pattern` - Regex pattern
+
+**Output:** List of `AttributeMeta` objects
+
+#### 6.2 Structural Validation (`domain/validation/structural.py`)
+
+**Input:** Mapped attributes + AttributeMeta
+
+**Validation Rules:**
+| Condition | Action |
+|-----------|--------|
+| Unknown attribute ID | Drop with warning |
+| Value type mismatch | Drop with warning |
+| Missing required attribute | Block payload |
+| Value not in allowed domain | Drop with warning |
+| Exceeds max_length | Truncate with warning |
+| Pattern mismatch | Drop with warning |
+
+**Output:** Sanitized attributes with errors/warnings
+
+#### 6.3 Attribute Classification (`domain/attribute_classifier.py`)
+
+**Categories by behavior:**
+- `editorial` - Descriptive text (title-like)
+- `technical` - Product specifications
+- `commercial` - Warranty, pricing terms
+- `logistics` - Shipping, packaging
+
+**Classification Logic (heuristic, ID-based):**
+- `LOGISTICS_PATTERNS`: SELLER_, PACKAGE_, SHIPPING_, WEIGHT, DIMENSION
+- `COMMERCIAL_PATTERNS`: WARRANTY, GARANTIA, PRICE, DISCOUNT
+- Default: `technical` (specifications)
+
+#### 6.4 Semantic Scoring (`domain/validation/scoring.py`)
+
+**Scoring Algorithm:**
+
+Base score: 100
+
+| Factor | Penalty/Bonus |
+|--------|--------------|
+| Optional attribute | -10 |
+| Low relevance (<0.3) | -20 |
+| Value outside allowed domain | -30 |
+| Free-text semantic leakage | -40 |
+| Logistics classification | -50 |
+| Required attribute | +20 |
+| High relevance (>0.8) | +10 |
+
+**Output:** `ScoredAttribute` with score 0-100
+
+#### 6.5 Sanitization (`domain/validation/sanitizer.py`)
+
+**Filtering Rules:**
+- Drop attributes with score < `min_score` (default: 50)
+- Drop redundant editorial attributes (>80% similarity)
+- Drop optional logistics attributes
+
+**Output:** Filtered high-quality attributes
+
+#### 6.6 Feedback Loop (`domain/validation/feedback.py`)
+
+**Purpose:** Learn from validation errors to improve scoring
+
+**Process:**
+1. Record validation results (`feedback_log.json`)
+2. Track problematic attributes
+3. Apply score penalties based on historical error frequency
+
+**Output:** Adjusted scores over time
+
+#### 6.7 Conditional Attributes
+
+**Process:**
+1. Send sanitized attributes to ML API
+2. POST `/categories/{id}/attributes/conditional`
+3. Receive conditional attributes that become required
+4. Never replicate dependency logic locally
+
+---
+
+### 7. Shipping Resolution (`domain/shipping/resolver.py`)
 
 **Input:** None (uses API client)
 
@@ -210,7 +310,7 @@ Product(
 
 ---
 
-### 7. Item Building (`application/publish_product.py`)
+### 8. Item Building (`application/publish_product.py`)
 
 **Input:**
 - Product entity
@@ -254,7 +354,7 @@ validator bugs.
 
 ---
 
-### 8. Validation (`application/publish_product.py`)
+### 9. Validation (`application/publish_product.py`)
 
 **Input:** Item payload
 
@@ -286,7 +386,7 @@ validator bugs.
 
 ---
 
-### 9. Publication (`application/publish_product.py`)
+### 10. Publication (`application/publish_product.py`)
 
 **Input:** Validated item payload
 
@@ -404,7 +504,14 @@ validator bugs.
 | `adapters/image_uploader.py` | Uploads images to ML |
 | `domain/category/resolver.py` | Resolves category names to IDs |
 | `domain/attribute_mapper.py` | Fuzzy maps Excel columns to ML attributes |
+| `domain/attribute_metadata.py` | Normalized attribute metadata model |
+| `domain/attribute_classifier.py` | Classifies attributes by behavior |
+| `domain/validation/structural.py` | Structural validation rules |
+| `domain/validation/scoring.py` | Semantic scoring engine |
+| `domain/validation/sanitizer.py` | Filters low-quality attributes |
+| `domain/validation/feedback.py` | Records validation feedback |
 | `domain/shipping/resolver.py` | Determines available shipping modes |
+| `infrastructure/cache/attribute_cache.py` | Caches API responses |
 | `application/publish_product.py` | Orchestrates publication use case |
 | `api/client.py` | ML API client |
 

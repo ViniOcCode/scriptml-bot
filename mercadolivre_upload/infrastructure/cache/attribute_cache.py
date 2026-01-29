@@ -6,6 +6,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Protocol
 
+from ...domain.attribute_metadata import AttributeMeta
+
 logger = logging.getLogger(__name__)
 
 
@@ -99,6 +101,57 @@ class AttributeCache:
             logger.debug(f"Cached {len(attributes)} attributes for {category_id}")
         except IOError as e:
             logger.warning(f"Failed to write cache for {category_id}: {e}")
+
+    def get_attribute_metadata(self, category_id: str) -> list[AttributeMeta] | None:
+        """Get cached attribute metadata as normalized objects.
+
+        Args:
+            category_id: Category ID
+
+        Returns:
+            List of AttributeMeta objects or None if not cached/expired
+        """
+        attributes = self.get_attributes(category_id)
+        if attributes is None:
+            return None
+
+        try:
+            return [AttributeMeta.from_ml_api(attr) for attr in attributes]
+        except (KeyError, TypeError) as e:
+            logger.warning(f"Failed to normalize attributes for {category_id}: {e}")
+            return None
+
+    def save_attribute_metadata(
+        self, category_id: str, metadata: list[AttributeMeta]
+    ) -> None:
+        """Save attribute metadata as raw dict.
+
+        Args:
+            category_id: Category ID
+            metadata: List of AttributeMeta objects
+        """
+        # Convert AttributeMeta back to dict format for storage
+        attributes = []
+        for meta in metadata:
+            attr = {
+                "id": meta.id,
+                "name": meta.name,
+                "value_type": meta.value_type,
+                "required": meta.required,
+            }
+            if meta.relevance is not None:
+                attr["relevance"] = meta.relevance
+            if meta.tags:
+                attr["tags"] = {tag: True for tag in meta.tags}
+            if meta.allowed_values:
+                attr["values"] = [{"name": v} for v in meta.allowed_values]
+            if meta.hierarchy != "none":
+                attr["hierarchy"] = meta.hierarchy
+            if meta.tooltip:
+                attr["tooltip"] = meta.tooltip
+            attributes.append(attr)
+
+        self.save_attributes(category_id, attributes)
 
     def clear_cache(self, category_id: str | None = None) -> None:
         """Clear cache for specific category or all.

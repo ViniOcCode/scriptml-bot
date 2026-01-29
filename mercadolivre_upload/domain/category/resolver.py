@@ -9,6 +9,8 @@ from difflib import SequenceMatcher
 from typing import Optional, Protocol
 import logging
 
+from ..attribute_metadata import AttributeMeta
+
 logger = logging.getLogger(__name__)
 
 
@@ -497,3 +499,37 @@ class CategoryResolver:
         ]
 
         return required + required_conditional
+
+    def get_attribute_metadata(self, category_id: str) -> list[AttributeMeta]:
+        """Get normalized attribute metadata for a category.
+
+        Args:
+            category_id: Category ID
+
+        Returns:
+            List of AttributeMeta objects
+        """
+        # Try cache first if available
+        if self._attribute_cache:
+            cached = self._attribute_cache.get_attribute_metadata(category_id)
+            if cached is not None:
+                logger.debug(f"Using cached metadata for {category_id}")
+                return cached
+
+        # Fetch from API
+        raw_attributes = self._api.get_category_attributes(category_id)
+
+        # Normalize to AttributeMeta
+        metadata = []
+        for attr in raw_attributes:
+            try:
+                meta = AttributeMeta.from_ml_api(attr)
+                metadata.append(meta)
+            except (KeyError, TypeError) as e:
+                logger.warning(f"Failed to parse attribute: {attr.get('id', 'unknown')}: {e}")
+
+        # Save to cache
+        if self._attribute_cache:
+            self._attribute_cache.save_attributes(category_id, raw_attributes)
+
+        return metadata
