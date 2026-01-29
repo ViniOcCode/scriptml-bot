@@ -237,9 +237,15 @@ Product(
     "attributes": ml_attributes,
     "shipping": {
         "mode": "me2",
-        "free_shipping": True
+        "logistic_type": "drop_off",
+        "local_pick_up": False,
+        "methods": []
     }
 }
+
+**Note:** Do NOT set `free_shipping=True` explicitly. Accounts with mandatory free shipping
+will have it applied automatically by the API. Explicit declaration can trigger legacy
+validator bugs.
 ```
 
 2. Normalize dimension attributes (add "cm" to numeric values)
@@ -254,10 +260,29 @@ Product(
 
 **Process:**
 1. POST to `/items/validate`
-2. Check response for errors
-3. If validation fails, log errors and skip item
+2. Parse response to check for actual errors vs warnings
+3. **Distinguish warnings from errors:**
+   - `type="error"` - Blocks publishing
+   - `type="warning"` - Logged but doesn't block publishing
+4. Special handling for 400 responses: Check `cause` array for error types
+5. If only warnings present, proceed to publish
+6. If errors present, log and skip item
 
-**Output:** Validation result (valid/invalid)
+**Response Structure:**
+```json
+{
+  "valid": false,
+  "cause": [
+    {
+      "type": "warning",
+      "code": "shipping.lost_me1_by_user",
+      "message": "..."
+    }
+  ]
+}
+```
+
+**Output:** Validation result with distinction between errors and warnings
 
 ---
 
@@ -331,7 +356,7 @@ Product(
 
 7. **Image Upload:** `/images/17515PETU/` → 7 picture URLs
 
-8. **Shipping Mode:** "me2" + free_shipping=True
+8. **Shipping Mode:** "me2" with drop_off (free shipping applied by API)
 
 9. **Final Payload:**
    ```json
@@ -339,13 +364,29 @@ Product(
      "title": "Meu Querido Pet",
      "category_id": "MLB437616",
      "price": 10.00,
-     "shipping": {"mode": "me2", "free_shipping": true},
+     "shipping": {
+       "mode": "me2",
+       "logistic_type": "drop_off",
+       "local_pick_up": false,
+       "methods": []
+     },
      "attributes": [
        {"id": "BOOK_TITLE", "value_name": "Meu Querido Pet"},
        {"id": "AUTHOR", "value_name": "Editora Ridell"},
        ...
      ],
      "pictures": [...]
+   }
+   ```
+
+   **API Response adds automatically:**
+   ```json
+   {
+     "shipping": {
+       "mode": "me2",
+       "free_shipping": true,
+       "tags": ["mandatory_free_shipping"]
+     }
    }
    ```
 
