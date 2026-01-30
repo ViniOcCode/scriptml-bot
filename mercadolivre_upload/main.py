@@ -21,6 +21,7 @@ from mercadolivre_upload.application.publish_product import PublishProductUseCas
 from mercadolivre_upload.auth import AuthManager
 from mercadolivre_upload.domain.category.resolver import CategoryResolver
 from mercadolivre_upload.domain.shipping.resolver import ShippingResolver
+from mercadolivre_upload.domain.cache_attribute_mapper import CachedAttributeMapper
 from mercadolivre_upload.infrastructure.cache.attribute_cache import AttributeCache
 
 logging.basicConfig(
@@ -121,6 +122,7 @@ def main():
         shipping_resolver=shipping_resolver,
         config=config,
         dry_run=args.dry_run,
+        cache_dir=args.cache_dir,
     )
 
     # Parse spreadsheet (input adapter)

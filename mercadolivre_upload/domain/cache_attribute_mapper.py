@@ -200,6 +200,28 @@ class CachedAttributeMapper:
         
         attr_name = attr.get('name', '')
         value_type = attr.get('value_type', 'string')
+        default_unit = attr.get('default_unit')
+        
+        # Handle number_unit type attributes (WIDTH, HEIGHT, WEIGHT, etc.)
+        if value_type == 'number_unit' and default_unit:
+            # Extract numeric value from the input
+            numeric_value = self._extract_numeric_value(excel_value)
+            if numeric_value is not None:
+                value_with_unit = f"{numeric_value} {default_unit}"
+                return {
+                    "id": attribute_id,
+                    "name": attr_name,
+                    "value_id": None,
+                    "value_name": value_with_unit,
+                    "values": [{
+                        "id": None,
+                        "name": value_with_unit,
+                        "struct": {
+                            "number": numeric_value,
+                            "unit": default_unit
+                        }
+                    }]
+                }
         
         # Handle list-type attributes
         if value_type == 'list' and attribute_id in self._value_index:
@@ -337,3 +359,36 @@ class CachedAttributeMapper:
         self.load_cache()
         self.build_name_index()
         return self._cache
+    
+    def _extract_numeric_value(self, excel_value: str) -> float | int | None:
+        """Extract numeric value from Excel cell value.
+        
+        Handles various formats like "23", "23 cm", "0.3", "3 kg", etc.
+        
+        Args:
+            excel_value: Value from Excel cell
+            
+        Returns:
+            Numeric value as int or float, or None if no number found
+        """
+        if not excel_value:
+            return None
+        
+        import re
+        
+        # Convert to string and strip whitespace
+        value_str = str(excel_value).strip()
+        
+        # Try to extract a number (integer or decimal)
+        # Match patterns like "23", "23.5", "0.3", etc.
+        match = re.match(r'^([\d]+(?:\.\d+)?)', value_str.replace(',', '.'))
+        
+        if match:
+            num_str = match.group(1)
+            # Return as int if it's a whole number, otherwise float
+            if '.' in num_str:
+                return float(num_str)
+            else:
+                return int(num_str)
+        
+        return None

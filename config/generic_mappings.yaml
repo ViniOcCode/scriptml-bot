@@ -55,6 +55,10 @@ explicit_mappings:
     target: "sale_terms"
     id: "WARRANTY_TIME"
     value_name: "30 dias"
+
+  "Tipo de anuncio":
+    target: "listingg_type_id"
+    id: "gold_special"
   
   # Dimension fields - automatically append units
   "Largura (cm)":

@@ -13,6 +13,7 @@ from mercadolivre_upload.domain.product.model import Product
 from mercadolivre_upload.domain.fiscal.data import FiscalData
 from mercadolivre_upload.domain.fiscal.service import FiscalService, FiscalSubmissionResult
 from mercadolivre_upload.domain.attribute_mapper import AttributeMapper
+from mercadolivre_upload.domain.cache_attribute_mapper import CachedAttributeMapper
 from mercadolivre_upload.domain.validation import (
     StructuralValidator,
     SemanticScorer,
@@ -67,6 +68,7 @@ class PublishProductUseCase:
         min_attribute_score: int = 50,
         enable_feedback: bool = True,
         enable_fiscal_submission: bool = True,
+        cache_dir: Optional[str] = None,
     ):
         """Initialize use case.
 
@@ -81,6 +83,7 @@ class PublishProductUseCase:
             min_attribute_score: Minimum score for attributes (0-100)
             enable_feedback: Enable validation feedback tracking
             enable_fiscal_submission: Whether to submit fiscal data after publishing
+            cache_dir: Directory containing category attribute cache files (optional)
         """
         self.category_resolver = category_resolver
         self.publisher = publisher
@@ -91,6 +94,7 @@ class PublishProductUseCase:
         self.dry_run = dry_run
         self.min_attribute_score = min_attribute_score
         self.enable_fiscal_submission = enable_fiscal_submission
+        self.cache_dir = cache_dir
 
         self.published = 0
         self.failed = 0
@@ -102,6 +106,10 @@ class PublishProductUseCase:
 
         # Cache for attribute metadata
         self._attr_metadata_cache: dict[str, list] = {}
+
+        # Cache mapper instance (initialized per category)
+        self._cache_mapper: Optional[CachedAttributeMapper] = None
+        self._current_category_id: Optional[str] = None
 
     def execute(self, products: list[Product], category_name: str) -> dict:
         """Execute publishing use case.
@@ -146,6 +154,9 @@ class PublishProductUseCase:
 
         logger.info(f"Publishing {len(products)} products to category {category_id}")
 
+        # Initialize cache mapper for this category
+        self._initialize_cache_mapper(category_id)
+
         for product in products:
             self._publish_one(product, category_id)
 
@@ -155,6 +166,37 @@ class PublishProductUseCase:
             "failed": self.failed,
             "errors": self.errors,
         }
+
+    def _initialize_cache_mapper(self, category_id: str) -> None:
+        """Initialize cache mapper for the given category.
+        
+        Args:
+            category_id: ML category ID
+        """
+        # Skip if already initialized for this category
+        if self._current_category_id == category_id and self._cache_mapper is not None:
+            return
+        
+        # Skip if no cache directory configured
+        if not self.cache_dir:
+            logger.debug("No cache_dir configured, skipping cache mapper initialization")
+            return
+        
+        try:
+            self._cache_mapper = CachedAttributeMapper(self.cache_dir, category_id)
+            self._current_category_id = category_id
+            logger.info(f"Cache loaded successfully for category {category_id}")
+        except FileNotFoundError:
+            logger.warning(
+                f"Cache file not found for category {category_id}. "
+                f"Falling back to fuzzy mapper."
+            )
+            self._cache_mapper = None
+            self._current_category_id = None
+        except Exception as e:
+            logger.error(f"Failed to load cache for category {category_id}: {e}")
+            self._cache_mapper = None
+            self._current_category_id = None
 
     def _build_attributes(
         self, product: Product, category_id: str
@@ -176,14 +218,57 @@ class PublishProductUseCase:
             errors.append(f"attribute_metadata: {e}")
             return [], [], warnings, errors
 
-        # 2. Map product attributes using explicit mappings + fuzzy matching
-        attribute_mapper = AttributeMapper(similarity_threshold=0.7)
-        explicit_mappings = self.config.get('explicit_mappings', {})
-        ml_attributes, sale_terms = attribute_mapper.map_product_attributes(
-            product.attributes,
-            [meta.__dict__ for meta in attr_metadata],
-            explicit_mappings=explicit_mappings
-        )
+        # 2. Map product attributes using cache-first strategy
+        ml_attributes: list[dict] = []
+        sale_terms: list[dict] = []
+        cache_attributes: list[dict] = []
+        
+        # Try cache mapper first if available
+        if self._cache_mapper is not None:
+            cache_attributes = self._map_attributes_with_cache(product.attributes)
+            if cache_attributes:
+                ml_attributes.extend(cache_attributes)
+                logger.info(f"Mapped {len(cache_attributes)} attributes via cache mapper")
+        
+        # Apply explicit mappings and fuzzy matching for remaining attributes
+        # (only if cache mapper didn't handle them)
+        cache_mapped_keys: set[str] = set()
+        if self._cache_mapper is not None and cache_attributes:
+            # Track which Excel headers were successfully mapped via cache
+            for excel_header, excel_value in product.attributes.items():
+                if not excel_value:
+                    continue
+                attr = self._cache_mapper.find_attribute_by_name(excel_header)
+                if attr and attr.get('id'):
+                    cache_mapped_keys.add(excel_header)
+        
+        # Filter out cache-mapped attributes for fuzzy processing
+        remaining_attributes = {
+            k: v for k, v in product.attributes.items() 
+            if k not in cache_mapped_keys
+        }
+        
+        if remaining_attributes:
+            logger.info(f"Falling back to fuzzy mapper for {len(remaining_attributes)} attributes")
+            attribute_mapper = AttributeMapper(similarity_threshold=0.7)
+            explicit_mappings = self.config.get('explicit_mappings', {})
+            fuzzy_attributes, fuzzy_sale_terms = attribute_mapper.map_product_attributes(
+                remaining_attributes,
+                [meta.__dict__ for meta in attr_metadata],
+                explicit_mappings=explicit_mappings
+            )
+            
+            # Merge attributes: cache results take precedence
+            cache_attr_ids = {attr["id"] for attr in ml_attributes}
+            for attr in fuzzy_attributes:
+                if attr["id"] not in cache_attr_ids:
+                    ml_attributes.append(attr)
+            
+            # Merge sale_terms
+            if fuzzy_sale_terms:
+                sale_terms.extend(fuzzy_sale_terms)
+        else:
+            logger.info("All attributes mapped via cache, no fuzzy fallback needed")
 
         # 3. Structural validation
         validator = StructuralValidator(attr_metadata)
@@ -253,6 +338,72 @@ class PublishProductUseCase:
         result_attrs = [{"id": a.id, "value_name": a.value} for a in final_attrs]
 
         return result_attrs, sale_terms, warnings, errors
+
+    def _map_attributes_with_cache(
+        self, product_attributes: dict[str, str]
+    ) -> list[dict]:
+        """Map product attributes using cache mapper with logging.
+        
+        Args:
+            product_attributes: Dictionary of {column_name: value} from Excel
+            
+        Returns:
+            List of ML API attribute payloads from cache matches
+        """
+        if self._cache_mapper is None:
+            return []
+        
+        result: list[dict] = []
+        explicit_mappings = self.config.get('explicit_mappings', {})
+        
+        for excel_header, excel_value in product_attributes.items():
+            if not excel_value:
+                continue
+            
+            # Try to find attribute in cache
+            attr = self._cache_mapper.find_attribute_by_name(excel_header)
+            
+            if attr:
+                attr_id = attr.get('id')
+                attr_name = attr.get('name', '')
+                
+                if attr_id:
+                    # Log cache hit
+                    logger.info(
+                        f"Matched '{excel_header}' to {attr_id} via cache"
+                    )
+                    
+                    # Map the value using cache
+                    payload = self._cache_mapper.map_value(attr_id, str(excel_value))
+                    
+                    # Apply unit_suffix from explicit_mappings if configured
+                    if excel_header in explicit_mappings:
+                        mapping_config = explicit_mappings[excel_header]
+                        unit_suffix = mapping_config.get("unit_suffix", "")
+                        if unit_suffix:
+                            current_value = payload.get("value_name", "")
+                            if current_value and not str(current_value).lower().endswith(unit_suffix.strip().lower()):
+                                payload["value_name"] = f"{current_value}{unit_suffix}"
+                                # Also update the values array if present
+                                if payload.get("values") and len(payload["values"]) > 0:
+                                    payload["values"][0]["name"] = payload["value_name"]
+                                logger.info(
+                                    f"Applied unit_suffix '{unit_suffix}' to {attr_id}: {payload['value_name']}"
+                                )
+                    
+                    result.append(payload)
+                else:
+                    # Cache hit but no ID (shouldn't happen)
+                    logger.debug(
+                        f"Cache match for '{excel_header}' but no attribute ID found"
+                    )
+            else:
+                # Log cache miss
+                logger.info(
+                    f"No cache match for '{excel_header}', trying fuzzy..."
+                )
+        
+        return result
 
     def _publish_one(self, product: Product, category_id: str) -> bool:
         """Publish a single product."""

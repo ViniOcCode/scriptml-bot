@@ -102,5 +102,117 @@
     "cause_type": "warning",
     "attribute_id": "WIDTH",
     "message": "Attribute WIDTH with value 23 was omitted. You can use a number followed by one of these valid units: [mm, cm]."
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-30T16:54:59.946610",
+    "cause_code": "item.attributes.omitted",
+    "cause_type": "warning",
+    "attribute_id": "WEIGHT",
+    "message": "Attribute WEIGHT with value 0.3 was omitted. You can use a number followed by one of these valid units: [g, kg]."
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-30T16:54:59.946842",
+    "cause_code": "item.attribute.number_invalid_format",
+    "cause_type": "error",
+    "attribute_id": null,
+    "message": "O valor que você inseriu em \"Largura\" está incorreto."
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-30T16:54:59.946851",
+    "cause_code": "item.attribute.number_invalid_format",
+    "cause_type": "error",
+    "attribute_id": null,
+    "message": "O valor que você inseriu em \"Peso\" está incorreto."
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-30T16:54:59.946855",
+    "cause_code": "item.attribute.number_invalid_format",
+    "cause_type": "error",
+    "attribute_id": null,
+    "message": "O valor que você inseriu em \"Altura\" está incorreto."
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-30T16:54:59.946860",
+    "cause_code": "item.attributes.omitted",
+    "cause_type": "warning",
+    "attribute_id": "HEIGHT",
+    "message": "Attribute HEIGHT with value 3 was omitted. You can use a number followed by one of these valid units: [mm, cm]."
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-30T16:54:59.946866",
+    "cause_code": "item.attributes.omitted",
+    "cause_type": "warning",
+    "attribute_id": "WIDTH",
+    "message": "Attribute WIDTH with value 23 was omitted. You can use a number followed by one of these valid units: [mm, cm]."
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-30T18:06:00.930190",
+    "cause_code": "item.attribute.number_invalid_format",
+    "cause_type": "error",
+    "attribute_id": null,
+    "message": "O valor que você inseriu em \"Largura\" está incorreto."
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-30T18:06:00.930429",
+    "cause_code": "item.attributes.omitted",
+    "cause_type": "warning",
+    "attribute_id": "WEIGHT",
+    "message": "Attribute WEIGHT with value 0.3 was omitted. You can use a number followed by one of these valid units: [g, kg]."
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-30T18:06:00.930440",
+    "cause_code": "item.attribute.number_invalid_format",
+    "cause_type": "error",
+    "attribute_id": null,
+    "message": "O valor que você inseriu em \"Altura\" está incorreto."
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-30T18:06:00.930445",
+    "cause_code": "item.attribute.number_invalid_format",
+    "cause_type": "error",
+    "attribute_id": null,
+    "message": "O valor que você inseriu em \"Peso\" está incorreto."
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-30T18:06:00.930450",
+    "cause_code": "item.attributes.omitted",
+    "cause_type": "warning",
+    "attribute_id": "HEIGHT",
+    "message": "Attribute HEIGHT with value 3 was omitted. You can use a number followed by one of these valid units: [mm, cm]."
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-30T18:06:00.930455",
+    "cause_code": "item.attributes.omitted",
+    "cause_type": "warning",
+    "attribute_id": "WIDTH",
+    "message": "Attribute WIDTH with value 23 was omitted. You can use a number followed by one of these valid units: [mm, cm]."
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-30T18:18:49.148533",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-30T18:18:49.148768",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
   }
 ]
