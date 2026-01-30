@@ -133,27 +133,71 @@ class AttributeMapper:
     def map_product_attributes(
         self,
         product_attributes: dict[str, str],
-        ml_attributes: list[dict]
-    ) -> list[dict]:
+        ml_attributes: list[dict],
+        explicit_mappings: dict[str, dict] | None = None
+    ) -> tuple[list[dict], list[dict]]:
         """Map product attributes to ML format using fuzzy matching.
 
         Args:
             product_attributes: Dictionary of {column_name: value} from Excel
             ml_attributes: List of ML attribute definitions from API
+            explicit_mappings: Optional dict of {excel_column: mapping_config} for direct mapping
 
         Returns:
-            List of ML-formatted attribute dictionaries
+            Tuple of (ml_attributes_list, sale_terms_list)
         """
         excel_columns = list(product_attributes.keys())
+        ml_attributes_list = []
+        sale_terms_list = []
 
-        # Map columns to ML attribute definitions
+        # Track which columns have been explicitly mapped
+        explicitly_mapped = set()
+
+        # 1. First, apply explicit mappings (bypass fuzzy matching)
+        if explicit_mappings:
+            for col, mapping_config in explicit_mappings.items():
+                if col in product_attributes:
+                    value = product_attributes[col]
+                    target = mapping_config.get("target", "attribute")
+
+                    if target == "sale_terms":
+                        # Build sale term from config
+                        sale_term = {"id": mapping_config["id"]}
+                        if "value_name" in mapping_config:
+                            sale_term["value_name"] = mapping_config["value_name"]
+                        elif value:
+                            sale_term["value_name"] = value
+                        if "value_struct" in mapping_config:
+                            sale_term["value_struct"] = mapping_config["value_struct"]
+                        sale_terms_list.append(sale_term)
+                        logger.info(f"Explicitly mapped '{col}' -> sale_terms[{mapping_config['id']}]")
+                    else:
+                        # Regular attribute mapping
+                        # Apply unit suffix if configured
+                        unit_suffix = mapping_config.get("unit_suffix", "")
+                        if unit_suffix and value:
+                            # Check if value already has the unit
+                            if not str(value).lower().endswith(unit_suffix.strip().lower()):
+                                value = f"{value}{unit_suffix}"
+                        
+                        ml_attributes_list.append({
+                            "id": mapping_config["id"],
+                            "name": mapping_config.get("name", mapping_config["id"]),
+                            "value_name": value or mapping_config.get("value_name", ""),
+                        })
+                        logger.info(f"Explicitly mapped '{col}' -> {mapping_config['id']}")
+
+                    explicitly_mapped.add(col)
+
+        # 2. Then apply fuzzy matching for remaining columns
+        remaining_columns = [c for c in excel_columns if c not in explicitly_mapped]
+
         column_to_attr = self.map_columns_to_attributes(
-            excel_columns,
+            remaining_columns,
             ml_attributes
         )
 
-        # Build ML attributes list
-        ml_attributes_list = []
+        # Build ML attributes list from fuzzy matches
         for col, attr_def in column_to_attr.items():
             value = product_attributes.get(col)
             if value:
@@ -163,4 +207,4 @@ class AttributeMapper:
                     "value_name": value,
                 })
 
-        return ml_attributes_list
+        return ml_attributes_list, sale_terms_list

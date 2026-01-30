@@ -11,6 +11,8 @@ import logging
 import sys
 from pathlib import Path
 
+import yaml
+
 from mercadolivre_upload.adapters.image_uploader import ImageUploader
 from mercadolivre_upload.adapters.spreadsheet.parser import SpreadsheetParser
 from mercadolivre_upload.api.category_adapter import CategoryAdapter
@@ -70,6 +72,17 @@ def main():
 
     args = parser.parse_args()
 
+    # Load configuration
+    config_path = Path("config/generic_mappings.yaml")
+    config = {}
+    if config_path.exists():
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = yaml.safe_load(f)
+            logger.info(f"Loaded config from {config_path}")
+        except Exception as e:
+            logger.warning(f"Failed to load config: {e}")
+
     # Initialize cache
     attribute_cache = AttributeCache(
         cache_dir=args.cache_dir,
@@ -106,6 +119,7 @@ def main():
         publisher=api_client,
         image_uploader=image_uploader,
         shipping_resolver=shipping_resolver,
+        config=config,
         dry_run=args.dry_run,
     )
 

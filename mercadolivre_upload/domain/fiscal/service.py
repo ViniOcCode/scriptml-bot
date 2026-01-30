@@ -6,7 +6,7 @@ to Mercado Livre's fiscal information endpoint.
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Optional, Protocol
+from typing import Any, Dict, List, Optional, Protocol
 
 from .data import FiscalData
 
@@ -113,11 +113,11 @@ class FiscalService:
 
                     # Extract specific error codes if available
                     if isinstance(error_detail, dict):
-                        causes_value: Any = error_detail.get("cause", [])
+                        causes_value: List[Any] = error_detail.get("cause", [])
                         if isinstance(causes_value, list) and len(causes_value) > 0:
-                            first_cause: Any = causes_value[0]
+                            first_cause: Dict[str, Any] = causes_value[0]
                             if isinstance(first_cause, dict):
-                                code_value: Any = first_cause.get("code")
+                                code_value: Optional[str] = first_cause.get("code")
                                 if code_value is not None:
                                     error_code = str(code_value)
                 except Exception:

@@ -13,3 +13,4 @@ tokens.json
 .env
 CLAUDE.md
 /plans
+cache/

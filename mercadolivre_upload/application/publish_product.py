@@ -62,6 +62,7 @@ class PublishProductUseCase:
         image_uploader: ImageUploaderPort,
         shipping_resolver: Optional[ShippingResolverPort] = None,
         fiscal_service: Optional[FiscalService] = None,
+        config: Optional[dict] = None,
         dry_run: bool = False,
         min_attribute_score: int = 50,
         enable_feedback: bool = True,
@@ -75,6 +76,7 @@ class PublishProductUseCase:
             image_uploader: Image uploader service
             shipping_resolver: Shipping mode resolver (optional)
             fiscal_service: Fiscal data submission service (optional)
+            config: Configuration dictionary with defaults (optional)
             dry_run: If True, only validate
             min_attribute_score: Minimum score for attributes (0-100)
             enable_feedback: Enable validation feedback tracking
@@ -85,6 +87,7 @@ class PublishProductUseCase:
         self.image_uploader = image_uploader
         self.shipping_resolver = shipping_resolver
         self.fiscal_service = fiscal_service
+        self.config = config or {}
         self.dry_run = dry_run
         self.min_attribute_score = min_attribute_score
         self.enable_fiscal_submission = enable_fiscal_submission
@@ -155,11 +158,11 @@ class PublishProductUseCase:
 
     def _build_attributes(
         self, product: Product, category_id: str
-    ) -> tuple[list[dict], list[str], list[str]]:
+    ) -> tuple[list[dict], list[dict], list[str], list[str]]:
         """Build sanitized attributes using semantic validation pipeline.
 
         Returns:
-            Tuple of (attributes, warnings, errors)
+            Tuple of (attributes, sale_terms, warnings, errors)
         """
         warnings = []
         errors = []
@@ -171,13 +174,15 @@ class PublishProductUseCase:
         except Exception as e:
             logger.error(f"Failed to get attribute metadata: {e}")
             errors.append(f"attribute_metadata: {e}")
-            return [], warnings, errors
+            return [], [], warnings, errors
 
-        # 2. Map product attributes to ML format using fuzzy matching
+        # 2. Map product attributes using explicit mappings + fuzzy matching
         attribute_mapper = AttributeMapper(similarity_threshold=0.7)
-        ml_attributes = attribute_mapper.map_product_attributes(
+        explicit_mappings = self.config.get('explicit_mappings', {})
+        ml_attributes, sale_terms = attribute_mapper.map_product_attributes(
             product.attributes,
-            [meta.__dict__ for meta in attr_metadata]
+            [meta.__dict__ for meta in attr_metadata],
+            explicit_mappings=explicit_mappings
         )
 
         # 3. Structural validation
@@ -247,14 +252,14 @@ class PublishProductUseCase:
         # Convert to dict format
         result_attrs = [{"id": a.id, "value_name": a.value} for a in final_attrs]
 
-        return result_attrs, warnings, errors
+        return result_attrs, sale_terms, warnings, errors
 
     def _publish_one(self, product: Product, category_id: str) -> bool:
         """Publish a single product."""
         logger.info(f"Publishing product: {product.sku} (title: {product.title[:50]}...)")
 
         # Build attributes using semantic validation pipeline
-        ml_attributes, attr_warnings, attr_errors = self._build_attributes(
+        ml_attributes, sale_terms_from_mapping, attr_warnings, attr_errors = self._build_attributes(
             product, category_id
         )
 
@@ -299,20 +304,36 @@ class PublishProductUseCase:
 
         logger.debug(f"Shipping config for {product.sku}: {shipping_config}")
 
-        # Build item
+        # Load defaults from config
+        core_defaults = self.config.get('core_item_fields', {}).get('defaults', {})
+        
+        # Build sale_terms: use explicit mappings if available, otherwise use config defaults
+        if sale_terms_from_mapping:
+            sale_terms = sale_terms_from_mapping
+            logger.info(f"Using sale_terms from explicit column mappings: {[st['id'] for st in sale_terms]}")
+        else:
+            # Use config defaults
+            sale_terms = [
+                {"id": "WARRANTY_TYPE", "value_name": "Garantia do vendedor"},
+                {"id": "WARRANTY_TIME", "value_struct": {"number": 30, "unit": "dias"}}
+            ]
+            logger.info("Using default sale_terms from config")
+        
+        # Build item with defaults from config
         item = {
             "title": product.title,
             "category_id": category_id,
             "price": product.price,
-            "currency_id": "BRL",
+            "currency_id": core_defaults.get('currency_id', 'BRL'),
             "available_quantity": product.available_quantity,
-            "buying_mode": "buy_it_now",
+            "buying_mode": core_defaults.get('buying_mode', 'buy_it_now'),
             "condition": product.condition,
-            "listing_type_id": "free" if not pictures else "gold_special",
+            "listing_type_id": "free" if not pictures else core_defaults.get('listing_type_id', 'gold_special'),
             "description": {"plain_text": product.description},
-            "pictures": pictures,
+            "pictures": pictures if pictures else [],
             "attributes": ml_attributes,
             "shipping": shipping_config,
+            "sale_terms": sale_terms,
         }
 
         # Log shipping section before validation

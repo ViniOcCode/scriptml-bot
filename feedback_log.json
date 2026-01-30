@@ -14,5 +14,93 @@
     "cause_type": "warning",
     "attribute_id": null,
     "message": "User has not mode me1"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-29T15:27:58.881178",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-29T15:27:58.881404",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-29T15:40:50.427135",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-29T15:40:50.427376",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-29T15:55:59.790350",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-29T15:55:59.790589",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-29T16:28:03.565809",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-29T16:28:03.566044",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-29T19:42:13.133483",
+    "cause_code": "item.attributes.omitted",
+    "cause_type": "warning",
+    "attribute_id": "HEIGHT",
+    "message": "Attribute HEIGHT with value 3 was omitted. You can use a number followed by one of these valid units: [mm, cm]."
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-29T19:42:13.133686",
+    "cause_code": "sale_term.invalid_value",
+    "cause_type": "error",
+    "attribute_id": null,
+    "message": "Sale term WARRANTY_TIME with value 30 is invalid. You can use a number followed by one of these valid units: [dias, meses, anos]."
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-29T19:42:13.133695",
+    "cause_code": "item.attributes.omitted",
+    "cause_type": "warning",
+    "attribute_id": "WIDTH",
+    "message": "Attribute WIDTH with value 23 was omitted. You can use a number followed by one of these valid units: [mm, cm]."
   }
 ]

@@ -1,5 +1,7 @@
 """Test parsing the Excel file with Clean Architecture SpreadsheetParser."""
+
 import pandas as pd
+
 from mercadolivre_upload.adapters.spreadsheet.parser import SpreadsheetParser
 
 print("=== Testing anuncios/teste.xlsx (Clean Architecture) ===")

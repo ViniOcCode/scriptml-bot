@@ -205,10 +205,12 @@ class TestOAuthHandler:
 
     def test_get_authorization_url_no_client_id(self):
         """Test error when client_id is missing."""
-        handler = OAuthHandler(client_id=None, client_secret="secret")
+        # Ensure no env var is set for client_id
+        with patch.dict(os.environ, {}, clear=True):
+            handler = OAuthHandler(client_id=None, client_secret="secret")
 
-        with pytest.raises(OAuthError, match="Client ID is required"):
-            handler.get_authorization_url()
+            with pytest.raises(OAuthError, match="Client ID is required"):
+                handler.get_authorization_url()
 
     @patch("mercadolivre_upload.auth.oauth.requests.post")
     def test_exchange_code_success(self, mock_post, oauth_handler):
