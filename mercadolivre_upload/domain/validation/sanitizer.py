@@ -2,7 +2,10 @@
 
 import logging
 from difflib import SequenceMatcher
+from pathlib import Path
 from typing import Optional
+
+import yaml
 
 from ..attribute_classifier import AttributeClassifier, CLASS_EDITORIAL
 from .scoring import ScoredAttribute
@@ -10,8 +13,45 @@ from .scoring import ScoredAttribute
 logger = logging.getLogger(__name__)
 
 
+def _load_protected_attributes() -> set:
+    """Load protected attributes from config file.
+    
+    Returns:
+        Set of attribute IDs that should never be dropped
+    """
+    try:
+        config_path = Path("config/generic_mappings.yaml")
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+        
+        protected = config.get('protected_attributes', [])
+        return set(protected)
+    except Exception as e:
+        logger.warning(f"Could not load protected attributes from config: {e}. Using empty set.")
+        return set()
+
+
+def _load_similarity_threshold() -> float:
+    """Load similarity threshold from config file.
+    
+    Returns:
+        Threshold value for redundancy detection
+    """
+    try:
+        config_path = Path("config/generic_mappings.yaml")
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+        
+        return config.get('similarity', {}).get('redundancy_threshold', 0.9)
+    except Exception as e:
+        logger.warning(f"Could not load similarity threshold from config: {e}. Using default 0.9.")
+        return 0.9
+
+
 class AttributeSanitizer:
     """Drops attributes that increase rejection risk or add noise.
+    
+    Uses configuration from config/generic_mappings.yaml as the single source of truth.
     
     NOTE: This sanitizer is intentionally conservative. We preserve most
     attributes because Mercado Livre's API accepts them. Only drop:
@@ -23,25 +63,23 @@ class AttributeSanitizer:
     - Editorial attributes (they provide useful product info)
     """
 
-    SIMILARITY_THRESHOLD = 0.9  # Higher threshold - only drop nearly identical
-
-    # Attributes that should never be dropped (important for ML API)
-    PROTECTED_ATTRIBUTES = {
-        # Dimensions - important for shipping calculations
-        "HEIGHT", "WIDTH", "LENGTH", "WEIGHT",
-        "SELLER_PACKAGE_HEIGHT", "SELLER_PACKAGE_WIDTH", "SELLER_PACKAGE_LENGTH", "SELLER_PACKAGE_WEIGHT",
-        # Product identifiers
-        "GTIN", "ISBN", "SELLER_SKU",
-        # Important product features
-        "WITH_AUGMENTED_REALITY", "IS_WRITTEN_IN_CAPITAL_LETTERS",
-        "WITH_COLORING_PAGES", "WITH_INDEX",
-        # Book-specific
-        "PAGES_NUMBER", "BOOKS_NUMBER_PER_SET", "BOOK_SIZE",
-    }
-
-    def __init__(self, min_score: int = 40):  # Lower threshold to keep more
+    def __init__(self, min_score: int = 40, config: Optional[dict] = None):
+        """Initialize the sanitizer.
+        
+        Args:
+            min_score: Minimum score threshold for keeping attributes
+            config: Optional custom config to override file-based config
+        """
         self.min_score = min_score
         self.classifier = AttributeClassifier()
+        
+        # Load from config (single source of truth), allow override
+        if config:
+            self.protected_attributes = set(config.get('protected_attributes', []))
+            self.similarity_threshold = config.get('similarity', {}).get('redundancy_threshold', 0.9)
+        else:
+            self.protected_attributes = _load_protected_attributes()
+            self.similarity_threshold = _load_similarity_threshold()
 
     def sanitize(self, scored_attrs: list[ScoredAttribute]) -> list[ScoredAttribute]:
         """Sanitize scored attributes by dropping low-quality data.
@@ -57,7 +95,7 @@ class AttributeSanitizer:
 
         for attr in scored_attrs:
             # Never drop protected attributes
-            if attr.id in self.PROTECTED_ATTRIBUTES:
+            if attr.id in self.protected_attributes:
                 logger.debug(f"Keeping protected attribute {attr.id}")
                 result.append(attr)
                 seen_values[attr.value.lower()] = attr.id
@@ -96,7 +134,7 @@ class AttributeSanitizer:
 
         for seen_val, seen_id in seen_values.items():
             similarity = SequenceMatcher(None, val_lower, seen_val).ratio()
-            if similarity > self.SIMILARITY_THRESHOLD:
+            if similarity > self.similarity_threshold:
                 logger.debug(
                     f"Redundant: '{attr.id}' (score {attr.score}) similar to "
                     f"'{seen_id}' ({similarity:.2f})"

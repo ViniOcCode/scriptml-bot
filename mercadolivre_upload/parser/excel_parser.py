@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Optional
 
 import pandas as pd
+import yaml
 
 from mercadolivre_upload.parser.exceptions import MissingColumnError, ValidationError
 from mercadolivre_upload.parser.models import FiscalData, Product
@@ -12,26 +13,58 @@ from mercadolivre_upload.parser.models import FiscalData, Product
 logger = logging.getLogger(__name__)
 
 
+def _load_config_mappings() -> dict:
+    """Load column mappings from config file.
+    
+    Returns:
+        Dictionary of column mappings from config/standard_fields
+    """
+    try:
+        config_path = Path("config/generic_mappings.yaml")
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+        
+        # Build mappings from standard_fields and fiscal_fields
+        mappings = {}
+        standard_fields = config.get('standard_fields', {})
+        fiscal_fields = config.get('fiscal_fields', {})
+        
+        for field_name, field_config in {**standard_fields, **fiscal_fields}.items():
+            patterns = field_config.get('patterns', [])
+            exact_matches = field_config.get('exact_matches', [])
+            # Combine patterns and exact matches for column matching
+            all_patterns = list(dict.fromkeys(patterns + exact_matches))  # Preserve order, remove duplicates
+            if all_patterns:
+                mappings[field_name] = all_patterns
+        
+        return mappings
+    except Exception as e:
+        logger.warning(f"Could not load config mappings: {e}. Using empty mappings.")
+        return {}
+
+
+# Fallback mappings for tests when config is not available
+_FALLBACK_MAPPINGS = {
+    "sku": ["sku", "codigo", "código", "code", "item_id"],
+    "title": ["title", "titulo", "título", "nome", "name", "produto"],
+    "description": ["description", "descricao", "descrição", "desc", "detalhes"],
+    "price": ["price", "preco", "preço", "valor"],
+    "available_quantity": ["available_quantity", "quantidade", "estoque", "stock", "qtd"],
+    "condition": ["condition", "condicao", "condição", "estado", "situacao", "situação"],
+    "ncm": ["ncm", "NCM"],
+    "cfop": ["cfop", "CFOP"],
+    "origin": ["origin", "origem", "origem_produto"],
+    "cest": ["cest", "CEST"],
+}
+
+
 class ExcelParser:
     """Parser for Excel product files.
 
     Reads Excel files and converts rows to Product objects.
     Supports flexible column naming with case-insensitive matching.
+    Uses configuration from config/generic_mappings.yaml as the single source of truth.
     """
-
-    # Default column name mappings (case-insensitive, accent-insensitive)
-    DEFAULT_COLUMN_MAPPINGS = {
-        "sku": ["sku", "codigo", "código", "code", "item_id"],
-        "title": ["title", "titulo", "título", "nome", "name", "produto"],
-        "description": ["description", "descricao", "descrição", "desc", "detalhes"],
-        "price": ["price", "preco", "preço", "valor"],
-        "available_quantity": ["available_quantity", "quantidade", "estoque", "stock", "qtd"],
-        "condition": ["condition", "condicao", "condição", "estado", "situacao", "situação"],
-        "ncm": ["ncm", "NCM"],
-        "cfop": ["cfop", "CFOP"],
-        "origin": ["origin", "origem", "origem_produto"],
-        "cest": ["cest", "CEST"],
-    }
 
     REQUIRED_COLUMNS = ["sku", "title", "description", "price", "available_quantity", "condition"]
     FISCAL_COLUMNS = ["ncm", "cfop", "origin"]
@@ -40,9 +73,13 @@ class ExcelParser:
         """Initialize the parser.
 
         Args:
-            column_mappings: Optional custom column mappings. Overrides defaults.
+            column_mappings: Optional custom column mappings. Overrides config defaults.
         """
-        self.mappings = self.DEFAULT_COLUMN_MAPPINGS.copy()
+        # Load mappings from config (single source of truth)
+        config_mappings = _load_config_mappings()
+        # Use fallback if config couldn't be loaded (e.g., in tests)
+        self.mappings = config_mappings if config_mappings else _FALLBACK_MAPPINGS.copy()
+        # Apply any custom overrides
         if column_mappings:
             self.mappings.update(column_mappings)
 
@@ -64,6 +101,11 @@ class ExcelParser:
                 if normalized_alt in normalized_to_original:
                     reverse_mapping[canonical] = normalized_to_original[normalized_alt]
                     break
+            # Also check for exact match if no pattern matched
+            if canonical not in reverse_mapping:
+                normalized_canonical = self._normalize_column_name(canonical)
+                if normalized_canonical in normalized_to_original:
+                    reverse_mapping[canonical] = normalized_to_original[normalized_canonical]
 
         return reverse_mapping
 

@@ -3,6 +3,10 @@
 import logging
 import re
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional
+
+import yaml
 
 from ..attribute_metadata import AttributeMeta
 from ..attribute_classifier import (
@@ -12,6 +16,44 @@ from ..attribute_classifier import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _load_scoring_config() -> dict:
+    """Load scoring configuration from config file.
+    
+    Returns:
+        Dictionary with scoring weights and thresholds
+    """
+    try:
+        config_path = Path("config/generic_mappings.yaml")
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+        
+        scoring_config = config.get('scoring', {})
+        
+        return {
+            'base_score': scoring_config.get('base_score', 100),
+            'penalties': scoring_config.get('penalties', {}),
+            'bonuses': scoring_config.get('bonuses', {}),
+            'min_score': scoring_config.get('min_score', 40),
+        }
+    except Exception as e:
+        logger.warning(f"Could not load scoring config: {e}. Using defaults.")
+        return {
+            'base_score': 100,
+            'penalties': {
+                'optional_attribute': 10,
+                'low_relevance': 20,
+                'value_not_allowed': 30,
+                'free_text_leakage': 40,
+                'logistics_attribute': 50,
+            },
+            'bonuses': {
+                'required_attribute': 20,
+                'high_relevance': 10,
+            },
+            'min_score': 40,
+        }
 
 
 @dataclass
@@ -26,11 +68,26 @@ class ScoredAttribute:
 
 
 class SemanticScorer:
-    """Estimates how safe an attribute is to send."""
+    """Estimates how safe an attribute is to send.
+    
+    Uses configuration from config/generic_mappings.yaml as the single source of truth.
+    """
 
-    def __init__(self, attribute_metadata: list[AttributeMeta]):
+    def __init__(self, attribute_metadata: list[AttributeMeta], config: Optional[dict] = None):
+        """Initialize the scorer.
+        
+        Args:
+            attribute_metadata: List of attribute metadata
+            config: Optional custom config to override file-based config
+        """
         self.metadata = {attr.id: attr for attr in attribute_metadata}
         self.classifier = AttributeClassifier()
+        
+        # Load scoring weights from config (single source of truth), allow override
+        if config:
+            self.scoring_config = config.get('scoring', {})
+        else:
+            self.scoring_config = _load_scoring_config()
 
     def score_attribute(self, attr_id: str, value: str) -> ScoredAttribute:
         """Calculate semantic score for an attribute.
@@ -59,41 +116,46 @@ class SemanticScorer:
                 ),
             )
 
-        score = 100
+        # Get scoring weights from config
+        base_score = self.scoring_config.get('base_score', 100)
+        penalties = self.scoring_config.get('penalties', {})
+        bonuses = self.scoring_config.get('bonuses', {})
+        
+        score = base_score
         classification = self.classifier.classify(meta)
 
         # Penalty: Optional attribute
         if not meta.required:
-            score -= 10
+            score -= penalties.get('optional_attribute', 10)
 
         # Penalty: Low relevance
         if meta.relevance and meta.relevance < 0.3:
-            score -= 20
+            score -= penalties.get('low_relevance', 20)
 
         # Penalty: Value outside allowed domain
         if meta.allowed_values and value not in meta.allowed_values:
-            score -= 30
+            score -= penalties.get('value_not_allowed', 30)
             logger.warning(
-                f"Value '{value}' not in allowed values for {attr_id}, score -30"
+                f"Value '{value}' not in allowed values for {attr_id}, score -{penalties.get('value_not_allowed', 30)}"
             )
 
         # Penalty: Free-text semantic leakage
         if self._is_free_text(value) and self._looks_out_of_context(value, meta):
-            score -= 40
-            logger.warning(f"Possible semantic leakage in {attr_id}, score -40")
+            score -= penalties.get('free_text_leakage', 40)
+            logger.warning(f"Possible semantic leakage in {attr_id}, score -{penalties.get('free_text_leakage', 40)}")
 
         # Penalty: Aggressive logistics data
         if classification == CLASS_LOGISTICS:
-            score -= 50
-            logger.debug(f"Logistics attribute {attr_id}, score -50")
+            score -= penalties.get('logistics_attribute', 50)
+            logger.debug(f"Logistics attribute {attr_id}, score -{penalties.get('logistics_attribute', 50)}")
 
         # Bonus: Required attribute
         if meta.required:
-            score += 20
+            score += bonuses.get('required_attribute', 20)
 
         # Bonus: High relevance
         if meta.relevance and meta.relevance > 0.8:
-            score += 10
+            score += bonuses.get('high_relevance', 10)
 
         final_score = max(0, min(100, score))
 

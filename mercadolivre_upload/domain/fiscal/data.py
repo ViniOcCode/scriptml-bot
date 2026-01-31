@@ -2,10 +2,35 @@
 
 Based on Mercado Livre API documentation for fiscal information submission:
 https://developers.mercadolivre.com.br/pt_br/envio-dos-dados-fiscais
+
+Uses configuration from config/generic_mappings.yaml as the single source of truth for defaults.
 """
 
+import logging
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Optional
+
+import yaml
+
+logger = logging.getLogger(__name__)
+
+
+def _load_fiscal_defaults() -> dict:
+    """Load fiscal defaults from config file.
+    
+    Returns:
+        Dictionary with fiscal default values
+    """
+    try:
+        config_path = Path("config/generic_mappings.yaml")
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+        
+        return config.get('fiscal_defaults', {})
+    except Exception as e:
+        logger.warning(f"Could not load fiscal defaults from config: {e}. Using empty defaults.")
+        return {}
 
 
 @dataclass
@@ -29,10 +54,10 @@ class FiscalData:
     title: str
 
     # Product type - "single" for individual items, "variation" for products with variations
-    type: str = "single"
+    type: str = ""
 
     # Measurement unit - "UN" (units), "KG", "LT", etc.
-    measurement_unit: str = "UN"
+    measurement_unit: str = ""
 
     # Product cost (for tax calculation)
     cost: float = 0.0
@@ -63,11 +88,15 @@ class FiscalData:
     attributes: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
-        """Normalize fiscal data."""
+        """Normalize fiscal data using config defaults."""
+        # Load defaults from config (single source of truth)
+        defaults = _load_fiscal_defaults()
+        
         self.sku = str(self.sku).strip() if self.sku else ""
         self.title = str(self.title).strip() if self.title else ""
-        self.type = str(self.type).strip() if self.type else "single"
-        self.measurement_unit = str(self.measurement_unit).strip() if self.measurement_unit else "UN"
+        # Use config defaults for type and measurement_unit
+        self.type = str(self.type).strip() if self.type else defaults.get('type', 'single')
+        self.measurement_unit = str(self.measurement_unit).strip() if self.measurement_unit else defaults.get('measurement_unit', 'UN')
         self.ncm = str(self.ncm).strip() if self.ncm else ""
         self.origin_type = str(self.origin_type).strip() if self.origin_type else ""
         self.origin_detail = str(self.origin_detail).strip() if self.origin_detail else ""
@@ -209,6 +238,35 @@ class FiscalData:
         if not self.origin_detail:
             missing.append("origin_detail")
         return missing
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary representation.
+
+        Returns:
+            Dictionary with all fiscal data fields
+        """
+        return {
+            "sku": self.sku,
+            "title": self.title,
+            "type": self.type,
+            "measurement_unit": self.measurement_unit,
+            "cost": self.cost,
+            "ncm": self.ncm,
+            "origin_type": self.origin_type,
+            "origin_detail": self.origin_detail,
+            "cest": self.cest,
+            "csosn": self.csosn,
+            "tax_rule_id": self.tax_rule_id,
+            "cfop": self.cfop,
+            "fci": self.fci,
+            "ex_tipi": self.ex_tipi,
+            "ean": self.ean,
+            "med_anvisa_code": self.med_anvisa_code,
+            "med_exemption_reason": self.med_exemption_reason,
+            "net_weight": self.net_weight,
+            "gross_weight": self.gross_weight,
+            "attributes": self.attributes,
+        }
 
     @classmethod
     def from_spreadsheet_row(

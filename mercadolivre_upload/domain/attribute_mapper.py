@@ -161,14 +161,38 @@ class AttributeMapper:
                     target = mapping_config.get("target", "attribute")
 
                     if target == "sale_terms":
-                        # Build sale term from config
-                        sale_term = {"id": mapping_config["id"]}
+                        # Build sale term from config with full ML API format
+                        sale_term = {
+                            "id": mapping_config["id"],
+                            "name": mapping_config.get("name", mapping_config["id"]),
+                        }
+                        
+                        # Determine value_name
                         if "value_name" in mapping_config:
                             sale_term["value_name"] = mapping_config["value_name"]
                         elif value:
                             sale_term["value_name"] = value
+                        else:
+                            sale_term["value_name"] = ""
+                        
+                        # Build values array
                         if "value_struct" in mapping_config:
                             sale_term["value_struct"] = mapping_config["value_struct"]
+                            sale_term["values"] = [{
+                                "id": mapping_config.get("value_id"),
+                                "name": sale_term["value_name"],
+                                "struct": mapping_config["value_struct"]
+                            }]
+                            sale_term["value_type"] = "number_unit"
+                        else:
+                            sale_term["value_id"] = mapping_config.get("value_id")
+                            sale_term["values"] = [{
+                                "id": mapping_config.get("value_id"),
+                                "name": sale_term["value_name"],
+                                "struct": None
+                            }]
+                            sale_term["value_type"] = mapping_config.get("value_type", "list")
+                        
                         sale_terms_list.append(sale_term)
                         logger.info(f"Explicitly mapped '{col}' -> sale_terms[{mapping_config['id']}]")
                     else:

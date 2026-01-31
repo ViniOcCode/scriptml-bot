@@ -11,6 +11,7 @@ from typing import Optional
 
 import pandas as pd
 
+from mercadolivre_upload.domain.text_normalizer import PortugueseTextNormalizer
 from mercadolivre_upload.parser.exceptions import MissingColumnError, ValidationError
 from mercadolivre_upload.parser.models import FiscalData, Product
 
@@ -257,10 +258,11 @@ class DynamicExcelParser:
                     # Skip columns with certain keywords
                     if re.search(r"informe|caso crie|voc[êe] deve|ttulo:", col_str, re.I):
                         continue
-                    # Clean column name
-                    clean_col = re.sub(r"[^a-zA-Z0-9_\s]", "", col_str).strip()
+                    # Clean column name - normalize first to handle accents, then remove special chars
+                    normalized_col = PortugueseTextNormalizer.normalize(col_str)
+                    clean_col = re.sub(r"[^a-z0-9_\s]", "", normalized_col).strip()
                     if clean_col and len(clean_col) < 50:
-                        attributes[clean_col.lower().replace(" ", "_")] = str(value).strip()
+                        attributes[clean_col.replace(" ", "_")] = str(value).strip()
 
         return attributes
 

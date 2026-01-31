@@ -223,3 +223,61 @@ class MLApiClient:
         """
         endpoint = f"/items/{item_id}/fiscal_info"
         return self.post(endpoint, json=fiscal_data)
+
+    def check_fiscal_data_exists(self, sku: str) -> tuple[bool, Optional[dict]]:
+        """Check if fiscal data exists for a SKU.
+
+        Args:
+            sku: Product SKU
+
+        Returns:
+            Tuple of (exists, response_data)
+            - exists: True if fiscal data exists (200), False if not (404)
+            - response_data: API response if exists, None otherwise
+
+        Raises:
+            requests.HTTPError: For non-404 errors
+        """
+        endpoint = f"/items/fiscal_information/{sku}"
+        try:
+            response = self.get(endpoint)
+            return True, response
+        except requests.HTTPError as e:
+            if e.response is not None and e.response.status_code == 404:
+                return False, None
+            raise
+
+    def register_fiscal_data(self, fiscal_data: dict) -> dict:
+        """Register new fiscal data for a product.
+
+        Args:
+            fiscal_data: Fiscal data payload with sku, title, type, measurement_unit,
+                        cost, and tax_information fields
+
+        Returns:
+            API response
+
+        Raises:
+            requests.HTTPError: On API error
+        """
+        endpoint = "/items/fiscal_information"
+        return self.post(endpoint, json=fiscal_data)
+
+    def verify_invoice_readiness(self, item_id: str) -> tuple[bool, Optional[dict]]:
+        """Verify if an item is ready for invoice generation.
+
+        Args:
+            item_id: Mercado Livre item ID (e.g., MLB1234567890)
+
+        Returns:
+            Tuple of (is_ready, response_data)
+            - is_ready: True if status is true, False otherwise
+            - response_data: Full API response
+
+        Raises:
+            requests.HTTPError: On API error
+        """
+        endpoint = f"/can_invoice/items/{item_id}"
+        response = self.get(endpoint)
+        is_ready = response.get("status", False) is True
+        return is_ready, response

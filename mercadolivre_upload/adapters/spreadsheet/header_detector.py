@@ -2,51 +2,76 @@
 
 import logging
 import re
+from pathlib import Path
 from typing import Optional
 
 import pandas as pd
+import yaml
 
 logger = logging.getLogger(__name__)
 
 
+def _load_header_config() -> dict:
+    """Load header detection config from config file.
+    
+    Returns:
+        Dictionary with column_patterns, header_indicators, and validation limits
+    """
+    try:
+        config_path = Path("config/generic_mappings.yaml")
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+        
+        header_config = config.get('header_detection', {})
+        
+        # Convert column_patterns from config format (dict of lists) to regex patterns
+        column_patterns = {}
+        for col_name, patterns in header_config.get('column_patterns', {}).items():
+            column_patterns[col_name] = patterns if isinstance(patterns, list) else [patterns]
+        
+        # Convert header_indicators from config format (list of dicts) to tuples
+        header_indicators = []
+        for indicator in header_config.get('header_indicators', []):
+            header_indicators.append((indicator['pattern'], indicator['weight']))
+        
+        return {
+            'column_patterns': column_patterns,
+            'header_indicators': header_indicators,
+            'max_cell_length': header_config.get('max_cell_length', 100),
+            'max_row_length': header_config.get('max_row_length', 800),
+        }
+    except Exception as e:
+        logger.warning(f"Could not load header detection config: {e}. Using defaults.")
+        return {
+            'column_patterns': {},
+            'header_indicators': [],
+            'max_cell_length': 100,
+            'max_row_length': 800,
+        }
+
+
 class HeaderDetector:
-    """Detects header rows and maps columns dynamically."""
+    """Detects header rows and maps columns dynamically.
+    
+    Uses configuration from config/generic_mappings.yaml as the single source of truth.
+    """
 
-    # Keywords to search for in column headers (Mercado Livre template format)
-    COLUMN_PATTERNS = {
-        "sku": [r"\bsku\b"],
-        "title": [r"^t[íi]tulo(?!\s+do)"],  # Match "Título" at start, but not "Título do livro"
-        "description": [r"descri[çc][ãa]o"],
-        "price": [r"pre[çc]o"],
-        "available_quantity": [r"estoque"],
-        "condition": [r"condi[çc][ãa]o"],
-        "isbn": [r"isbn"],
-        "gtin": [r"gtin"],
-        "ncm": [r"ncm"],
-        "cfop": [r"cfop"],
-        "origin": [r"origem"],
-        "cest": [r"cest"],
-        "fotos": [r"fotos"],
-    }
-
-    # Row patterns to detect header row (multiple matches needed)
-    HEADER_INDICATORS = [
-        (r"sku", 5),               # SKU is very strong indicator
-        (r"t[ií]tulo", 4),         # Title is strong indicator
-        (r"condi[cç][aã]o", 3),    # Condition is good indicator
-        (r"pre[cç]o", 3),          # Price is good indicator
-        (r"estoque", 2),           # Stock is medium indicator
-        (r"fotos", 2),             # Fotos is medium indicator
-    ]
-
-    # Maximum length for a valid header cell
-    MAX_CELL_LENGTH = 100
-    # Maximum total row length
-    MAX_ROW_LENGTH = 800
-
-    def __init__(self):
+    def __init__(self, config: Optional[dict] = None):
+        """Initialize the header detector.
+        
+        Args:
+            config: Optional custom config. If not provided, loads from config file.
+        """
         self.header_row: Optional[int] = None
         self.column_mapping: dict[str, str] = {}
+        
+        # Load config from file (single source of truth)
+        header_config = config or _load_header_config()
+        
+        self.COLUMN_PATTERNS = header_config.get('column_patterns', {})
+        self.HEADER_INDICATORS = header_config.get('header_indicators', [])
+        self.MAX_CELL_LENGTH = header_config.get('max_cell_length', 100)
+        self.MAX_ROW_LENGTH = header_config.get('max_row_length', 800)
 
     def detect_header_row(self, df: pd.DataFrame, max_rows: int = 10) -> int:
         """Detect which row contains the actual headers.

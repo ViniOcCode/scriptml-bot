@@ -1,16 +1,31 @@
 """Fiscal service for managing tax information submission.
 
 This service handles the post-publication submission of fiscal data
-to Mercado Livre's fiscal information endpoint.
+to Mercado Livre's fiscal information endpoint following the workflow:
+1. Check if fiscal data exists (GET /items/fiscal_information/{SKU})
+2. Register new fiscal data if not exists (POST /items/fiscal_information)
+3. Verify invoice readiness (GET /can_invoice/items/{ITEM_ID})
 """
 
 import logging
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Protocol
+from enum import Enum
+from typing import Any, Optional, Protocol, Tuple
 
 from .data import FiscalData
 
 logger = logging.getLogger(__name__)
+
+
+class FiscalSubmissionStatus(Enum):
+    """Status of fiscal data submission."""
+    ALREADY_EXISTS = "already_exists"
+    REGISTERED = "registered"
+    VERIFIED = "verified"
+    FAILED = "failed"
+    SKIPPED = "skipped"
 
 
 @dataclass
@@ -19,20 +34,33 @@ class FiscalSubmissionResult:
 
     success: bool
     item_id: str
-    fiscal_data: FiscalData
+    sku: str
+    status: FiscalSubmissionStatus
+    fiscal_data: Optional[FiscalData] = None
     response: Optional[dict[str, Any]] = None
     error_message: Optional[str] = None
     error_code: Optional[str] = None
+    retry_count: int = 0
 
 
 class FiscalApiPort(Protocol):
     """Port for fiscal API operations."""
 
-    def submit_fiscal_info(self, item_id: str, fiscal_data: dict[str, Any]) -> dict[str, Any]:
-        """Submit fiscal information for an item.
+    def check_fiscal_data_exists(self, sku: str) -> tuple[bool, Optional[dict[str, Any]]]:
+        """Check if fiscal data exists for a SKU.
 
         Args:
-            item_id: Mercado Livre item ID (e.g., MLB1234567890)
+            sku: Product SKU
+
+        Returns:
+            Tuple of (exists, response_data)
+        """
+        ...
+
+    def register_fiscal_data(self, fiscal_data: dict[str, Any]) -> dict[str, Any]:
+        """Register new fiscal data.
+
+        Args:
             fiscal_data: Fiscal data payload
 
         Returns:
@@ -40,28 +68,141 @@ class FiscalApiPort(Protocol):
         """
         ...
 
+    def verify_invoice_readiness(self, item_id: str) -> tuple[bool, dict[str, Any]]:
+        """Verify if item is ready for invoice generation.
+
+        Args:
+            item_id: Mercado Livre item ID
+
+        Returns:
+            Tuple of (is_ready, response_data)
+        """
+        ...
+
+
+class RetryConfig:
+    """Configuration for retry logic."""
+
+    def __init__(
+        self,
+        max_retries: int = 3,
+        base_delay: float = 1.0,
+        max_delay: float = 60.0,
+        exponential_base: float = 2.0,
+        retryable_status_codes: Optional[set[int]] = None
+    ):
+        self.max_retries = max_retries
+        self.base_delay = base_delay
+        self.max_delay = max_delay
+        self.exponential_base = exponential_base
+        self.retryable_status_codes = retryable_status_codes or {429, 500, 502, 503, 504}
+
+    def get_delay(self, attempt: int) -> float:
+        """Calculate delay for retry attempt with exponential backoff."""
+        delay = self.base_delay * (self.exponential_base ** attempt)
+        return min(delay, self.max_delay)
+
 
 class FiscalService:
     """Service for managing fiscal data submission.
 
-    This service orchestrates the submission of fiscal information to Mercado Livre
-    after an item has been successfully published.
+    This service orchestrates the complete workflow for fiscal information:
+    1. Check if fiscal data already exists
+    2. Register new fiscal data if needed
+    3. Verify invoice readiness
+
+    Includes retry logic for transient failures and comprehensive logging.
     """
 
-    def __init__(self, api_client: FiscalApiPort):
+    def __init__(
+        self,
+        api_client: FiscalApiPort,
+        retry_config: Optional[RetryConfig] = None
+    ):
         """Initialize fiscal service.
 
         Args:
             api_client: API client implementing FiscalApiPort
+            retry_config: Optional retry configuration
         """
         self.api_client = api_client
+        self.retry_config = retry_config or RetryConfig()
 
-    def submit_fiscal_data(
+    def _execute_with_retry(
+        self,
+        operation: Callable[[], Any],
+        operation_name: str,
+        sku: str,
+        item_id: str
+    ) -> Tuple[Any, int]:
+        """Execute an operation with retry logic.
+
+        Args:
+            operation: Callable to execute
+            operation_name: Name of operation for logging
+            sku: Product SKU for logging
+            item_id: Item ID for logging
+
+        Returns:
+            Tuple of (result, retry_count)
+        """
+        last_exception: Optional[Exception] = None
+
+        for attempt in range(self.retry_config.max_retries + 1):
+            try:
+                result = operation()
+                if attempt > 0:
+                    logger.info(
+                        f"{operation_name} succeeded for SKU {sku} (item {item_id}) "
+                        f"after {attempt} retries"
+                    )
+                return result, attempt
+            except Exception as e:
+                last_exception = e
+                status_code = self._extract_status_code(e)
+
+                if status_code not in self.retry_config.retryable_status_codes:
+                    logger.error(
+                        f"{operation_name} failed for SKU {sku} (item {item_id}) "
+                        f"with non-retryable error: {e}"
+                    )
+                    raise
+
+                if attempt < self.retry_config.max_retries:
+                    delay = self.retry_config.get_delay(attempt)
+                    logger.warning(
+                        f"{operation_name} failed for SKU {sku} (item {item_id}) "
+                        f"with status {status_code}, retrying in {delay:.1f}s "
+                        f"(attempt {attempt + 1}/{self.retry_config.max_retries})"
+                    )
+                    time.sleep(delay)
+                else:
+                    logger.error(
+                        f"{operation_name} failed for SKU {sku} (item {item_id}) "
+                        f"after {self.retry_config.max_retries} retries: {e}"
+                    )
+
+        raise last_exception or Exception(f"{operation_name} failed")
+
+    def _extract_status_code(self, exception: Exception) -> int:
+        """Extract HTTP status code from exception."""
+        response = getattr(exception, 'response', None)
+        if response is not None:
+            return getattr(response, 'status_code', 0)
+        return 0
+
+    def submit_fiscal_data_workflow(
         self,
         item_id: str,
         fiscal_data: FiscalData
     ) -> FiscalSubmissionResult:
-        """Submit fiscal data for a published item.
+        """Execute complete fiscal data submission workflow.
+
+        Workflow:
+        1. Check if fiscal data exists (GET /items/fiscal_information/{SKU})
+        2. If 200: log exists, skip to verification
+        3. If 404: register new fiscal data (POST /items/fiscal_information)
+        4. Verify invoice readiness (GET /can_invoice/items/{ITEM_ID})
 
         Args:
             item_id: Mercado Livre item ID (e.g., MLB1234567890)
@@ -70,6 +211,9 @@ class FiscalService:
         Returns:
             FiscalSubmissionResult with success status and details
         """
+        sku = fiscal_data.sku
+        logger.info(f"Starting fiscal data workflow for item {item_id}, SKU: {sku}")
+
         # Validate fiscal data before submission
         if not fiscal_data.is_valid:
             missing = fiscal_data.get_missing_fields()
@@ -78,61 +222,174 @@ class FiscalService:
             return FiscalSubmissionResult(
                 success=False,
                 item_id=item_id,
+                sku=sku,
+                status=FiscalSubmissionStatus.FAILED,
                 fiscal_data=fiscal_data,
                 error_message=error_msg,
                 error_code="INVALID_FISCAL_DATA"
             )
 
-        # Build API payload
-        payload = fiscal_data.to_api_payload()
-        logger.info(f"Submitting fiscal data for item {item_id}, SKU: {fiscal_data.sku}")
-        logger.debug(f"Fiscal payload for {item_id}: {payload}")
-
+        # Step 1: Check if fiscal data exists
         try:
-            # Submit to API
-            response = self.api_client.submit_fiscal_info(item_id, payload)
-            logger.info(f"Successfully submitted fiscal data for {item_id}")
-
-            return FiscalSubmissionResult(
-                success=True,
-                item_id=item_id,
-                fiscal_data=fiscal_data,
-                response=response
+            (exists, existing_data), _ = self._execute_with_retry(
+                lambda: self.api_client.check_fiscal_data_exists(sku),
+                "Check fiscal data exists",
+                sku,
+                item_id
             )
 
+            if exists:
+                logger.info(
+                    f"Fiscal data already exists for SKU {sku} (item {item_id}), "
+                    f"skipping registration"
+                )
+                # Skip to verification
+                return self._verify_invoice_readiness(
+                    item_id, sku, fiscal_data, FiscalSubmissionStatus.ALREADY_EXISTS
+                )
+
         except Exception as e:
-            error_msg = str(e)
-            error_code: str = "API_ERROR"
-
-            # Try to extract error details from exception
-            response = getattr(e, 'response', None)
-            if response is not None:
-                try:
-                    error_detail = response.json()
-                    error_msg = f"{error_msg} - {error_detail}"
-
-                    # Extract specific error codes if available
-                    if isinstance(error_detail, dict):
-                        causes_value: List[Any] = error_detail.get("cause", [])
-                        if isinstance(causes_value, list) and len(causes_value) > 0:
-                            first_cause: Dict[str, Any] = causes_value[0]
-                            if isinstance(first_cause, dict):
-                                code_value: Optional[str] = first_cause.get("code")
-                                if code_value is not None:
-                                    error_code = str(code_value)
-                except Exception:
-                    text = getattr(response, 'text', '')
-                    error_msg = f"{error_msg} - {text[:200]}"
-
-            logger.error(f"Failed to submit fiscal data for {item_id}: {error_msg}")
-
+            error_msg = f"Failed to check fiscal data existence: {str(e)}"
+            logger.error(f"{error_msg} for SKU {sku} (item {item_id})")
             return FiscalSubmissionResult(
                 success=False,
                 item_id=item_id,
+                sku=sku,
+                status=FiscalSubmissionStatus.FAILED,
                 fiscal_data=fiscal_data,
                 error_message=error_msg,
-                error_code=error_code
+                error_code="CHECK_EXISTS_ERROR"
             )
+
+        # Step 2: Register new fiscal data
+        registration_retry_count = 0
+        try:
+            payload = fiscal_data.to_api_payload()
+            logger.info(f"Registering fiscal data for SKU {sku} (item {item_id})")
+            logger.debug(f"Fiscal payload: {payload}")
+
+            _, registration_retry_count = self._execute_with_retry(
+                lambda: self.api_client.register_fiscal_data(payload),
+                "Register fiscal data",
+                sku,
+                item_id
+            )
+
+            logger.info(
+                f"Successfully registered fiscal data for SKU {sku} (item {item_id})"
+            )
+
+        except Exception as e:
+            error_msg = f"Failed to register fiscal data: {str(e)}"
+            error_code = self._extract_error_code(e)
+            logger.error(f"{error_msg} for SKU {sku} (item {item_id})")
+            return FiscalSubmissionResult(
+                success=False,
+                item_id=item_id,
+                sku=sku,
+                status=FiscalSubmissionStatus.FAILED,
+                fiscal_data=fiscal_data,
+                error_message=error_msg,
+                error_code=error_code or "REGISTER_ERROR",
+                retry_count=registration_retry_count
+            )
+
+        # Step 3: Verify invoice readiness
+        return self._verify_invoice_readiness(
+            item_id, sku, fiscal_data, FiscalSubmissionStatus.REGISTERED, registration_retry_count
+        )
+
+    def _verify_invoice_readiness(
+        self,
+        item_id: str,
+        sku: str,
+        fiscal_data: FiscalData,
+        previous_status: FiscalSubmissionStatus,
+        previous_retry_count: int = 0
+    ) -> FiscalSubmissionResult:
+        """Verify invoice readiness for an item.
+
+        Args:
+            item_id: Mercado Livre item ID
+            sku: Product SKU
+            fiscal_data: Fiscal data
+            previous_status: Status from previous step
+            previous_retry_count: Retry count from previous operations
+
+        Returns:
+            FiscalSubmissionResult
+        """
+        try:
+            (is_ready, response), retry_count = self._execute_with_retry(
+                lambda: self.api_client.verify_invoice_readiness(item_id),
+                "Verify invoice readiness",
+                sku,
+                item_id
+            )
+
+            total_retry_count = previous_retry_count + retry_count
+
+            if is_ready:
+                logger.info(
+                    f"Invoice readiness verified for item {item_id} (SKU: {sku})"
+                )
+                return FiscalSubmissionResult(
+                    success=True,
+                    item_id=item_id,
+                    sku=sku,
+                    status=FiscalSubmissionStatus.VERIFIED,
+                    fiscal_data=fiscal_data,
+                    response=response,
+                    retry_count=total_retry_count
+                )
+            else:
+                logger.warning(
+                    f"Item {item_id} (SKU: {sku}) is not ready for invoicing: {response}"
+                )
+                return FiscalSubmissionResult(
+                    success=False,
+                    item_id=item_id,
+                    sku=sku,
+                    status=FiscalSubmissionStatus.FAILED,
+                    fiscal_data=fiscal_data,
+                    response=response,
+                    error_message="Item not ready for invoice generation",
+                    error_code="NOT_INVOICE_READY",
+                    retry_count=total_retry_count
+                )
+
+        except Exception as e:
+            error_msg = f"Failed to verify invoice readiness: {str(e)}"
+            logger.error(f"{error_msg} for item {item_id} (SKU: {sku})")
+            return FiscalSubmissionResult(
+                success=False,
+                item_id=item_id,
+                sku=sku,
+                status=FiscalSubmissionStatus.FAILED,
+                fiscal_data=fiscal_data,
+                error_message=error_msg,
+                error_code="VERIFY_ERROR",
+                retry_count=previous_retry_count
+            )
+
+    def _extract_error_code(self, exception: Exception) -> Optional[str]:
+        """Extract error code from API exception."""
+        response = getattr(exception, 'response', None)
+        if response is None:
+            return None
+
+        try:
+            error_detail = response.json()
+            if isinstance(error_detail, dict):
+                causes = error_detail.get("cause", [])
+                if isinstance(causes, list) and len(causes) > 0:
+                    first_cause = causes[0]
+                    if isinstance(first_cause, dict):
+                        return first_cause.get("code")
+        except Exception:
+            pass
+
+        return None
 
     def submit_fiscal_data_batch(
         self,
@@ -147,10 +404,26 @@ class FiscalService:
             List of FiscalSubmissionResult for each submission
         """
         results: list[FiscalSubmissionResult] = []
+        total = len(items)
 
-        for item_id, fiscal_data in items:
-            result = self.submit_fiscal_data(item_id, fiscal_data)
+        logger.info(f"Starting batch fiscal data submission for {total} items")
+
+        for index, (item_id, fiscal_data) in enumerate(items, 1):
+            logger.info(f"Processing item {index}/{total}: {item_id}")
+            result = self.submit_fiscal_data_workflow(item_id, fiscal_data)
             results.append(result)
+
+            if result.success:
+                logger.info(f"Successfully processed {item_id}")
+            else:
+                logger.error(
+                    f"Failed to process {item_id}: {result.error_message}"
+                )
+
+        success_count = sum(1 for r in results if r.success)
+        logger.info(
+            f"Batch submission complete: {success_count}/{total} successful"
+        )
 
         return results
 
@@ -173,3 +446,88 @@ class FiscalService:
             logger.warning(f"Fiscal data validation failed: missing {missing}")
 
         return is_valid, missing
+
+    def check_fiscal_data_exists(
+        self,
+        sku: str,
+        item_id: str = ""
+    ) -> Tuple[bool, Optional[dict[str, Any]], int]:
+        """Check if fiscal data exists for a SKU.
+
+        Args:
+            sku: Product SKU
+            item_id: Item ID for logging context
+
+        Returns:
+            Tuple of (exists, response_data, retry_count)
+        """
+        try:
+            (exists, data), retry_count = self._execute_with_retry(
+                lambda: self.api_client.check_fiscal_data_exists(sku),
+                "Check fiscal data exists",
+                sku,
+                item_id or sku
+            )
+            return exists, data, retry_count
+        except Exception as e:
+            logger.error(f"Failed to check fiscal data for SKU {sku}: {e}")
+            raise
+
+    def register_fiscal_data(
+        self,
+        fiscal_data: FiscalData,
+        item_id: str = ""
+    ) -> Tuple[dict[str, Any], int]:
+        """Register fiscal data for a product.
+
+        Args:
+            fiscal_data: Fiscal data to register
+            item_id: Item ID for logging context
+
+        Returns:
+            Tuple of (response_data, retry_count)
+        """
+        if not fiscal_data.is_valid:
+            missing = fiscal_data.get_missing_fields()
+            raise ValueError(f"Invalid fiscal data: missing {missing}")
+
+        payload = fiscal_data.to_api_payload()
+        sku = fiscal_data.sku
+
+        try:
+            response, retry_count = self._execute_with_retry(
+                lambda: self.api_client.register_fiscal_data(payload),
+                "Register fiscal data",
+                sku,
+                item_id or sku
+            )
+            return response, retry_count
+        except Exception as e:
+            logger.error(f"Failed to register fiscal data for SKU {sku}: {e}")
+            raise
+
+    def verify_invoice_readiness(
+        self,
+        item_id: str,
+        sku: str = ""
+    ) -> Tuple[bool, dict[str, Any], int]:
+        """Verify if an item is ready for invoice generation.
+
+        Args:
+            item_id: Mercado Livre item ID
+            sku: SKU for logging context
+
+        Returns:
+            Tuple of (is_ready, response_data, retry_count)
+        """
+        try:
+            (is_ready, response), retry_count = self._execute_with_retry(
+                lambda: self.api_client.verify_invoice_readiness(item_id),
+                "Verify invoice readiness",
+                sku or item_id,
+                item_id
+            )
+            return is_ready, response, retry_count
+        except Exception as e:
+            logger.error(f"Failed to verify invoice readiness for {item_id}: {e}")
+            raise

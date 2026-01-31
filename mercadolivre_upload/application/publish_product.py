@@ -160,11 +160,17 @@ class PublishProductUseCase:
         for product in products:
             self._publish_one(product, category_id)
 
+        # Batch submit fiscal information for all published products
+        if not self.dry_run and self._pending_fiscal:
+            self._submit_fiscal_batch(self._pending_fiscal)
+
         return {
             "success": self.failed == 0,
             "published": self.published,
             "failed": self.failed,
             "errors": self.errors,
+            "fiscal_submitted": len([r for r in self.fiscal_results if r.success]),
+            "fiscal_failed": len([r for r in self.fiscal_results if not r.success]),
         }
 
     def _initialize_cache_mapper(self, category_id: str) -> None:
@@ -436,26 +442,12 @@ class PublishProductUseCase:
         if not pictures:
             logger.warning(f"No pictures for {product.sku}")
 
-        # Determine shipping mode
-        shipping_mode = "not_specified"
-        if self.shipping_resolver:
-            shipping_mode = self.shipping_resolver.get_best_shipping_mode()
-            logger.info(f"Using shipping mode: {shipping_mode}")
-
-        # Build shipping config
-        shipping_config = {"mode": shipping_mode}
-        if shipping_mode == "not_specified":
-            shipping_config["local_pick_up"] = True
-            logger.info("Enabled local_pick_up for not_specified shipping")
-        elif shipping_mode in ("me1", "me2"):
-            shipping_config["logistic_type"] = "drop_off"
-            shipping_config["local_pick_up"] = False
-            shipping_config["methods"] = []
-            logger.info(f"Shipping config for {shipping_mode} mode")
+        # Determine shipping mode from config
+        shipping_config = self._build_shipping_config()
 
         logger.debug(f"Shipping config for {product.sku}: {shipping_config}")
 
-        # Load defaults from config
+        # Load defaults from config (config is the single source of truth)
         core_defaults = self.config.get('core_item_fields', {}).get('defaults', {})
         
         # Build sale_terms: use explicit mappings if available, otherwise use config defaults
@@ -463,23 +455,20 @@ class PublishProductUseCase:
             sale_terms = sale_terms_from_mapping
             logger.info(f"Using sale_terms from explicit column mappings: {[st['id'] for st in sale_terms]}")
         else:
-            # Use config defaults
-            sale_terms = [
-                {"id": "WARRANTY_TYPE", "value_name": "Garantia do vendedor"},
-                {"id": "WARRANTY_TIME", "value_struct": {"number": 30, "unit": "dias"}}
-            ]
+            # Use config defaults only - no hardcoded fallbacks
+            sale_terms = core_defaults.get('sale_terms', [])
             logger.info("Using default sale_terms from config")
         
-        # Build item with defaults from config
+        # Build item with values from config only (no hardcoded fallbacks)
         item = {
             "title": product.title,
             "category_id": category_id,
             "price": product.price,
-            "currency_id": core_defaults.get('currency_id', 'BRL'),
+            "currency_id": core_defaults.get('currency_id'),
             "available_quantity": product.available_quantity,
-            "buying_mode": core_defaults.get('buying_mode', 'buy_it_now'),
+            "buying_mode": core_defaults.get('buying_mode'),
             "condition": product.condition,
-            "listing_type_id": "free" if not pictures else core_defaults.get('listing_type_id', 'gold_special'),
+            "listing_type_id": "free" if not pictures else core_defaults.get('listing_type_id'),
             "description": {"plain_text": product.description},
             "pictures": pictures if pictures else [],
             "attributes": ml_attributes,
@@ -676,19 +665,77 @@ class PublishProductUseCase:
             return self.feedback.get_problematic_attributes()
         return {}
 
+    def _build_shipping_config(self) -> dict:
+        """Build shipping configuration from config.
+        
+        Uses shipping configuration from config file as the single source of truth.
+        Builds complete shipping payload matching ML API format:
+        {
+            "mode": "me2",
+            "methods": [],
+            "tags": ["mandatory_free_shipping"],
+            "dimensions": null,
+            "local_pick_up": false,
+            "free_shipping": true,
+            "logistic_type": "drop_off",
+            "store_pick_up": false
+        }
+        
+        Returns:
+            Shipping configuration dictionary
+        """
+        shipping_config = self.config.get('shipping', {})
+        default_mode = shipping_config.get('default_mode', 'not_specified')
+        modes_config = shipping_config.get('modes', {})
+        
+        # Determine shipping mode
+        shipping_mode = default_mode
+        if self.shipping_resolver:
+            shipping_mode = self.shipping_resolver.get_best_shipping_mode()
+            logger.info(f"Using shipping mode: {shipping_mode}")
+        
+        # Get mode-specific config
+        mode_config = modes_config.get(shipping_mode, {})
+        
+        # Build complete shipping config matching ML API format
+        config_shipping: dict[str, any] = {
+            "mode": shipping_mode,
+            "methods": mode_config.get('methods', []),
+            "tags": mode_config.get('tags', []),
+            "dimensions": mode_config.get('dimensions'),
+            "local_pick_up": mode_config.get('local_pick_up', False),
+            "free_shipping": mode_config.get('free_shipping', False),
+            "logistic_type": mode_config.get('logistic_type'),
+            "store_pick_up": mode_config.get('store_pick_up', False),
+        }
+        
+        # Remove None values to keep payload clean
+        config_shipping = {k: v for k, v in config_shipping.items() if v is not None}
+        
+        logger.info(f"Shipping config for {shipping_mode} mode: {config_shipping}")
+        return config_shipping
+
     def _normalize_item_attributes(self, item: dict) -> None:
         """Ensure numeric dimensions have units.
 
-        Appends ' cm' to pure-numeric dimension attributes (height/width/length/depth).
+        Appends default unit to pure-numeric dimension attributes.
+        Uses dimension patterns from config.
         Operates in-place on `item['attributes']`.
         """
         attrs = item.get("attributes")
         if not isinstance(attrs, list):
             return
 
-        # Patterns
-        numeric_only = re.compile(r"^\s*\d+(?:[\.,]\d+)?\s*$")
-        unit_marker = re.compile(r"\b(cm|mm|m|in|pouce|polegadas)\b", re.IGNORECASE)
+        # Get dimension patterns from config
+        dim_config = self.config.get('dimension_patterns', {})
+        keywords = dim_config.get('keywords', ["height", "altura", "width", "largura", "length", "comprimento", "depth", "profundidade"])
+        default_unit = dim_config.get('default_unit', 'cm')
+        numeric_pattern = dim_config.get('numeric_only', r'^\s*\d+(?:[\.,]\d+)?\s*$')
+        unit_pattern = dim_config.get('unit_marker', r'\b(cm|mm|m|in|pouce|polegadas)\b')
+
+        # Compile patterns
+        numeric_only = re.compile(numeric_pattern)
+        unit_marker = re.compile(unit_pattern, re.IGNORECASE)
 
         for attr in attrs:
             try:
@@ -696,13 +743,13 @@ class PublishProductUseCase:
             except Exception:
                 name = ""
 
-            # Normalize dimension-like attributes
-            if name and any(k in name for k in ("height", "altura", "width", "largura", "length", "comprimento", "depth", "profundidade")):
+            # Normalize dimension-like attributes using config keywords
+            if name and any(k in name for k in keywords):
                 val = attr.get("value_name")
                 if isinstance(val, (int, float)):
-                    attr["value_name"] = f"{val} cm"
+                    attr["value_name"] = f"{val} {default_unit}"
                 elif isinstance(val, str):
                     if numeric_only.match(val) and not unit_marker.search(val):
-                        # Convert comma decimals to dot (ML accepts dot) then append cm
+                        # Convert comma decimals to dot (ML accepts dot) then append default unit
                         normalized = val.strip().replace(",", ".")
-                        attr["value_name"] = f"{normalized} cm"
+                        attr["value_name"] = f"{normalized} {default_unit}"
