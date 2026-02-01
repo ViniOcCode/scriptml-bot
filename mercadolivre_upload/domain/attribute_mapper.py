@@ -154,10 +154,22 @@ class AttributeMapper:
         explicitly_mapped = set()
 
         # 1. First, apply explicit mappings (bypass fuzzy matching)
+        # Normalize explicit mapping keys to match parser's column cleaning
+        # Parser uses: re.sub(r"[^a-zA-Z0-9_\s]", "", col_str).strip()
+        import re
+        normalized_explicit_mappings = {}
         if explicit_mappings:
             for col, mapping_config in explicit_mappings.items():
-                if col in product_attributes:
-                    value = product_attributes[col]
+                # Apply same cleaning as parser: remove non-alphanumeric chars (except spaces)
+                normalized_col = re.sub(r"[^a-zA-Z0-9_\s]", "", col).strip().lower()
+                normalized_explicit_mappings[normalized_col] = mapping_config
+        
+        if normalized_explicit_mappings:
+            for col, value in product_attributes.items():
+                # Apply same cleaning as parser
+                normalized_col = re.sub(r"[^a-zA-Z0-9_\s]", "", col).strip().lower()
+                if normalized_col in normalized_explicit_mappings:
+                    mapping_config = normalized_explicit_mappings[normalized_col]
                     target = mapping_config.get("target", "attribute")
 
                     if target == "sale_terms":
@@ -195,8 +207,32 @@ class AttributeMapper:
                         
                         sale_terms_list.append(sale_term)
                         logger.info(f"Explicitly mapped '{col}' -> sale_terms[{mapping_config['id']}]")
+                    elif target == "listing_type_id":
+                        # Map listing type (Tipo de anúncio) - use cell value, not hardcoded ID
+                        # Map common Portuguese values to ML API values
+                        listing_type_map = {
+                            "clássico": "gold_special",
+                            "classico": "gold_special",
+                            "premium": "gold_premium",
+                            "grátis": "free",
+                            "gratis": "free",
+                        }
+                        mapped_value = listing_type_map.get(str(value).lower().strip(), value)
+                        # Store for later use in item payload
+                        ml_attributes_list.append({
+                            "_listing_type_id": mapped_value,  # Special marker for publisher
+                        })
+                        logger.info(f"Explicitly mapped '{col}' -> listing_type_id={mapped_value}")
+                    
                     else:
                         # Regular attribute mapping
+                        # Sanitize numeric values: convert comma to dot for decimals
+                        if value and isinstance(value, str):
+                            # Check if looks like a number with comma
+                            if "," in value and value.replace(",", "").replace(".", "").isdigit():
+                                # Brazilian format: 0,220 -> 0.220
+                                value = value.replace(",", ".")
+                        
                         # Apply unit suffix if configured
                         unit_suffix = mapping_config.get("unit_suffix", "")
                         if unit_suffix and value:

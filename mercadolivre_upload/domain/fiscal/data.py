@@ -3,7 +3,7 @@
 Based on Mercado Livre API documentation for fiscal information submission:
 https://developers.mercadolivre.com.br/pt_br/envio-dos-dados-fiscais
 
-Uses configuration from config/generic_mappings.yaml as the single source of truth for defaults.
+Uses configuration from config/fiscal_config.yaml as the single source of truth for defaults.
 """
 
 import logging
@@ -23,7 +23,7 @@ def _load_fiscal_defaults() -> dict:
         Dictionary with fiscal default values
     """
     try:
-        config_path = Path("config/generic_mappings.yaml")
+        config_path = Path("config/fiscal_config.yaml")
         with open(config_path, 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f)
         
@@ -62,10 +62,13 @@ class FiscalData:
     # Product cost (for tax calculation)
     cost: float = 0.0
 
+    # Tax payer type - required by ML API ("individual" or "company")
+    tax_payer_type: str = "company"  # Default to "company"
+
     # Tax information
     ncm: str = ""  # NCM code (e.g., "39263000")
     origin_type: str = ""  # "reseller", "manufacturer", "importer"
-    origin_detail: str = ""  # Origin detail code (e.g., "2" for national)
+    origin_detail: str = ""  # Origin detail code (e.g., "0" for national, range 0-8)
 
     # Optional tax fields
     cest: Optional[str] = None  # CEST code
@@ -98,12 +101,41 @@ class FiscalData:
         self.type = str(self.type).strip() if self.type else defaults.get('type', 'single')
         self.measurement_unit = str(self.measurement_unit).strip() if self.measurement_unit else defaults.get('measurement_unit', 'UN')
         self.ncm = str(self.ncm).strip() if self.ncm else ""
-        self.origin_type = str(self.origin_type).strip() if self.origin_type else ""
-        self.origin_detail = str(self.origin_detail).strip() if self.origin_detail else ""
+        
+        # Sanitize origin_type - map common values to codes
+        origin_type_str = str(self.origin_type).strip() if self.origin_type else ""
+        origin_type_map = {
+            "nacional": "0",
+            "importado": "1",
+            "estrangeira": "2",
+            "nacional-importacao": "3",
+            "nacional-conteudo-importacao": "4",
+            "nacional-efetiv": "5",
+            "importacao-direta": "6",
+            "importacao-indireta": "7",
+            "nacional-mercadoria": "8",
+        }
+        self.origin_type = origin_type_map.get(origin_type_str.lower(), origin_type_str)
+        
+        # Sanitize origin_detail - extract just the number if it's a long string
+        origin_detail_str = str(self.origin_detail).strip() if self.origin_detail else ""
+        if origin_detail_str:
+            # Extract first digit if format is like "0 - NACIONAL..."
+            import re
+            match = re.match(r'^(\d)', origin_detail_str)
+            if match:
+                self.origin_detail = match.group(1)
+            else:
+                self.origin_detail = origin_detail_str
 
         # Optional fields
         if self.cest:
-            self.cest = str(self.cest).strip()
+            cest_str = str(self.cest).strip()
+            # Skip if CEST is empty, nan, or None
+            if cest_str and cest_str.lower() not in ('nan', 'none', ''):
+                self.cest = cest_str
+            else:
+                self.cest = None
         if self.csosn:
             self.csosn = str(self.csosn).strip()
         if self.cfop:
@@ -133,7 +165,7 @@ class FiscalData:
         """Convert to Mercado Livre API payload format.
 
         Returns:
-            Dictionary formatted for /items/{item_id}/fiscal_info endpoint
+            Dictionary formatted for /items/fiscal_information endpoint
         """
         payload: dict[str, Any] = {
             "sku": self.sku,
@@ -141,12 +173,13 @@ class FiscalData:
             "type": self.type,
             "measurement_unit": self.measurement_unit,
             "cost": float(self.cost) if self.cost else 0.0,
+            "tax_payer_type": self.tax_payer_type,
             "tax_information": {}
         }
 
         tax_info: dict[str, Any] = payload["tax_information"]
 
-        # Required tax fields
+        # Required tax fields (always include if present)
         if self.ncm:
             tax_info["ncm"] = self.ncm
         if self.origin_type:
@@ -154,7 +187,7 @@ class FiscalData:
         if self.origin_detail:
             tax_info["origin_detail"] = self.origin_detail
 
-        # Optional tax fields
+        # Optional tax fields (only include if they have values)
         if self.cest:
             tax_info["cest"] = self.cest
         if self.csosn:
@@ -176,11 +209,11 @@ class FiscalData:
         if self.med_exemption_reason:
             tax_info["med_exemption_reason"] = self.med_exemption_reason
 
-        # Weight fields
+        # Weight fields in kg (convert from grams if needed)
         if self.net_weight is not None:
-            tax_info["net_weight"] = float(self.net_weight)
+            tax_info["net_weight"] = self.net_weight / 1000.0  # Convert grams to kg
         if self.gross_weight is not None:
-            tax_info["gross_weight"] = float(self.gross_weight)
+            tax_info["gross_weight"] = self.gross_weight / 1000.0  # Convert grams to kg
 
         return payload
 

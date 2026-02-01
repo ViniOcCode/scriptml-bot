@@ -550,5 +550,613 @@
     "cause_type": "warning",
     "attribute_id": null,
     "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-31T18:22:53.357179",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-31T18:22:53.357414",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17510CRIANCAU",
+    "timestamp": "2026-01-31T18:23:00.200167",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17510CRIANCAU",
+    "timestamp": "2026-01-31T18:23:00.200188",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-31T18:27:55.081509",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-31T18:27:55.081736",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17510CRIANCAU",
+    "timestamp": "2026-01-31T18:28:02.282237",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17510CRIANCAU",
+    "timestamp": "2026-01-31T18:28:02.282257",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-31T18:46:15.994622",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-31T18:46:15.994848",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17510CRIANCAU",
+    "timestamp": "2026-01-31T18:46:22.960686",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17510CRIANCAU",
+    "timestamp": "2026-01-31T18:46:22.960705",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-31T18:52:32.761482",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-31T18:52:32.761715",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17510CRIANCAU",
+    "timestamp": "2026-01-31T18:52:39.536196",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17510CRIANCAU",
+    "timestamp": "2026-01-31T18:52:39.536216",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-31T19:08:01.507059",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-31T19:08:01.507291",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17510CRIANCAU",
+    "timestamp": "2026-01-31T19:08:07.918463",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17510CRIANCAU",
+    "timestamp": "2026-01-31T19:08:07.918484",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-31T19:21:08.364828",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-31T19:21:08.365057",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17510CRIANCAU",
+    "timestamp": "2026-01-31T19:21:15.325488",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17510CRIANCAU",
+    "timestamp": "2026-01-31T19:21:15.325509",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-31T23:01:44.586209",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-31T23:01:44.586450",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17510CRIANCAU",
+    "timestamp": "2026-01-31T23:01:51.035316",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17510CRIANCAU",
+    "timestamp": "2026-01-31T23:01:51.035340",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-31T23:06:41.748387",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-01-31T23:06:41.748683",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17510CRIANCAU",
+    "timestamp": "2026-01-31T23:06:48.573115",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17510CRIANCAU",
+    "timestamp": "2026-01-31T23:06:48.573144",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "TESTE001",
+    "timestamp": "2026-02-01T16:21:59.286135",
+    "cause_code": "item.attribute.product_identifier.invalid_format",
+    "cause_type": "error",
+    "attribute_id": null,
+    "message": "Product Identifier [GTIN] contains values with invalid format: [9781234567890]"
+  },
+  {
+    "sku": "TESTE002",
+    "timestamp": "2026-02-01T16:22:00.613731",
+    "cause_code": "item.attribute.product_identifier.invalid_format",
+    "cause_type": "error",
+    "attribute_id": null,
+    "message": "Product Identifier [GTIN] contains values with invalid format: [9780987654321]"
+  },
+  {
+    "sku": "TESTE005",
+    "timestamp": "2026-02-01T16:29:47.357169",
+    "cause_code": "item.available_quantity.invalid",
+    "cause_type": "error",
+    "attribute_id": null,
+    "message": "Available quantity max. value is 1 for category MLB437616, condition new and listing type free"
+  },
+  {
+    "sku": "TESTE005",
+    "timestamp": "2026-02-01T16:29:47.357342",
+    "cause_code": "item.attribute.missing_catalog_required",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "O campo \"Gênero do livro\" é obrigatório e não foi adicionado."
+  },
+  {
+    "sku": "TESTE005",
+    "timestamp": "2026-02-01T16:29:47.357347",
+    "cause_code": "item.attribute.missing_catalog_required",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "O campo \"Editora do livro\" é obrigatório e não foi adicionado."
+  },
+  {
+    "sku": "TESTE005",
+    "timestamp": "2026-02-01T16:29:47.357351",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "TESTE005",
+    "timestamp": "2026-02-01T16:29:47.357353",
+    "cause_code": "shipping.free_shipping.cost_exceeded",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Free shipping costs exceeds sale"
+  },
+  {
+    "sku": "TESTE005",
+    "timestamp": "2026-02-01T16:29:47.357356",
+    "cause_code": "item.attributes.missing_required",
+    "cause_type": "error",
+    "attribute_id": "is",
+    "message": "The attributes [BOOK_GENRE] are required for category MLB437616 and channel marketplace. Check the attribute is present in the attributes list or in all variation's attributes_combination or attributes."
+  },
+  {
+    "sku": "TESTE005",
+    "timestamp": "2026-02-01T16:29:47.357364",
+    "cause_code": "item.listing_type_id.requiresPictures",
+    "cause_type": "error",
+    "attribute_id": null,
+    "message": "Item pictures are mandatory for listing type free"
+  },
+  {
+    "sku": "TESTE006",
+    "timestamp": "2026-02-01T16:29:47.990066",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "TESTE006",
+    "timestamp": "2026-02-01T16:29:47.990094",
+    "cause_code": "shipping.free_shipping.cost_exceeded",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Free shipping costs exceeds sale"
+  },
+  {
+    "sku": "TESTE006",
+    "timestamp": "2026-02-01T16:29:47.990098",
+    "cause_code": "item.attribute.missing_catalog_required",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "O campo \"Editora do livro\" é obrigatório e não foi adicionado."
+  },
+  {
+    "sku": "TESTE006",
+    "timestamp": "2026-02-01T16:29:47.990102",
+    "cause_code": "item.attribute.missing_catalog_required",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "O campo \"Gênero do livro\" é obrigatório e não foi adicionado."
+  },
+  {
+    "sku": "TESTE006",
+    "timestamp": "2026-02-01T16:29:47.990107",
+    "cause_code": "item.listing_type_id.requiresPictures",
+    "cause_type": "error",
+    "attribute_id": null,
+    "message": "Item pictures are mandatory for listing type free"
+  },
+  {
+    "sku": "TESTE006",
+    "timestamp": "2026-02-01T16:29:47.990111",
+    "cause_code": "item.available_quantity.invalid",
+    "cause_type": "error",
+    "attribute_id": null,
+    "message": "Available quantity max. value is 1 for category MLB437616, condition new and listing type free"
+  },
+  {
+    "sku": "TESTE006",
+    "timestamp": "2026-02-01T16:29:47.990115",
+    "cause_code": "item.attributes.missing_required",
+    "cause_type": "error",
+    "attribute_id": "is",
+    "message": "The attributes [BOOK_GENRE] are required for category MLB437616 and channel marketplace. Check the attribute is present in the attributes list or in all variation's attributes_combination or attributes."
+  },
+  {
+    "sku": "TESTE005",
+    "timestamp": "2026-02-01T16:30:46.475114",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "TESTE005",
+    "timestamp": "2026-02-01T16:30:46.475282",
+    "cause_code": "shipping.free_shipping.cost_exceeded",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Free shipping costs exceeds sale"
+  },
+  {
+    "sku": "TESTE006",
+    "timestamp": "2026-02-01T16:30:48.615012",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "TESTE006",
+    "timestamp": "2026-02-01T16:30:48.615033",
+    "cause_code": "shipping.free_shipping.cost_exceeded",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Free shipping costs exceeds sale"
+  },
+  {
+    "sku": "TESTE005",
+    "timestamp": "2026-02-01T16:37:45.475066",
+    "cause_code": "shipping.free_shipping.cost_exceeded",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Free shipping costs exceeds sale"
+  },
+  {
+    "sku": "TESTE005",
+    "timestamp": "2026-02-01T16:37:45.475233",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "TESTE006",
+    "timestamp": "2026-02-01T16:37:47.661308",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "TESTE006",
+    "timestamp": "2026-02-01T16:37:47.661330",
+    "cause_code": "shipping.free_shipping.cost_exceeded",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Free shipping costs exceeds sale"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-02-01T16:45:21.612833",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-02-01T16:45:21.613075",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17510CRIANCAU",
+    "timestamp": "2026-02-01T16:45:28.514942",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17510CRIANCAU",
+    "timestamp": "2026-02-01T16:45:28.514964",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-02-01T17:23:18.688552",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-02-01T17:23:18.688891",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17510CRIANCAU",
+    "timestamp": "2026-02-01T17:23:25.217212",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17510CRIANCAU",
+    "timestamp": "2026-02-01T17:23:25.217237",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-02-01T17:26:10.953464",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-02-01T17:26:10.953639",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17510CRIANCAU",
+    "timestamp": "2026-02-01T17:26:17.667480",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17510CRIANCAU",
+    "timestamp": "2026-02-01T17:26:17.667510",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-02-01T17:28:14.889968",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-02-01T17:28:14.890245",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17510CRIANCAU",
+    "timestamp": "2026-02-01T17:28:22.301778",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17510CRIANCAU",
+    "timestamp": "2026-02-01T17:28:22.301805",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-02-01T17:30:26.081780",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-02-01T17:30:26.081996",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17510CRIANCAU",
+    "timestamp": "2026-02-01T17:30:32.753039",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17510CRIANCAU",
+    "timestamp": "2026-02-01T17:30:32.753067",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
   }
 ]

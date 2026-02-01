@@ -20,6 +20,7 @@ from mercadolivre_upload.api.client import MLApiClient
 from mercadolivre_upload.application.publish_product import PublishProductUseCase
 from mercadolivre_upload.auth import AuthManager
 from mercadolivre_upload.domain.category.resolver import CategoryResolver
+from mercadolivre_upload.domain.fiscal.service import FiscalService
 from mercadolivre_upload.domain.shipping.resolver import ShippingResolver
 from mercadolivre_upload.domain.cache_attribute_mapper import CachedAttributeMapper
 from mercadolivre_upload.infrastructure.cache.attribute_cache import AttributeCache
@@ -113,6 +114,7 @@ def main():
         attribute_cache=attribute_cache,
     )
     shipping_resolver = ShippingResolver(api_client)
+    fiscal_service = FiscalService(api_client)
 
     # Initialize application layer (orchestration)
     use_case = PublishProductUseCase(
@@ -120,6 +122,7 @@ def main():
         publisher=api_client,
         image_uploader=image_uploader,
         shipping_resolver=shipping_resolver,
+        fiscal_service=fiscal_service,
         config=config,
         dry_run=args.dry_run,
         cache_dir=args.cache_dir,

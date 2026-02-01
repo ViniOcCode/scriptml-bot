@@ -249,8 +249,15 @@ class SpreadsheetParser:
         # Handle ISBN/GTIN if present
         isbn = self._get_value(row, "isbn", "") or self._get_value(row, "gtin", "")
         if isbn:
-            attributes["isbn"] = str(isbn).strip()
-            attributes["gtin"] = str(isbn).strip()
+            isbn_clean = str(isbn).strip()
+            # Accept any numeric GTIN/EAN (8, 12, 13, or 14 digits)
+            isbn_digits = re.sub(r'\D', '', isbn_clean)
+            if len(isbn_digits) in [8, 12, 13, 14]:
+                attributes["isbn"] = isbn_clean
+                attributes["gtin"] = isbn_clean
+            else:
+                logger.warning(f"Skipping invalid GTIN/ISBN for {sku}: {isbn_clean} "
+                              f"(expected 8, 12, 13, or 14 digits, got {len(isbn_digits)})")
 
         # Handle Fotos column - store in attributes for image uploader
         fotos = self._get_value(row, "fotos", "")

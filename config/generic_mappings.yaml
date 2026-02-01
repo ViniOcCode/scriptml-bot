@@ -106,6 +106,40 @@ explicit_mappings:
     target: "attribute"
     id: "WEIGHT"
     unit_suffix: " kg"
+  
+  # GTIN/EAN mapping
+  "EAN / GTIN":
+    target: "attribute"
+    id: "GTIN"
+  
+  "ISBN":
+    target: "attribute"
+    id: "GTIN"
+  
+  # Book-specific fields already handled by cache, but explicit helps
+  "Título do livro":
+    target: "attribute"
+    id: "BOOK_TITLE"
+  
+  "Autor":
+    target: "attribute"
+    id: "AUTHOR"
+  
+  "Editora do livro":
+    target: "attribute"
+    id: "BOOK_PUBLISHER"
+  
+  "Gênero do livro":
+    target: "attribute"
+    id: "BOOK_GENRE"
+  
+  "Idioma":
+    target: "attribute"
+    id: "LANGUAGE"
+  
+  "Capa do livro":
+    target: "attribute"
+    id: "BOOK_COVER"
 
 # Standard product fields (same across all categories)
 standard_fields:
@@ -232,128 +266,6 @@ standard_fields:
       "used": "used"
       "1": "used"
       "recondicionado": "used"
-
-# Fiscal/tax fields (same for all products)
-fiscal_fields:
-  ncm:
-    description: "NCM code (8 digits)"
-    required: true
-    patterns:
-      - "ncm"
-      - "código ncm"
-      - "codigo ncm"
-      - "cód ncm"
-      - "cod ncm"
-      - "n.c.m"
-      - "n.c.m."
-    exact_matches:
-      - "NCM"
-      - "ncm"
-    validation:
-      pattern: '^\d{8}$'
-      message: "NCM deve ter exatamente 8 dígitos numéricos"
-
-  origin:
-    description: "Product origin code"
-    required: true
-    patterns:
-      - "origem"
-      - "origem produto"
-      - "código origem"
-      - "codigo origem"
-    exact_matches:
-      - "Origem"
-      - "ORIGEM"
-    value_mappings:
-      # Origin codes for tax purposes
-      "0": "0"
-      "1": "1"
-      "2": "2"
-      "3": "3"
-      "4": "4"
-      "5": "5"
-      "6": "6"
-      "7": "7"
-      "8": "8"
-      "nacional": "0"
-      "importado": "1"
-      "estrangeira": "1"
-      "nacional importacao": "2"
-      "nacional similar": "3"
-      "condicao 4": "4"
-      "condicao 5": "5"
-      "condicao 6": "6"
-      "condicao 7": "7"
-      "condicao 8": "8"
-
-  cfop:
-    description: "CFOP code"
-    required: false
-    patterns:
-      - "cfop"
-      - "código cfop"
-      - "codigo cfop"
-    exact_matches:
-      - "CFOP"
-      - "cfop"
-    validation:
-      pattern: '^\d{4}$'
-      message: "CFOP deve ter 4 dígitos"
-
-  cest:
-    description: "CEST code"
-    required: false
-    patterns:
-      - "cest"
-      - "código cest"
-      - "codigo cest"
-    exact_matches:
-      - "CEST"
-      - "cest"
-    validation:
-      pattern: '^\d{7}$'
-      message: "CEST deve ter 7 dígitos"
-
-  cost:
-    description: "Product cost for tax calculation"
-    required: false
-    patterns:
-      - "custo"
-      - "custo produto"
-      - "preço custo"
-      - "preco custo"
-      - "valor custo"
-    exact_matches:
-      - "Custo"
-      - "CUSTO"
-
-  # Additional fiscal fields
-  csosn:
-    description: "CSOSN for Simples Nacional"
-    required: false
-    patterns:
-      - "csosn"
-      - "código csosn"
-      - "codigo csosn"
-    exact_matches:
-      - "CSOSN"
-      - "csosn"
-
-  origin_type:
-    description: "Origin type (reseller/manufacturer/importer)"
-    required: false
-    default_value: "reseller"
-    patterns:
-      - "tipo origem"
-      - "tipo de origem"
-      - "origin type"
-    value_mappings:
-      "revenda": "reseller"
-      "reseller": "reseller"
-      "fabricante": "manufacturer"
-      "manufacturer": "manufacturer"
-      "importador": "importer"
-      "importer": "importer"
 
 # Image-related fields
 image_fields:
@@ -543,25 +455,6 @@ similarity:
   # Threshold for considering values redundant (0.0 - 1.0)
   # Higher = more strict (only very similar values are considered redundant)
   redundancy_threshold: 0.9
-
-# =============================================================================
-# FISCAL DEFAULTS
-# =============================================================================
-fiscal_defaults:
-  # Default product type
-  type: "single"
-  
-  # Default measurement unit
-  measurement_unit: "UN"
-  
-  # Default cost (0 means not set)
-  cost: 0.0
-  
-  # Default origin type
-  origin_type: "reseller"
-  
-  # Default origin detail (empty means not set)
-  origin_detail: ""
 
 # =============================================================================
 # DIMENSION PATTERNS

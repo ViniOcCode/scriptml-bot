@@ -167,7 +167,12 @@ class TestFiscalService(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures."""
         self.mock_api = MagicMock()
-        self.service = FiscalService(self.mock_api)
+        # Use zero wait delay for tests to avoid long waits
+        self.service = FiscalService(
+            self.mock_api,
+            can_invoice_wait_delay=0.0,
+            can_invoice_max_retries=0
+        )
         self.valid_fiscal_data = FiscalData(
             sku="SKU123",
             title="Test Product",
@@ -179,9 +184,9 @@ class TestFiscalService(unittest.TestCase):
 
     def test_submit_fiscal_data_workflow_already_exists(self):
         """Test workflow when fiscal data already exists."""
-        # Mock API responses
-        self.mock_api.check_fiscal_data_exists.return_value = (True, {"id": "123"})
+        # Mock API responses - can_invoice must return True first
         self.mock_api.verify_invoice_readiness.return_value = (True, {"status": True})
+        self.mock_api.check_fiscal_data_exists.return_value = (True, {"id": "123"})
 
         result = self.service.submit_fiscal_data_workflow(
             "MLB123456", self.valid_fiscal_data
@@ -192,17 +197,17 @@ class TestFiscalService(unittest.TestCase):
         self.assertEqual(result.item_id, "MLB123456")
         self.assertEqual(result.sku, "SKU123")
 
-        # Verify API calls
+        # Verify API calls - can_invoice is called first now
+        self.mock_api.verify_invoice_readiness.assert_called_with("MLB123456")
         self.mock_api.check_fiscal_data_exists.assert_called_once_with("SKU123")
         self.mock_api.register_fiscal_data.assert_not_called()
-        self.mock_api.verify_invoice_readiness.assert_called_once_with("MLB123456")
 
     def test_submit_fiscal_data_workflow_register_new(self):
         """Test workflow when registering new fiscal data."""
-        # Mock API responses
+        # Mock API responses - can_invoice must return True first
+        self.mock_api.verify_invoice_readiness.return_value = (True, {"status": True})
         self.mock_api.check_fiscal_data_exists.return_value = (False, None)
         self.mock_api.register_fiscal_data.return_value = {"id": "456"}
-        self.mock_api.verify_invoice_readiness.return_value = (True, {"status": True})
 
         result = self.service.submit_fiscal_data_workflow(
             "MLB123456", self.valid_fiscal_data
@@ -211,10 +216,10 @@ class TestFiscalService(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertEqual(result.status, FiscalSubmissionStatus.VERIFIED)
 
-        # Verify API calls
+        # Verify API calls - can_invoice is called first, then at the end
+        self.mock_api.verify_invoice_readiness.assert_called_with("MLB123456")
         self.mock_api.check_fiscal_data_exists.assert_called_once_with("SKU123")
         self.mock_api.register_fiscal_data.assert_called_once()
-        self.mock_api.verify_invoice_readiness.assert_called_once_with("MLB123456")
 
     def test_submit_fiscal_data_workflow_register_new_with_retry(self):
         """Test workflow with retry during registration."""
@@ -225,10 +230,11 @@ class TestFiscalService(unittest.TestCase):
         error = requests.HTTPError("Service Unavailable")
         error.response = mock_response
 
-        # Mock API responses - check exists returns False, register fails once then succeeds
+        # Mock API responses - can_invoice returns True, check exists returns False,
+        # register fails once then succeeds
+        self.mock_api.verify_invoice_readiness.return_value = (True, {"status": True})
         self.mock_api.check_fiscal_data_exists.return_value = (False, None)
         self.mock_api.register_fiscal_data.side_effect = [error, {"id": "456"}]
-        self.mock_api.verify_invoice_readiness.return_value = (True, {"status": True})
 
         with patch("time.sleep") as mock_sleep:
             result = self.service.submit_fiscal_data_workflow(
@@ -260,12 +266,14 @@ class TestFiscalService(unittest.TestCase):
 
     def test_submit_fiscal_data_workflow_not_invoice_ready(self):
         """Test workflow when item is not invoice ready."""
+        # First can_invoice check returns True (to proceed with fiscal data)
+        # Final verify_invoice_readiness returns False
+        self.mock_api.verify_invoice_readiness.side_effect = [
+            (True, {"status": True}),  # First check - ready for fiscal data
+            (False, {"status": False, "reason": "missing_data"}),  # Final check
+        ]
         self.mock_api.check_fiscal_data_exists.return_value = (False, None)
         self.mock_api.register_fiscal_data.return_value = {"id": "456"}
-        self.mock_api.verify_invoice_readiness.return_value = (
-            False,
-            {"status": False, "reason": "missing_data"},
-        )
 
         result = self.service.submit_fiscal_data_workflow(
             "MLB123456", self.valid_fiscal_data
@@ -277,6 +285,8 @@ class TestFiscalService(unittest.TestCase):
 
     def test_submit_fiscal_data_workflow_check_exists_error(self):
         """Test workflow when check exists fails."""
+        # can_invoice returns True first, then check_exists fails
+        self.mock_api.verify_invoice_readiness.return_value = (True, {"status": True})
         self.mock_api.check_fiscal_data_exists.side_effect = requests.HTTPError(
             "Server Error"
         )
@@ -291,6 +301,8 @@ class TestFiscalService(unittest.TestCase):
 
     def test_submit_fiscal_data_workflow_register_error(self):
         """Test workflow when registration fails."""
+        # can_invoice returns True first, then registration fails
+        self.mock_api.verify_invoice_readiness.return_value = (True, {"status": True})
         self.mock_api.check_fiscal_data_exists.return_value = (False, None)
         self.mock_api.register_fiscal_data.side_effect = requests.HTTPError(
             "Bad Request"
@@ -313,13 +325,13 @@ class TestFiscalService(unittest.TestCase):
         error = requests.HTTPError("Service Unavailable")
         error.response = mock_response
 
-        # Fail twice, then succeed
+        # can_invoice returns True, then check_exists fails twice, then succeeds
+        self.mock_api.verify_invoice_readiness.return_value = (True, {"status": True})
         self.mock_api.check_fiscal_data_exists.side_effect = [
             error,
             error,
             (True, {"id": "123"}),
         ]
-        self.mock_api.verify_invoice_readiness.return_value = (True, {"status": True})
 
         with patch("time.sleep") as mock_sleep:
             result = self.service.submit_fiscal_data_workflow(
@@ -327,7 +339,7 @@ class TestFiscalService(unittest.TestCase):
             )
 
         self.assertTrue(result.success)
-        # Retry count is from verify_invoice_readiness since check_exists succeeded on 3rd try
+        # Retry count is from check_exists retry logic
         self.assertEqual(self.mock_api.check_fiscal_data_exists.call_count, 3)
         mock_sleep.assert_called()
 
@@ -339,6 +351,8 @@ class TestFiscalService(unittest.TestCase):
         error = requests.HTTPError("Bad Request")
         error.response = mock_response
 
+        # can_invoice returns True, then check_exists fails with non-retryable error
+        self.mock_api.verify_invoice_readiness.return_value = (True, {"status": True})
         self.mock_api.check_fiscal_data_exists.side_effect = error
 
         with patch("time.sleep") as mock_sleep:
@@ -364,8 +378,9 @@ class TestFiscalService(unittest.TestCase):
             )),
         ]
 
-        self.mock_api.check_fiscal_data_exists.return_value = (True, {"id": "123"})
+        # can_invoice returns True for both items
         self.mock_api.verify_invoice_readiness.return_value = (True, {"status": True})
+        self.mock_api.check_fiscal_data_exists.return_value = (True, {"id": "123"})
 
         results = self.service.submit_fiscal_data_batch(items)
 

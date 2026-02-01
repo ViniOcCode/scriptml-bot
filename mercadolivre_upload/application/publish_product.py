@@ -111,6 +111,9 @@ class PublishProductUseCase:
         self._cache_mapper: Optional[CachedAttributeMapper] = None
         self._current_category_id: Optional[str] = None
 
+        # Pending fiscal data for batch submission
+        self._pending_fiscal: list[tuple[str, FiscalData]] = []
+
     def execute(self, products: list[Product], category_name: str) -> dict:
         """Execute publishing use case.
 
@@ -265,9 +268,12 @@ class PublishProductUseCase:
             )
             
             # Merge attributes: cache results take precedence
-            cache_attr_ids = {attr["id"] for attr in ml_attributes}
+            cache_attr_ids = {attr["id"] for attr in ml_attributes if "id" in attr}
             for attr in fuzzy_attributes:
-                if attr["id"] not in cache_attr_ids:
+                # Skip special markers (like _listing_type_id)
+                if "id" not in attr:
+                    ml_attributes.append(attr)
+                elif attr["id"] not in cache_attr_ids:
                     ml_attributes.append(attr)
             
             # Merge sale_terms
@@ -459,6 +465,21 @@ class PublishProductUseCase:
             sale_terms = core_defaults.get('sale_terms', [])
             logger.info("Using default sale_terms from config")
         
+        # Check if listing_type_id was explicitly mapped from spreadsheet
+        explicit_listing_type = None
+        for attr in ml_attributes:
+            if "_listing_type_id" in attr:
+                explicit_listing_type = attr.pop("_listing_type_id")
+                break
+        
+        # Determine listing_type_id: explicit > has_pictures_default > free
+        if explicit_listing_type:
+            listing_type_id = explicit_listing_type
+        elif pictures:
+            listing_type_id = core_defaults.get('listing_type_id')
+        else:
+            listing_type_id = "free"
+        
         # Build item with values from config only (no hardcoded fallbacks)
         item = {
             "title": product.title,
@@ -468,7 +489,7 @@ class PublishProductUseCase:
             "available_quantity": product.available_quantity,
             "buying_mode": core_defaults.get('buying_mode'),
             "condition": product.condition,
-            "listing_type_id": "free" if not pictures else core_defaults.get('listing_type_id'),
+            "listing_type_id": listing_type_id,
             "description": {"plain_text": product.description},
             "pictures": pictures if pictures else [],
             "attributes": ml_attributes,
@@ -581,7 +602,7 @@ class PublishProductUseCase:
                     product.sku, ml_attributes, validation_result
                 )
 
-            # Submit fiscal data if available and service is configured
+            # Queue fiscal data for batch submission if available
             if (
                 self.enable_fiscal_submission
                 and self.fiscal_service
@@ -589,20 +610,8 @@ class PublishProductUseCase:
                 and product.fiscal
                 and product.fiscal.is_valid
             ):
-                logger.info(f"Submitting fiscal data for {product.sku} (item: {published_item_id})")
-                fiscal_result = self.fiscal_service.submit_fiscal_data(
-                    published_item_id,
-                    product.fiscal
-                )
-                self.fiscal_results.append(fiscal_result)
-                
-                if fiscal_result.success:
-                    logger.info(f"Fiscal data submitted successfully for {product.sku}")
-                else:
-                    logger.warning(
-                        f"Fiscal data submission failed for {product.sku}: "
-                        f"{fiscal_result.error_message}"
-                    )
+                logger.info(f"Queueing fiscal data for {product.sku} (item: {published_item_id})")
+                self._pending_fiscal.append((published_item_id, product.fiscal))
 
             return True
         except Exception as e:
@@ -753,3 +762,25 @@ class PublishProductUseCase:
                         # Convert comma decimals to dot (ML accepts dot) then append default unit
                         normalized = val.strip().replace(",", ".")
                         attr["value_name"] = f"{normalized} {default_unit}"
+
+    def _submit_fiscal_batch(self, pending_fiscal: list[tuple[str, FiscalData]]) -> None:
+        """Submit fiscal data for multiple items using the fiscal service.
+
+        Args:
+            pending_fiscal: List of (item_id, fiscal_data) tuples
+        """
+        if not self.fiscal_service:
+            logger.warning("No fiscal service configured, skipping fiscal batch submission")
+            return
+
+        logger.info(f"Submitting fiscal data for {len(pending_fiscal)} items")
+        results = self.fiscal_service.submit_fiscal_data_batch(pending_fiscal)
+        self.fiscal_results.extend(results)
+
+        success_count = sum(1 for r in results if r.success)
+        failed_count = len(results) - success_count
+
+        if success_count:
+            logger.info(f"Successfully submitted fiscal data for {success_count} items")
+        if failed_count:
+            logger.warning(f"Failed to submit fiscal data for {failed_count} items")

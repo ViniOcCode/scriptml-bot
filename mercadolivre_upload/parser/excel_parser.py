@@ -17,19 +17,34 @@ def _load_config_mappings() -> dict:
     """Load column mappings from config file.
     
     Returns:
-        Dictionary of column mappings from config/standard_fields
+        Dictionary of column mappings from config/standard_fields and config/fiscal_fields
     """
     try:
+        mappings = {}
+        
+        # Load standard fields from generic_mappings.yaml
         config_path = Path("config/generic_mappings.yaml")
         with open(config_path, 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f)
         
-        # Build mappings from standard_fields and fiscal_fields
-        mappings = {}
         standard_fields = config.get('standard_fields', {})
-        fiscal_fields = config.get('fiscal_fields', {})
         
-        for field_name, field_config in {**standard_fields, **fiscal_fields}.items():
+        for field_name, field_config in standard_fields.items():
+            patterns = field_config.get('patterns', [])
+            exact_matches = field_config.get('exact_matches', [])
+            # Combine patterns and exact matches for column matching
+            all_patterns = list(dict.fromkeys(patterns + exact_matches))  # Preserve order, remove duplicates
+            if all_patterns:
+                mappings[field_name] = all_patterns
+        
+        # Load fiscal fields from fiscal_config.yaml
+        fiscal_config_path = Path("config/fiscal_config.yaml")
+        with open(fiscal_config_path, 'r', encoding='utf-8') as f:
+            fiscal_config = yaml.safe_load(f)
+        
+        fiscal_fields = fiscal_config.get('fiscal_fields', {})
+        
+        for field_name, field_config in fiscal_fields.items():
             patterns = field_config.get('patterns', [])
             exact_matches = field_config.get('exact_matches', [])
             # Combine patterns and exact matches for column matching

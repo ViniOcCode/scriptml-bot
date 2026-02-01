@@ -1,0 +1,195 @@
+# =============================================================================
+# FISCAL CONFIGURATION
+# =============================================================================
+# Fiscal/tax fields configuration for Mercado Livre products
+# Based on ML API documentation for fiscal information submission:
+# https://developers.mercadolivre.com.br/pt_br/envio-dos-dados-fiscais
+#
+# Fields are used for:
+# - Mapping Excel columns to fiscal data fields
+# - Validation of fiscal data
+# - Default values for fiscal fields
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# FISCAL FIELDS MAPPINGS
+# -----------------------------------------------------------------------------
+# These define how to identify fiscal-related columns in Excel spreadsheets
+# and map them to the corresponding ML API fields.
+#
+# Each field has:
+# - description: Human-readable description
+# - required: Whether the field is required for fiscal submission
+# - patterns: Regex patterns to match column names (case-insensitive)
+# - exact_matches: Exact column name matches (case-sensitive)
+# - validation: Regex validation rules for field values
+# - value_mappings: Maps input values to ML API values
+# - default_value: Default value if not provided
+# -----------------------------------------------------------------------------
+fiscal_fields:
+  ncm:
+    description: "NCM code (8 digits)"
+    required: true
+    patterns:
+      - "ncm"
+      - "código ncm"
+      - "codigo ncm"
+      - "cód ncm"
+      - "cod ncm"
+      - "n.c.m"
+      - "n.c.m."
+    exact_matches:
+      - "NCM"
+      - "ncm"
+    validation:
+      pattern: '^\d{8}$'
+      message: "NCM deve ter exatamente 8 dígitos numéricos"
+
+  origin:
+    description: "Product origin code"
+    required: true
+    patterns:
+      - "origem"
+      - "origem produto"
+      - "código origem"
+      - "codigo origem"
+    exact_matches:
+      - "Origem"
+      - "ORIGEM"
+    value_mappings:
+      # Origin codes for tax purposes (0-8)
+      "0": "0"
+      "1": "1"
+      "2": "2"
+      "3": "3"
+      "4": "4"
+      "5": "5"
+      "6": "6"
+      "7": "7"
+      "8": "8"
+      "nacional": "0"
+      "importado": "1"
+      "estrangeira": "1"
+      "nacional importacao": "2"
+      "nacional similar": "3"
+      "condicao 4": "4"
+      "condicao 5": "5"
+      "condicao 6": "6"
+      "condicao 7": "7"
+      "condicao 8": "8"
+
+  cfop:
+    description: "CFOP code"
+    required: false
+    patterns:
+      - "cfop"
+      - "código cfop"
+      - "codigo cfop"
+    exact_matches:
+      - "CFOP"
+      - "cfop"
+    validation:
+      pattern: '^\d{4}$'
+      message: "CFOP deve ter 4 dígitos"
+
+  cest:
+    description: "CEST code"
+    required: false
+    patterns:
+      - "cest"
+      - "código cest"
+      - "codigo cest"
+    exact_matches:
+      - "CEST"
+      - "cest"
+    validation:
+      pattern: '^\d{7}$'
+      message: "CEST deve ter 7 dígitos"
+
+  cost:
+    description: "Product cost for tax calculation"
+    required: false
+    patterns:
+      - "custo"
+      - "custo produto"
+      - "preço custo"
+      - "preco custo"
+      - "valor custo"
+    exact_matches:
+      - "Custo"
+      - "CUSTO"
+
+  csosn:
+    description: "CSOSN for Simples Nacional"
+    required: false
+    patterns:
+      - "csosn"
+      - "código csosn"
+      - "codigo csosn"
+    exact_matches:
+      - "CSOSN"
+      - "csosn"
+
+  origin_type:
+    description: "Origin type (reseller/manufacturer/importer)"
+    required: false
+    default_value: "reseller"
+    patterns:
+      - "tipo origem"
+      - "tipo de origem"
+      - "origin type"
+    value_mappings:
+      "revenda": "reseller"
+      "reseller": "reseller"
+      "fabricante": "manufacturer"
+      "manufacturer": "manufacturer"
+      "importador": "importer"
+      "importer": "importer"
+
+
+# -----------------------------------------------------------------------------
+# FISCAL DEFAULTS
+# -----------------------------------------------------------------------------
+# Default values for fiscal fields when not provided in the source data.
+# These values are used when creating FiscalData objects and fields are empty.
+# -----------------------------------------------------------------------------
+fiscal_defaults:
+  # Default product type - "single" for individual items, "variation" for products with variations
+  type: "single"
+
+  # Default measurement unit - "UN" (units), "KG", "LT", etc.
+  measurement_unit: "UN"
+
+  # Default cost (0.0 means not set - user must provide cost)
+  cost: 0.0
+
+  # Default origin type - "reseller", "manufacturer", "importer"
+  origin_type: "reseller"
+
+  # Default origin detail (empty means not set - user must provide origin code 0-8)
+  origin_detail: ""
+
+  # Default tax payer type - "individual" or "company"
+  tax_payer_type: "company"
+
+
+# -----------------------------------------------------------------------------
+# ORIGIN CODE REFERENCE
+# -----------------------------------------------------------------------------
+# Reference for origin_detail codes (ICMS origin codes):
+# 0 - Nacional
+# 1 - Estrangeira - Importação direta
+# 2 - Estrangeira - Adquirida no mercado interno
+# 3 - Nacional - Mercadoria ou bem com conteúdo de importação superior a 40%
+# 4 - Nacional - Cuja produção tenha sido feita em conformidade com processos
+#     produtivos básicos de que tratam as legislações citadas nos Ajustes
+# 5 - Nacional - Mercadoria ou bem com conteúdo de importação inferior ou igual a 40%
+# 6 - Estrangeira - Importação direta sem similar nacional
+# 7 - Estrangeira - Adquirida no mercado interno sem similar nacional
+# 8 - Nacional - Mercadoria ou bem com conteúdo de importação superior a 70%
+#
+# Origin type reference:
+# - reseller: Revendedor (compra para revender)
+# - manufacturer: Fabricante (produz o produto)
+# - importer: Importador (importa o produto)
+# -----------------------------------------------------------------------------

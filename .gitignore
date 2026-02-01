@@ -14,3 +14,5 @@ tokens.json
 CLAUDE.md
 /plans
 cache/
+AGENTS/
+venv_*

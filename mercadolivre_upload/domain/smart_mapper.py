@@ -65,7 +65,10 @@ class SmartAttributeMapper:
         self._category_cache: dict[str, list[dict]] = {}
         
     def _load_config(self, config_path: str) -> dict:
-        """Load generic mappings from YAML config."""
+        """Load generic mappings from YAML config.
+        
+        Also loads fiscal fields from fiscal_config.yaml and merges them.
+        """
         config_file = Path(config_path)
         if not config_file.exists():
             logger.warning(f"Config file not found: {config_path}")
@@ -75,6 +78,16 @@ class SmartAttributeMapper:
             with open(config_file, 'r', encoding='utf-8') as f:
                 config = yaml.safe_load(f)
             logger.info(f"Loaded config from {config_path}")
+            
+            # Also load fiscal fields from fiscal_config.yaml
+            fiscal_config_path = Path("config/fiscal_config.yaml")
+            if fiscal_config_path.exists():
+                with open(fiscal_config_path, 'r', encoding='utf-8') as f:
+                    fiscal_config = yaml.safe_load(f)
+                # Merge fiscal fields into config
+                config['fiscal_fields'] = fiscal_config.get('fiscal_fields', {})
+                logger.info(f"Loaded fiscal config from {fiscal_config_path}")
+            
             return config
         except Exception as e:
             logger.error(f"Failed to load config: {e}")
