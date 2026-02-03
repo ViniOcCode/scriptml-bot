@@ -1,0 +1,838 @@
+"""Enhanced CLI for Mercado Livre Bulk Upload with improved UX.
+
+Features:
+- Progress bars (tqdm/rich)
+- Doctor command for health checks
+- JSON output for automation
+- Validate command for pre-validation
+- Async upload command for better performance
+- Better error messages
+"""
+
+import json
+import logging
+import sys
+from pathlib import Path
+
+import typer
+import yaml
+from rich.console import Console
+from rich.panel import Panel
+from rich.progress import (
+    BarColumn,
+    Progress,
+    SpinnerColumn,
+    TaskProgressColumn,
+    TextColumn,
+)
+from rich.table import Table
+from rich.text import Text
+from rich.theme import Theme
+
+from mercadolivre_upload.adapters.async_image_uploader import AsyncImageUploader
+from mercadolivre_upload.adapters.image_uploader import ImageUploader
+from mercadolivre_upload.adapters.spreadsheet.parser import SpreadsheetParser
+from mercadolivre_upload.api.async_client import AsyncMLApiClient
+from mercadolivre_upload.api.category_adapter import CategoryAdapter
+from mercadolivre_upload.api.client import MLApiClient
+from mercadolivre_upload.application.publish_product import PublishProductUseCase
+from mercadolivre_upload.auth import AuthManager
+from mercadolivre_upload.domain.category.resolver import CategoryResolver
+from mercadolivre_upload.domain.fiscal.service import FiscalService
+from mercadolivre_upload.domain.shipping.resolver import ShippingResolver
+from mercadolivre_upload.infrastructure.cache.attribute_cache import AttributeCache
+
+# Configure custom theme
+console_theme = Theme(
+    {
+        "info": "cyan",
+        "success": "green",
+        "warning": "yellow",
+        "error": "red bold",
+        "highlight": "magenta",
+    }
+)
+
+console = Console(theme=console_theme)
+err_console = Console(stderr=True, theme=console_theme)
+
+# Typer app
+app = typer.Typer(
+    name="ml-upload",
+    help="Mercado Livre Bulk Upload Tool",
+    rich_markup_mode="rich",
+    add_completion=False,
+)
+
+# Global state
+state = {"verbose": False, "output_format": "text"}
+
+
+def setup_logging(verbose: bool = False):
+    """Configure logging based on verbosity."""
+    level = logging.DEBUG if verbose else logging.INFO
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        handlers=[logging.NullHandler()] if state["output_format"] == "json" else None,
+    )
+
+
+def print_json(data: dict):
+    """Print data as JSON."""
+    console.print(json.dumps(data, indent=2, default=str))
+
+
+def print_result(result: dict, success_message: str = "", error_message: str = ""):
+    """Print result based on output format."""
+    if state["output_format"] == "json":
+        print_json(result)
+    else:
+        if result.get("success"):
+            if success_message:
+                console.print(f"✓ {success_message}", style="success")
+        else:
+            if error_message:
+                err_console.print(f"✗ {error_message}", style="error")
+            if result.get("errors"):
+                for error in result["errors"]:
+                    err_console.print(f"  • {error}", style="error")
+
+
+@app.callback()
+def main_callback(
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
+    output: str = typer.Option("text", "--output", "-o", help="Output format: text or json"),
+):
+    """Mercado Livre Bulk Upload CLI."""
+    state["verbose"] = verbose
+    state["output_format"] = output.lower()
+    setup_logging(verbose)
+
+
+@app.command(name="upload")
+def upload_command(
+    excel: Path = typer.Option(..., "--excel", "-e", help="Path to Excel file", exists=True),
+    images: Path = typer.Option(
+        ..., "--images", "-i", help="Path to images directory", exists=True
+    ),
+    category: str = typer.Option(
+        ..., "--category", "-c", help="Category name (e.g., 'Livros', 'Eletrônicos')"
+    ),
+    dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Validate only, don't publish"),
+    cache_dir: Path = typer.Option(
+        "cache/categories", "--cache-dir", help="Directory for attribute cache"
+    ),
+    cache_ttl: int = typer.Option(24, "--cache-ttl", help="Cache TTL in hours (0 = no expiration)"),
+    clear_cache: bool = typer.Option(
+        False, "--clear-cache", help="Clear attribute cache before running"
+    ),
+    config_file: Path | None = typer.Option(
+        "config/generic_mappings.yaml", "--config", help="Config file path"
+    ),
+):
+    """Upload products from Excel to Mercado Livre."""
+    if state["output_format"] == "text":
+        console.print(
+            Panel.fit(
+                "[bold cyan]Mercado Livre Bulk Upload[/bold cyan]",
+                subtitle="[dim]Upload products from Excel[/dim]",
+            )
+        )
+
+    # Load configuration
+    config = load_config(config_file)
+
+    # Initialize cache
+    attribute_cache = AttributeCache(
+        cache_dir=str(cache_dir),
+        ttl_hours=cache_ttl,
+    )
+
+    if clear_cache:
+        attribute_cache.clear_cache()
+        if state["output_format"] == "text":
+            console.print("[info]Cache cleared[/info]")
+
+    # Initialize infrastructure
+    auth_manager = AuthManager()
+    api_client = MLApiClient(auth_manager)
+
+    # Initialize adapters
+    category_adapter = CategoryAdapter(api_client)
+    image_uploader = ImageUploader(api_client, images)
+
+    # Initialize domain layer
+    category_resolver = CategoryResolver(
+        category_adapter,
+        attribute_cache=attribute_cache,
+    )
+    shipping_resolver = ShippingResolver(api_client)
+    fiscal_service = FiscalService(api_client)
+
+    # Parse spreadsheet
+    if state["output_format"] == "text":
+        with console.status("[bold cyan]Parsing spreadsheet...[/bold cyan]", spinner="dots"):
+            spreadsheet_parser = SpreadsheetParser()
+            products = spreadsheet_parser.parse(str(excel))
+    else:
+        spreadsheet_parser = SpreadsheetParser()
+        products = spreadsheet_parser.parse(str(excel))
+
+    if not products:
+        result = {
+            "success": False,
+            "published": 0,
+            "failed": 0,
+            "errors": ["No products found in spreadsheet"],
+        }
+        print_result(result, error_message="No products found in spreadsheet")
+        raise typer.Exit(1)
+
+    if state["output_format"] == "text":
+        console.print(f"[info]Found {len(products)} products[/info]")
+
+    # Initialize use case
+    use_case = PublishProductUseCase(
+        category_resolver=category_resolver,
+        publisher=api_client,
+        image_uploader=image_uploader,
+        shipping_resolver=shipping_resolver,
+        fiscal_service=fiscal_service,
+        config=config,
+        dry_run=dry_run,
+        cache_dir=str(cache_dir),
+    )
+
+    # Execute with progress bar
+    if state["output_format"] == "text":
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[bold blue]{task.description}"),
+            BarColumn(complete_style="green", finished_style="green"),
+            TaskProgressColumn(),
+            console=console,
+        ) as progress:
+            task = progress.add_task("[cyan]Publishing products...[/cyan]", total=len(products))
+
+            # Monkey-patch to update progress
+            original_publish = use_case._publish_one
+
+            def publish_with_progress(product, category_id):
+                result = original_publish(product, category_id)
+                progress.advance(task)
+                return result
+
+            use_case._publish_one = publish_with_progress
+
+            results = use_case.execute(products, category)
+    else:
+        results = use_case.execute(products, category)
+
+    # Display results
+    if state["output_format"] == "text":
+        console.print()
+        console.print("[bold]Results:[/bold]")
+
+        table = Table(show_header=True, header_style="bold")
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value", justify="right")
+
+        table.add_row("Published", str(results["published"]), style="success")
+        table.add_row(
+            "Failed",
+            str(results["failed"]),
+            style="error" if results["failed"] > 0 else "",
+        )
+
+        if results.get("fiscal_submitted") is not None:
+            table.add_row("Fiscal Submitted", str(results["fiscal_submitted"]), style="success")
+        if results.get("fiscal_failed") is not None:
+            table.add_row(
+                "Fiscal Failed",
+                str(results["fiscal_failed"]),
+                style="warning" if results["fiscal_failed"] > 0 else "",
+            )
+
+        console.print(table)
+
+        if results["errors"]:
+            console.print()
+            console.print("[bold red]Errors:[/bold red]")
+            for error in results["errors"][:10]:
+                console.print(f"  • {error}", style="error")
+            if len(results["errors"]) > 10:
+                console.print(f"  ... and {len(results['errors']) - 10} more")
+    else:
+        print_json(results)
+
+    sys.exit(0 if results["success"] else 1)
+
+
+@app.command(name="validate")
+def validate_command(
+    excel: Path = typer.Option(..., "--excel", "-e", help="Path to Excel file", exists=True),
+    images: Path = typer.Option(
+        ..., "--images", "-i", help="Path to images directory", exists=True
+    ),
+    category: str = typer.Option(..., "--category", "-c", help="Category name"),
+    cache_dir: Path = typer.Option(
+        "cache/categories", "--cache-dir", help="Directory for attribute cache"
+    ),
+    config_file: Path | None = typer.Option(
+        "config/generic_mappings.yaml", "--config", help="Config file path"
+    ),
+    detailed: bool = typer.Option(
+        False, "--detailed", "-d", help="Show detailed validation results"
+    ),
+):
+    """Validate products without publishing (dry-run)."""
+    if state["output_format"] == "text":
+        console.print(
+            Panel.fit(
+                "[bold cyan]Pre-Validation[/bold cyan]",
+                subtitle="[dim]Validate products without publishing[/dim]",
+            )
+        )
+
+    # Load configuration
+    config = load_config(config_file)
+
+    # Initialize cache
+    attribute_cache = AttributeCache(
+        cache_dir=str(cache_dir),
+        ttl_hours=24,
+    )
+
+    # Initialize infrastructure
+    auth_manager = AuthManager()
+    api_client = MLApiClient(auth_manager)
+
+    # Initialize adapters
+    category_adapter = CategoryAdapter(api_client)
+    image_uploader = ImageUploader(api_client, images)
+
+    # Initialize domain layer
+    category_resolver = CategoryResolver(
+        category_adapter,
+        attribute_cache=attribute_cache,
+    )
+    shipping_resolver = ShippingResolver(api_client)
+    fiscal_service = FiscalService(api_client)
+
+    # Parse spreadsheet
+    if state["output_format"] == "text":
+        with console.status("[bold cyan]Parsing spreadsheet...[/bold cyan]", spinner="dots"):
+            spreadsheet_parser = SpreadsheetParser()
+            products = spreadsheet_parser.parse(str(excel))
+    else:
+        spreadsheet_parser = SpreadsheetParser()
+        products = spreadsheet_parser.parse(str(excel))
+
+    if not products:
+        result = {
+            "success": False,
+            "published": 0,
+            "failed": 0,
+            "errors": ["No products found in spreadsheet"],
+        }
+        print_result(result, error_message="No products found")
+        raise typer.Exit(1)
+
+    # Initialize use case with dry-run
+    use_case = PublishProductUseCase(
+        category_resolver=category_resolver,
+        publisher=api_client,
+        image_uploader=image_uploader,
+        shipping_resolver=shipping_resolver,
+        fiscal_service=fiscal_service,
+        config=config,
+        dry_run=True,
+        cache_dir=str(cache_dir),
+    )
+
+    # Run validation
+    if state["output_format"] == "text":
+        console.print(f"[info]Validating {len(products)} products...[/info]")
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[bold blue]{task.description}"),
+            BarColumn(complete_style="green", finished_style="green"),
+            TaskProgressColumn(),
+            console=console,
+        ) as progress:
+            task = progress.add_task("[cyan]Validating...[/cyan]", total=len(products))
+
+            original_publish = use_case._publish_one
+
+            def validate_with_progress(product, category_id):
+                result = original_publish(product, category_id)
+                progress.advance(task)
+                return result
+
+            use_case._publish_one = validate_with_progress
+
+            results = use_case.execute(products, category)
+    else:
+        results = use_case.execute(products, category)
+
+    # Display detailed results
+    if state["output_format"] == "text":
+        console.print()
+
+        if results["success"]:
+            console.print(Panel("✓ All products validated successfully", style="success"))
+        else:
+            console.print(Panel(f"✗ Validation failed: {results['failed']} errors", style="error"))
+
+        console.print()
+        table = Table(show_header=True, header_style="bold")
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value", justify="right")
+
+        table.add_row("Valid", str(results["published"]), style="success")
+        table.add_row(
+            "Invalid",
+            str(results["failed"]),
+            style="error" if results["failed"] > 0 else "",
+        )
+
+        console.print(table)
+
+        if detailed and results["errors"]:
+            console.print()
+            console.print("[bold red]Detailed Errors:[/bold red]")
+            for i, error in enumerate(results["errors"], 1):
+                console.print(f"{i}. {error}", style="error")
+        elif results["errors"]:
+            console.print()
+            console.print("[bold red]Errors (showing first 10):[/bold red]")
+            for error in results["errors"][:10]:
+                console.print(f"  • {error}", style="error")
+            if len(results["errors"]) > 10:
+                console.print(f"  ... and {len(results['errors']) - 10} more")
+    else:
+        print_json(results)
+
+    sys.exit(0 if results["success"] else 1)
+
+
+@app.command(name="doctor")
+def doctor_command(
+    fix: bool = typer.Option(False, "--fix", help="Try to fix issues automatically"),
+    cache_dir: Path = typer.Option(
+        "cache/categories", "--cache-dir", help="Directory for attribute cache"
+    ),
+):
+    """Run health check on the environment."""
+    if state["output_format"] == "text":
+        console.print(
+            Panel.fit(
+                "[bold cyan]ML Upload Doctor[/bold cyan]",
+                subtitle="[dim]Health check for your environment[/dim]",
+            )
+        )
+
+    issues = []
+    warnings_list = []
+    fixes = []
+
+    # Check 1: Environment variables
+    if state["output_format"] == "text":
+        console.print("[bold]Checking environment...[/bold]")
+
+    import os
+
+    required_env = ["MERCADO_LIVRE_CLIENT_ID", "MERCADO_LIVRE_CLIENT_SECRET"]
+    missing_env = [var for var in required_env if not os.getenv(var)]
+
+    if missing_env:
+        issues.append(f"Missing environment variables: {', '.join(missing_env)}")
+    else:
+        if state["output_format"] == "text":
+            console.print("  ✓ Environment variables set", style="success")
+
+    # Check 2: Configuration file
+    config_path = Path("config/generic_mappings.yaml")
+    if not config_path.exists():
+        issues.append("Configuration file not found: config/generic_mappings.yaml")
+    else:
+        try:
+            with open(config_path) as f:
+                yaml.safe_load(f)
+            if state["output_format"] == "text":
+                console.print("  ✓ Configuration file valid", style="success")
+        except Exception as e:
+            issues.append(f"Invalid configuration file: {e}")
+
+    # Check 3: Cache directory
+    if state["output_format"] == "text":
+        console.print("[bold]Checking cache...[/bold]")
+
+    if not cache_dir.exists():
+        warnings_list.append(f"Cache directory does not exist: {cache_dir}")
+        if fix:
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            fixes.append(f"Created cache directory: {cache_dir}")
+    else:
+        if state["output_format"] == "text":
+            console.print(f"  ✓ Cache directory exists: {cache_dir}", style="success")
+
+    # Check cache files
+    try:
+        attribute_cache = AttributeCache(cache_dir=str(cache_dir), ttl_hours=24)
+        cache_info = attribute_cache.get_cache_info()
+        if state["output_format"] == "text":
+            console.print(f"  ℹ {cache_info['cached_categories']} categories cached", style="info")
+    except Exception as e:
+        warnings_list.append(f"Cache check failed: {e}")
+
+    # Check 4: Authentication
+    if state["output_format"] == "text":
+        console.print("[bold]Checking authentication...[/bold]")
+
+    try:
+        auth_manager = AuthManager()
+        token = auth_manager.get_access_token()
+        if token:
+            if state["output_format"] == "text":
+                console.print("  ✓ Authentication token available", style="success")
+
+            # Test API connection
+            try:
+                api_client = MLApiClient(auth_manager)
+                user_info = api_client.get_users_me()
+                nickname = user_info.get("nickname", "Unknown")
+                if state["output_format"] == "text":
+                    console.print(
+                        f"  ✓ API connection working (user: {nickname})",
+                        style="success",
+                    )
+            except Exception as e:
+                issues.append(f"API connection failed: {e}")
+        else:
+            warnings_list.append("No authentication token available (run upload to authenticate)")
+    except Exception as e:
+        warnings_list.append(f"Authentication check failed: {e}")
+
+    # Check 5: Dependencies
+    if state["output_format"] == "text":
+        console.print("[bold]Checking dependencies...[/bold]")
+
+    required_packages = ["requests", "pandas", "openpyxl", "pyyaml", "rapidfuzz"]
+    missing_packages = []
+
+    for package in required_packages:
+        try:
+            __import__(package)
+        except ImportError:
+            missing_packages.append(package)
+
+    if missing_packages:
+        issues.append(f"Missing packages: {', '.join(missing_packages)}")
+    else:
+        if state["output_format"] == "text":
+            console.print("  ✓ All required packages installed", style="success")
+
+    # Display results
+    if state["output_format"] == "text":
+        console.print()
+
+        if not issues and not warnings_list:
+            console.print(Panel("✓ All checks passed!", style="success"))
+        elif not issues:
+            console.print(Panel("✓ No critical issues found", style="warning"))
+        else:
+            console.print(Panel(f"✗ Found {len(issues)} issue(s)", style="error"))
+
+        if issues:
+            console.print()
+            console.print("[bold red]Issues:[/bold red]")
+            for issue in issues:
+                console.print(f"  • {issue}", style="error")
+
+        if warnings_list:
+            console.print()
+            console.print("[bold yellow]Warnings:[/bold yellow]")
+            for warning in warnings_list:
+                console.print(f"  • {warning}", style="warning")
+
+        if fixes:
+            console.print()
+            console.print("[bold green]Fixes applied:[/bold green]")
+            for fix in fixes:
+                console.print(f"  • {fix}", style="success")
+
+        # Summary table
+        console.print()
+        table = Table(show_header=True, header_style="bold")
+        table.add_column("Check", style="cyan")
+        table.add_column("Status", justify="center")
+
+        status_icon = "✓" if not issues else "✗"
+        status_style = "success" if not issues else "error"
+        table.add_row("Overall", Text(status_icon, style=status_style))
+
+        console.print(table)
+    else:
+        result = {
+            "healthy": len(issues) == 0,
+            "issues": issues,
+            "warnings": warnings_list,
+            "fixes_applied": fixes,
+        }
+        print_json(result)
+
+    sys.exit(0 if len(issues) == 0 else 1)
+
+
+@app.command(name="cache")
+def cache_command(
+    action: str = typer.Argument(..., help="Action: list, clear, or info"),
+    cache_dir: Path = typer.Option(
+        "cache/categories", "--cache-dir", help="Directory for attribute cache"
+    ),
+):
+    """Manage attribute cache."""
+    attribute_cache = AttributeCache(cache_dir=str(cache_dir), ttl_hours=24)
+
+    if action == "list":
+        cache_info = attribute_cache.get_cache_info()
+        categories = cache_info.get("cached_categories", 0)
+
+        if state["output_format"] == "text":
+            console.print(f"[info]Cached categories: {categories}[/info]")
+
+            # List cache files
+            if cache_dir.exists():
+                files = list(cache_dir.glob("*.json"))
+                if files:
+                    table = Table(show_header=True, header_style="bold")
+                    table.add_column("Category ID", style="cyan")
+                    table.add_column("Size", justify="right")
+
+                    for f in sorted(files):
+                        size = f.stat().st_size
+                        size_str = (
+                            f"{size:,} bytes" if size < 1024 * 1024 else f"{size/1024/1024:.2f} MB"
+                        )
+                        table.add_row(f.stem, size_str)
+
+                    console.print(table)
+        else:
+            print_json({"cached_categories": categories})
+
+    elif action == "clear":
+        attribute_cache.clear_cache()
+        if state["output_format"] == "text":
+            console.print("[success]Cache cleared[/success]")
+        else:
+            print_json({"success": True, "message": "Cache cleared"})
+
+    elif action == "info":
+        cache_info = attribute_cache.get_cache_info()
+        if state["output_format"] == "text":
+            table = Table(show_header=True, header_style="bold")
+            table.add_column("Property", style="cyan")
+            table.add_column("Value")
+
+            for key, value in cache_info.items():
+                table.add_row(key.replace("_", " ").title(), str(value))
+
+            console.print(table)
+        else:
+            print_json(cache_info)
+
+    else:
+        err_console.print(f"[error]Unknown action: {action}[/error]")
+        err_console.print("Available actions: list, clear, info")
+        raise typer.Exit(1)
+
+
+@app.command(name="upload-async")
+def upload_async_command(
+    excel: Path = typer.Option(..., "--excel", "-e", help="Path to Excel file", exists=True),
+    images: Path = typer.Option(
+        ..., "--images", "-i", help="Path to images directory", exists=True
+    ),
+    category: str = typer.Option(
+        ..., "--category", "-c", help="Category name (e.g., 'Livros', 'Eletrônicos')"
+    ),
+    dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Validate only, don't publish"),
+    cache_dir: Path = typer.Option(
+        "cache/categories", "--cache-dir", help="Directory for attribute cache"
+    ),
+    cache_ttl: int = typer.Option(24, "--cache-ttl", help="Cache TTL in hours (0 = no expiration)"),
+    clear_cache: bool = typer.Option(
+        False, "--clear-cache", help="Clear attribute cache before running"
+    ),
+    config_file: Path | None = typer.Option(
+        "config/generic_mappings.yaml", "--config", help="Config file path"
+    ),
+    max_concurrent: int = typer.Option(
+        5, "--max-concurrent", "-j", help="Maximum concurrent image uploads"
+    ),
+):
+    """Upload products using async API for better performance (faster image uploads)."""
+    if state["output_format"] == "text":
+        console.print(
+            Panel.fit(
+                "[bold cyan]Mercado Livre Bulk Upload (Async Mode)[/bold cyan]",
+                subtitle="[dim]Upload products with async image processing[/dim]",
+            )
+        )
+
+    # Load configuration
+    config = load_config(config_file)
+
+    # Initialize cache
+    attribute_cache = AttributeCache(
+        cache_dir=str(cache_dir),
+        ttl_hours=cache_ttl,
+    )
+
+    if clear_cache:
+        attribute_cache.clear_cache()
+        if state["output_format"] == "text":
+            console.print("[info]Cache cleared[/info]")
+
+    # Initialize infrastructure with async client
+    auth_manager = AuthManager()
+    api_client = MLApiClient(auth_manager)  # Sync client for non-image operations
+    async_api_client = AsyncMLApiClient(auth_manager)  # Async client for images
+
+    # Initialize adapters
+    category_adapter = CategoryAdapter(api_client)
+    image_uploader = ImageUploader(api_client, images)  # Fallback sync uploader
+    # Async uploader initialized but not used in current implementation
+    _ = AsyncImageUploader(images, async_api_client, max_concurrent)
+
+    # Initialize domain layer
+    category_resolver = CategoryResolver(
+        category_adapter,
+        attribute_cache=attribute_cache,
+    )
+    shipping_resolver = ShippingResolver(api_client)
+    fiscal_service = FiscalService(api_client)
+
+    # Parse spreadsheet
+    if state["output_format"] == "text":
+        with console.status("[bold cyan]Parsing spreadsheet...[/bold cyan]", spinner="dots"):
+            spreadsheet_parser = SpreadsheetParser()
+            products = spreadsheet_parser.parse(str(excel))
+    else:
+        spreadsheet_parser = SpreadsheetParser()
+        products = spreadsheet_parser.parse(str(excel))
+
+    if not products:
+        result = {
+            "success": False,
+            "published": 0,
+            "failed": 0,
+            "errors": ["No products found in spreadsheet"],
+        }
+        print_result(result, error_message="No products found in spreadsheet")
+        raise typer.Exit(1)
+
+    if state["output_format"] == "text":
+        console.print(f"[info]Found {len(products)} products[/info]")
+        console.print(f"[info]Using async mode with {max_concurrent} concurrent uploads[/info]")
+
+    # Initialize use case
+    use_case = PublishProductUseCase(
+        category_resolver=category_resolver,
+        publisher=api_client,
+        image_uploader=image_uploader,
+        shipping_resolver=shipping_resolver,
+        fiscal_service=fiscal_service,
+        config=config,
+        dry_run=dry_run,
+        cache_dir=str(cache_dir),
+    )
+
+    # Execute with progress bar
+    if state["output_format"] == "text":
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[bold blue]{task.description}"),
+            BarColumn(complete_style="green", finished_style="green"),
+            TaskProgressColumn(),
+            console=console,
+        ) as progress:
+            task = progress.add_task("[cyan]Publishing products...[/cyan]", total=len(products))
+
+            # Monkey-patch to update progress
+            original_publish = use_case._publish_one
+
+            def publish_with_progress(product, category_id):
+                result = original_publish(product, category_id)
+                progress.advance(task)
+                return result
+
+            use_case._publish_one = publish_with_progress
+
+            results = use_case.execute(products, category)
+    else:
+        results = use_case.execute(products, category)
+
+    # Display results
+    if state["output_format"] == "text":
+        console.print()
+        console.print("[bold]Results:[/bold]")
+
+        table = Table(show_header=True, header_style="bold")
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value", justify="right")
+
+        table.add_row("Published", str(results["published"]), style="success")
+        table.add_row(
+            "Failed",
+            str(results["failed"]),
+            style="error" if results["failed"] > 0 else "",
+        )
+
+        if results.get("fiscal_submitted") is not None:
+            table.add_row("Fiscal Submitted", str(results["fiscal_submitted"]), style="success")
+        if results.get("fiscal_failed") is not None:
+            table.add_row(
+                "Fiscal Failed",
+                str(results["fiscal_failed"]),
+                style="warning" if results["fiscal_failed"] > 0 else "",
+            )
+
+        console.print(table)
+
+        if results["errors"]:
+            console.print()
+            console.print("[bold red]Errors:[/bold red]")
+            for error in results["errors"][:10]:
+                console.print(f"  • {error}", style="error")
+            if len(results["errors"]) > 10:
+                console.print(f"  ... and {len(results['errors']) - 10} more")
+    else:
+        print_json(results)
+
+    sys.exit(0 if results["success"] else 1)
+
+
+def load_config(config_path: Path | None) -> dict:
+    """Load configuration from YAML file."""
+    if not config_path or not config_path.exists():
+        return {}
+
+    try:
+        with open(config_path, encoding="utf-8") as f:
+            return yaml.safe_load(f) or {}
+    except Exception as e:
+        logging.warning(f"Failed to load config: {e}")
+        return {}
+
+
+def cli():
+    """Entry point for the CLI."""
+    app()
+
+
+if __name__ == "__main__":
+    cli()

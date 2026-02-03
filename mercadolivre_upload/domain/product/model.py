@@ -21,6 +21,8 @@ class Product:
     condition: str  # "new" or "used"
     fiscal: FiscalData
     attributes: dict[str, str] = field(default_factory=dict)
+    clip_file_path: Optional[Path] = None  # New field for video file path
+    clip_uuid: Optional[str] = None # New field for clip UUID
 
     def __post_init__(self):
         """Validate product data."""
@@ -42,6 +44,8 @@ class Product:
             "condition": self.condition,
             "fiscal": self.fiscal.to_dict(),
             "attributes": self.attributes,
+            "clip_file_path": str(self.clip_file_path) if self.clip_file_path else None, # Include clip_file_path
+            "clip_uuid": self.clip_uuid, # Include clip_uuid
         }
 
     def get_attribute(self, name: str, default: Optional[str] = None) -> Optional[str]:

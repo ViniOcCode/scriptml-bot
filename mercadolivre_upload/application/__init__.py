@@ -1,5 +1,19 @@
-"""Application layer - Use cases / Orchestration."""
+"""Application layer (use cases).
 
-from mercadolivre_upload.application.publish_product import PublishProductUseCase
+This layer orchestrates domain logic and adapters.
+"""
 
-__all__ = ["PublishProductUseCase"]
+from .ports import ImageUploaderPort, ItemPublisherPort, ShippingResolverPort
+from .results import PublishResult, BatchPublishResult
+from .attribute_builder import AttributeBuilderService
+from .publish_product import PublishProductUseCase
+
+__all__ = [
+    "ImageUploaderPort",
+    "ItemPublisherPort",
+    "ShippingResolverPort",
+    "PublishResult",
+    "BatchPublishResult",
+    "AttributeBuilderService",
+    "PublishProductUseCase",
+]

@@ -8,11 +8,47 @@ wheels/
 
 # Virtual environments
 .venv
+venv/
+env/
+venv_*/
+
+# Testing & Coverage
+htmlcov/
+.coverage
+.pytest_cache/
+.tox/
+.mypy_cache/
+.dmypy.json
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Project specific
 anuncios/**
 tokens.json
+tokens.json.*
 .env
 CLAUDE.md
 /plans
 cache/
+cache/**/
 AGENTS/
-venv_*
+.github/*
+.claude/*
+.benchmarks/*
+.ruff_cache/
+scripts/
+
+# Documentation build
+docs/*
+
+
+

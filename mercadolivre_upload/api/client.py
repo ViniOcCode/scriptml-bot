@@ -202,7 +202,7 @@ class MLApiClient:
                 if token:
                     headers["Authorization"] = f"Bearer {token}"
 
-            url = f"{self.base_url}/pictures"
+            url = f"{self.base_url}/pictures/items/upload"
             response = self.session.post(url, headers=headers, files=files, timeout=60)
             response.raise_for_status()
 

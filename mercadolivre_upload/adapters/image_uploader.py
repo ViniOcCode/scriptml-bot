@@ -40,10 +40,16 @@ class ImageUploader:
         if sku in self._cache:
             return self._cache[sku]
 
+        # Try SKU-specific folder first
         sku_folder = self.images_base_path / sku
-
+        
+        # Fall back to base folder if SKU folder doesn't exist
         if not sku_folder.exists():
-            logger.warning(f"Image folder not found: {sku_folder}")
+            logger.warning(f"Image folder not found: {sku_folder}, using base folder")
+            sku_folder = self.images_base_path
+            
+        if not sku_folder.exists():
+            logger.warning(f"Base image folder not found: {sku_folder}")
             return []
 
         urls = []

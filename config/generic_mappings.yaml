@@ -508,6 +508,8 @@ header_detection:
       - "origem"
     cest:
       - "cest"
+    cost:
+      - "custo"
     fotos:
       - "fotos"
   

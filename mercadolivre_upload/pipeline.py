@@ -13,8 +13,8 @@ from typing import Optional
 from mercadolivre_upload.api.category_resolver import CategoryResolver
 from mercadolivre_upload.api.client import MLApiClient
 from mercadolivre_upload.auth.manager import AuthManager
-from mercadolivre_upload.parser.dynamic_parser import DynamicExcelParser
-from mercadolivre_upload.parser.models import Product
+from mercadolivre_upload.adapters.spreadsheet.dynamic_parser import DynamicExcelParser
+from mercadolivre_upload.adapters.spreadsheet.models import Product
 from mercadolivre_upload.publisher.publisher import Publisher
 
 logger = logging.getLogger(__name__)

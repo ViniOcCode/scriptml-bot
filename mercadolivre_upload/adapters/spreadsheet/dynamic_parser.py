@@ -12,8 +12,8 @@ from typing import Optional
 import pandas as pd
 
 from mercadolivre_upload.domain.text_normalizer import PortugueseTextNormalizer
-from mercadolivre_upload.parser.exceptions import MissingColumnError, ValidationError
-from mercadolivre_upload.parser.models import FiscalData, Product
+from .exceptions import MissingColumnError, ValidationError
+from .models import FiscalData, Product
 
 logger = logging.getLogger(__name__)
 

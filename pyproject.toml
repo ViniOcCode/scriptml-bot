@@ -1,15 +1,191 @@
 [project]
-name = "scriptml"
+name = "mercado-livre-bulk-upload"
 version = "0.1.0"
-description = "Add your description here"
+description = "Automated bulk product publication for Mercado Livre with secure token storage"
 readme = "README.md"
 requires-python = ">=3.13"
+license = "MIT"
+authors = [
+    {name = "Vinicius", email = "viniciusoctavio@hotmail.com"}
+]
+keywords = ["mercado-livre", "ecommerce", "bulk-upload", "api", "automation"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Office/Business :: Financial :: Point-Of-Sale",
+]
+
 dependencies = [
     "openpyxl>=3.0.0",
     "pandas>=1.5.0",
-    "pytest>=7.0.0",
-    "pytest-mock>=3.0.0",
     "python-dotenv>=1.0.0",
     "pyyaml>=6.0.0",
     "requests>=2.28.0",
+    "cryptography>=41.0.0",
+    "keyring>=24.0.0",
+    "aiohttp>=3.9.0",
+    "rich>=13.7.0",
+    "typer>=0.9.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
 ]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-mock>=3.12.0",
+    "pytest-cov>=4.1.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-benchmark>=4.0.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.7.0",
+    "pre-commit>=3.5.0",
+    "safety>=2.3.0",
+    "bandit>=1.7.0",
+]
+
+[project.scripts]
+ml-upload = "mercadolivre_upload.main:main"
+
+[tool.setuptools]
+packages = ["mercadolivre_upload", "mercadolivre_upload.cli", "mercadolivre_upload.cli.commands", "mercadolivre_upload.adapters", "mercadolivre_upload.adapters.spreadsheet", "mercadolivre_upload.api", "mercadolivre_upload.application", "mercadolivre_upload.application.builders", "mercadolivre_upload.auth", "mercadolivre_upload.domain", "mercadolivre_upload.domain.fiscal", "mercadolivre_upload.domain.product", "mercadolivre_upload.domain.category", "mercadolivre_upload.domain.shipping", "mercadolivre_upload.domain.validation", "mercadolivre_upload.infrastructure", "mercadolivre_upload.infrastructure.cache", "mercadolivre_upload.utils"]
+
+[project.urls]
+Homepage = "https://github.com/vinicius/scriptml"
+Repository = "https://github.com/vinicius/scriptml"
+Issues = "https://github.com/vinicius/scriptml/issues"
+
+# =============================================================================
+# BLACK - Code formatting
+# =============================================================================
+[tool.black]
+line-length = 100
+target-version = ['py313']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+  | venv
+)/
+'''
+
+# =============================================================================
+# RUFF - Fast Python linter (replaces flake8, isort, pydocstyle)
+# =============================================================================
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+indent-width = 4
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # Pyflakes
+    "W",    # pycodestyle warnings
+    "I",    # isort
+    "N",    # pep8-naming
+    "D",    # pydocstyle
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "C4",   # flake8-comprehensions
+    "SIM",  # flake8-simplify
+    "S",    # flake8-bandit (security)
+]
+ignore = [
+    "D100",  # Missing module docstring (optional)
+    "D104",  # Missing public package docstring (optional)
+    "S101",  # Use of assert detected (common in tests)
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S", "D"]  # Skip security and docstring checks in tests
+
+# =============================================================================
+# MYPY - Static type checking
+# =============================================================================
+[tool.mypy]
+python_version = "3.13"
+strict = true
+warn_return_any = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unused_configs = true
+show_error_codes = true
+show_column_numbers = true
+ignore_missing_imports = true
+
+# Per-module options
+[[tool.mypy.overrides]]
+module = "tests.*"
+strict = false
+disallow_untyped_defs = false
+
+# =============================================================================
+# PYTEST - Testing framework
+# =============================================================================
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = """
+    --tb=short
+    -v
+    --strict-markers
+    --cov=mercadolivre_upload
+    --cov-report=term-missing
+    --cov-report=html:htmlcov
+    --cov-fail-under=20
+"""
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests",
+]
+asyncio_mode = "auto"
+
+# =============================================================================
+# COVERAGE - Test coverage
+# =============================================================================
+[tool.coverage.run]
+source = ["mercadolivre_upload"]
+omit = [
+    "*/tests/*",
+    "*/test_*",
+    "mercadolivre_upload/__main__.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
+precision = 2
+fail_under = 20
+
+[tool.coverage.html]
+directory = "htmlcov"
+
+# =============================================================================
+# PRE-COMMIT - Git hooks
+# =============================================================================
+[tool.pre-commit]
+# Configuration in .pre-commit-config.yaml

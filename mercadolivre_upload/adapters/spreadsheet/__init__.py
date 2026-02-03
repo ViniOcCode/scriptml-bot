@@ -1,6 +1,7 @@
-"""Spreadsheet adapter module."""
+"""Spreadsheet adapters module."""
 
-from mercadolivre_upload.adapters.spreadsheet.parser import SpreadsheetParser
-from mercadolivre_upload.adapters.spreadsheet.header_detector import HeaderDetector
+from .parser import SpreadsheetParser
+from .dynamic_parser import DynamicExcelParser
+from .excel_parser import ExcelParser
 
-__all__ = ["SpreadsheetParser", "HeaderDetector"]
+__all__ = ["SpreadsheetParser", "DynamicExcelParser", "ExcelParser"]

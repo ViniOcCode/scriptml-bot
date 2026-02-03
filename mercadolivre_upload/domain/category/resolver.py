@@ -511,10 +511,11 @@ class CategoryResolver:
         """
         # Try cache first if available
         if self._attribute_cache:
-            cached = self._attribute_cache.get_attribute_metadata(category_id)
+            cached = self._attribute_cache.get_attributes(category_id)
             if cached is not None:
                 logger.debug(f"Using cached metadata for {category_id}")
-                return cached
+                # Convert cached dicts to AttributeMeta objects
+                return [AttributeMeta.from_ml_api(attr) for attr in cached]
 
         # Fetch from API
         raw_attributes = self._api.get_category_attributes(category_id)

@@ -1,1 +1,1 @@
-"""Tests for Mercado Livre Bulk Upload Pipeline."""
+"""Tests package for mercadolivre_upload."""

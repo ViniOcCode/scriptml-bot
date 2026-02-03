@@ -6,51 +6,20 @@ Orchestrates domain logic and adapters to publish products.
 import logging
 import re
 from pathlib import Path
-from typing import Any, Optional, Protocol
+from typing import Any, Optional
 
 from mercadolivre_upload.domain.category.resolver import CategoryResolver
 from mercadolivre_upload.domain.product.model import Product
 from mercadolivre_upload.domain.fiscal.data import FiscalData
-from mercadolivre_upload.domain.fiscal.service import FiscalService, FiscalSubmissionResult
-from mercadolivre_upload.domain.attribute_mapper import AttributeMapper
+from mercadolivre_upload.domain.fiscal.service import FiscalService
 from mercadolivre_upload.domain.cache_attribute_mapper import CachedAttributeMapper
-from mercadolivre_upload.domain.validation import (
-    StructuralValidator,
-    SemanticScorer,
-    AttributeSanitizer,
-    ValidationFeedback,
-)
-from mercadolivre_upload.adapters.spreadsheet.parser import SpreadsheetParser
+from mercadolivre_upload.domain.validation import ValidationFeedback
+
+from .ports import ImageUploaderPort, ItemPublisherPort, ShippingResolverPort
+from .results import BatchPublishResult, PublishResult
+from .attribute_builder import AttributeBuilderService
 
 logger = logging.getLogger(__name__)
-
-
-class ImageUploaderPort(Protocol):
-    """Port for image upload operations."""
-
-    def upload_images(self, sku: str) -> list[str]:
-        """Upload images for SKU and return URLs."""
-        ...
-
-
-class ItemPublisherPort(Protocol):
-    """Port for item publishing operations."""
-
-    def validate_item(self, item: dict) -> dict:
-        """Validate item payload."""
-        ...
-
-    def create_item(self, item: dict) -> dict:
-        """Create/publish item."""
-        ...
-
-
-class ShippingResolverPort(Protocol):
-    """Port for shipping mode resolution."""
-
-    def get_best_shipping_mode(self) -> str:
-        """Get best available shipping mode for user."""
-        ...
 
 
 class PublishProductUseCase:
@@ -92,7 +61,6 @@ class PublishProductUseCase:
         self.fiscal_service = fiscal_service
         self.config = config or {}
         self.dry_run = dry_run
-        self.min_attribute_score = min_attribute_score
         self.enable_fiscal_submission = enable_fiscal_submission
         self.cache_dir = cache_dir
 
@@ -104,8 +72,13 @@ class PublishProductUseCase:
         # Initialize feedback system
         self.feedback = ValidationFeedback() if enable_feedback else None
 
-        # Cache for attribute metadata
-        self._attr_metadata_cache: dict[str, list] = {}
+        # Initialize attribute builder service
+        self._attribute_builder = AttributeBuilderService(
+            category_resolver=category_resolver,
+            config=self.config,
+            min_attribute_score=min_attribute_score,
+            feedback=self.feedback,
+        )
 
         # Cache mapper instance (initialized per category)
         self._cache_mapper: Optional[CachedAttributeMapper] = None
@@ -207,222 +180,12 @@ class PublishProductUseCase:
             self._cache_mapper = None
             self._current_category_id = None
 
-    def _build_attributes(
-        self, product: Product, category_id: str
-    ) -> tuple[list[dict], list[dict], list[str], list[str]]:
-        """Build sanitized attributes using semantic validation pipeline.
-
-        Returns:
-            Tuple of (attributes, sale_terms, warnings, errors)
-        """
-        warnings = []
-        errors = []
-
-        # 1. Get attribute metadata for structural validation
-        try:
-            attr_metadata = self.category_resolver.get_attribute_metadata(category_id)
-            self._attr_metadata_cache[category_id] = attr_metadata
-        except Exception as e:
-            logger.error(f"Failed to get attribute metadata: {e}")
-            errors.append(f"attribute_metadata: {e}")
-            return [], [], warnings, errors
-
-        # 2. Map product attributes using cache-first strategy
-        ml_attributes: list[dict] = []
-        sale_terms: list[dict] = []
-        cache_attributes: list[dict] = []
-        
-        # Try cache mapper first if available
-        if self._cache_mapper is not None:
-            cache_attributes = self._map_attributes_with_cache(product.attributes)
-            if cache_attributes:
-                ml_attributes.extend(cache_attributes)
-                logger.info(f"Mapped {len(cache_attributes)} attributes via cache mapper")
-        
-        # Apply explicit mappings and fuzzy matching for remaining attributes
-        # (only if cache mapper didn't handle them)
-        cache_mapped_keys: set[str] = set()
-        if self._cache_mapper is not None and cache_attributes:
-            # Track which Excel headers were successfully mapped via cache
-            for excel_header, excel_value in product.attributes.items():
-                if not excel_value:
-                    continue
-                attr = self._cache_mapper.find_attribute_by_name(excel_header)
-                if attr and attr.get('id'):
-                    cache_mapped_keys.add(excel_header)
-        
-        # Filter out cache-mapped attributes for fuzzy processing
-        remaining_attributes = {
-            k: v for k, v in product.attributes.items() 
-            if k not in cache_mapped_keys
-        }
-        
-        if remaining_attributes:
-            logger.info(f"Falling back to fuzzy mapper for {len(remaining_attributes)} attributes")
-            attribute_mapper = AttributeMapper(similarity_threshold=0.7)
-            explicit_mappings = self.config.get('explicit_mappings', {})
-            fuzzy_attributes, fuzzy_sale_terms = attribute_mapper.map_product_attributes(
-                remaining_attributes,
-                [meta.__dict__ for meta in attr_metadata],
-                explicit_mappings=explicit_mappings
-            )
-            
-            # Merge attributes: cache results take precedence
-            cache_attr_ids = {attr["id"] for attr in ml_attributes if "id" in attr}
-            for attr in fuzzy_attributes:
-                # Skip special markers (like _listing_type_id)
-                if "id" not in attr:
-                    ml_attributes.append(attr)
-                elif attr["id"] not in cache_attr_ids:
-                    ml_attributes.append(attr)
-            
-            # Merge sale_terms
-            if fuzzy_sale_terms:
-                sale_terms.extend(fuzzy_sale_terms)
-        else:
-            logger.info("All attributes mapped via cache, no fuzzy fallback needed")
-
-        # 3. Structural validation
-        validator = StructuralValidator(attr_metadata)
-        struct_result = validator.validate(ml_attributes)
-
-        warnings.extend(struct_result.warnings)
-        if struct_result.blocking_errors:
-            errors.extend(struct_result.blocking_errors)
-            logger.error(f"Structural validation failed: {struct_result.blocking_errors}")
-
-        if not struct_result.valid:
-            logger.warning("Proceeding with sanitized attributes despite errors")
-
-        # 4. Semantic scoring
-        scorer = SemanticScorer(attr_metadata)
-        scored_attrs = []
-        for attr in struct_result.sanitized_attrs:
-            scored = scorer.score_attribute(attr["id"], attr["value_name"])
-            scored_attrs.append(scored)
-            logger.debug(f"Attribute {scored.id}: score={scored.score}, class={scored.classification}")
-
-        # 5. Apply feedback adjustments if available
-        if self.feedback:
-            scored_attrs = self.feedback.adjust_scores(scored_attrs)
-
-        # 6. Sanitization
-        sanitizer = AttributeSanitizer(min_score=self.min_attribute_score)
-        final_attrs = sanitizer.sanitize(scored_attrs)
-
-        # Log dropped attributes
-        dropped = set(a.id for a in scored_attrs) - set(a.id for a in final_attrs)
-        for attr_id in dropped:
-            logger.warning(f"Dropped attribute {attr_id} due to low score or redundancy")
-
-        # 7. Get conditional attributes
-        attr_dict = {a.id: a.value for a in final_attrs}
-        try:
-            conditional_attrs = self.category_resolver.get_conditional_attributes(
-                category_id, attr_dict
-            )
-
-            # Check if any conditional attributes should be added
-            for cond_attr in conditional_attrs:
-                attr_id = cond_attr.get("id")
-                attr_name = cond_attr.get("name", "").lower()
-
-                if attr_id in attr_dict:
-                    continue
-
-                if attr_name in product.attributes:
-                    meta = next((m for m in attr_metadata if m.id == attr_id), None)
-                    if meta:
-                        final_attrs.append(
-                            scorer.score_attribute(attr_id, product.attributes[attr_name])
-                        )
-                    else:
-                        # Create meta from API data and score
-                        from ..domain.attribute_metadata import AttributeMeta
-                        meta = AttributeMeta.from_ml_api(cond_attr)
-                        final_attrs.append(
-                            scorer.score_attribute(attr_id, product.attributes[attr_name])
-                        )
-        except Exception as e:
-            logger.warning(f"Could not get conditional attributes: {e}")
-
-        # Convert to dict format
-        result_attrs = [{"id": a.id, "value_name": a.value} for a in final_attrs]
-
-        return result_attrs, sale_terms, warnings, errors
-
-    def _map_attributes_with_cache(
-        self, product_attributes: dict[str, str]
-    ) -> list[dict]:
-        """Map product attributes using cache mapper with logging.
-        
-        Args:
-            product_attributes: Dictionary of {column_name: value} from Excel
-            
-        Returns:
-            List of ML API attribute payloads from cache matches
-        """
-        if self._cache_mapper is None:
-            return []
-        
-        result: list[dict] = []
-        explicit_mappings = self.config.get('explicit_mappings', {})
-        
-        for excel_header, excel_value in product_attributes.items():
-            if not excel_value:
-                continue
-            
-            # Try to find attribute in cache
-            attr = self._cache_mapper.find_attribute_by_name(excel_header)
-            
-            if attr:
-                attr_id = attr.get('id')
-                attr_name = attr.get('name', '')
-                
-                if attr_id:
-                    # Log cache hit
-                    logger.info(
-                        f"Matched '{excel_header}' to {attr_id} via cache"
-                    )
-                    
-                    # Map the value using cache
-                    payload = self._cache_mapper.map_value(attr_id, str(excel_value))
-                    
-                    # Apply unit_suffix from explicit_mappings if configured
-                    if excel_header in explicit_mappings:
-                        mapping_config = explicit_mappings[excel_header]
-                        unit_suffix = mapping_config.get("unit_suffix", "")
-                        if unit_suffix:
-                            current_value = payload.get("value_name", "")
-                            if current_value and not str(current_value).lower().endswith(unit_suffix.strip().lower()):
-                                payload["value_name"] = f"{current_value}{unit_suffix}"
-                                # Also update the values array if present
-                                if payload.get("values") and len(payload["values"]) > 0:
-                                    payload["values"][0]["name"] = payload["value_name"]
-                                logger.info(
-                                    f"Applied unit_suffix '{unit_suffix}' to {attr_id}: {payload['value_name']}"
-                                )
-                    
-                    result.append(payload)
-                else:
-                    # Cache hit but no ID (shouldn't happen)
-                    logger.debug(
-                        f"Cache match for '{excel_header}' but no attribute ID found"
-                    )
-            else:
-                # Log cache miss
-                logger.info(
-                    f"No cache match for '{excel_header}', trying fuzzy..."
-                )
-        
-        return result
-
     def _publish_one(self, product: Product, category_id: str) -> bool:
         """Publish a single product."""
         logger.info(f"Publishing product: {product.sku} (title: {product.title[:50]}...)")
 
-        # Build attributes using semantic validation pipeline
-        ml_attributes, sale_terms_from_mapping, attr_warnings, attr_errors = self._build_attributes(
+        # Build attributes using attribute builder service
+        ml_attributes, sale_terms_from_mapping, attr_warnings, attr_errors = self._attribute_builder.build_attributes(
             product, category_id
         )
 
@@ -495,6 +258,7 @@ class PublishProductUseCase:
             "attributes": ml_attributes,
             "shipping": shipping_config,
             "sale_terms": sale_terms,
+            "seller_custom_field": product.sku,
         }
 
         # Log shipping section before validation
