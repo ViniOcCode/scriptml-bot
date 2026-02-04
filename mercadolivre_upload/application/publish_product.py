@@ -97,6 +97,7 @@ class PublishProductUseCase:
             category_name: Category name for all products
 
         Returns:
+
             Execution results
         """
         # Find category ID using predictor-first strategy
@@ -193,8 +194,14 @@ class PublishProductUseCase:
         logger.info(f"Publishing product: {product.sku} (title: {product.title[:50]}...)")
 
         # Build attributes using attribute builder service
-        ml_attributes, sale_terms_from_mapping, attr_warnings, attr_errors = self._attribute_builder.build_attributes(
-            product, category_id
+        (
+            ml_attributes,
+            sale_terms_from_mapping,
+            attr_warnings,
+            attr_errors,
+        ) = self._attribute_builder.build_attributes(
+            product,
+            category_id,
         )
 
         # Handle blocking attribute errors
@@ -230,7 +237,8 @@ class PublishProductUseCase:
         # Build sale_terms: use explicit mappings if available, otherwise use config defaults
         if sale_terms_from_mapping:
             sale_terms = sale_terms_from_mapping
-            logger.info(f"Using sale_terms from explicit column mappings: {[st['id'] for st in sale_terms]}")
+            sale_term_ids = [st.get("id") for st in sale_terms]
+            logger.info(f"Using sale_terms from explicit column mappings: {sale_term_ids}")
         else:
             # Use config defaults only - no hardcoded fallbacks
             sale_terms = core_defaults.get('sale_terms', [])
@@ -270,10 +278,11 @@ class PublishProductUseCase:
         }
 
         # Log shipping section before validation
-        logger.info(f"Final shipping config for {product.sku}: mode={shipping_config.get('mode')}, "
-                    f"free_shipping={shipping_config.get('free_shipping')}, "
-                    f"logistic_type={shipping_config.get('logistic_type')}, "
-                    f"local_pick_up={shipping_config.get('local_pick_up')}")
+        logger.info(
+            f"Final shipping config for {product.sku}: mode={shipping_config.get('mode')}, "
+            f"free_shipping={shipping_config.get('free_shipping')}, "
+            f"logistic_type={shipping_config.get('logistic_type')}, "
+            f"local_pick_up={shipping_config.get('local_pick_up')}")
 
         if self.dry_run:
             logger.info(f"DRY RUN: Would publish {product.sku}")
