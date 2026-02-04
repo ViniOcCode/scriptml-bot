@@ -35,6 +35,7 @@ class ImageUploader:
             sku: Product SKU
 
         Returns:
+
             List of uploaded image URLs
         """
         if sku in self._cache:
@@ -59,7 +60,8 @@ class ImageUploader:
                     result = self.client.upload_image(str(image_file))
                     # ML API returns secure_url inside variations array
                     if "variations" in result and result["variations"]:
-                        url = result["variations"][0].get("secure_url") or result["variations"][0].get("url")
+                        variation = result["variations"][0]
+                        url = variation.get("secure_url") or variation.get("url")
                         if url:
                             urls.append(url)
                         else:
