@@ -29,6 +29,7 @@ def status(
     cache_dir: Path = typer.Option(Path("cache/categories"), "--cache-dir"),
 ):
     """Show cache status."""
-    cache = AttributeCache(cache_dir=str(cache_dir))
+    # Create cache instance for status checks (no assignment needed)
+    AttributeCache(cache_dir=str(cache_dir))
     # Implementation depends on AttributeCache methods
     console.print("[info]Cache status check[/info]")
