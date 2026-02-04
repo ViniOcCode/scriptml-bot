@@ -26,7 +26,12 @@ class HeaderDetector:
         "sku": [r"\bsku\b", r"c[óo]digo", r"\bcode\b", r"item_id", r"refer[êe]ncia"],
         "title": [r"t[íi]tulo", r"\bnome\b", r"\bname\b", r"\bproduto\b", r"\bitem\b"],
         "description": [r"descri[çc][ãa]o", r"\bdesc\b", r"detalhes", r"especifica[çc][ãa]o"],
-        "price": [r"\bpre[çc]o\b", r"\bpre[çc]o\s*\[?r\$\]?", r"\bprice\b", r"\bvalor\b"],
+        "price": [
+            r"\bpre[çc]o\b",
+            r"\bpre[çc]o\s*\[?r\$\]?",
+            r"\bprice\b",
+            r"\bvalor\b",
+        ],
         "available_quantity": [r"\bestoque\b", r"\bquantidade\s+de\s+unidades\b", r"\bstock\b", r"\bqtd\b", r"dispon[íi]vel"],
         "quantity_pages": [r"quantidade\s+de\s+p[áa]ginas", r"p[áa]ginas"],
         "condition": [r"condi[çc][ãa]o", r"\bestado\b", r"situa[çc][ãa]o", r"novo/usado"],
@@ -256,7 +261,8 @@ class DynamicExcelParser:
                     if len(col_str) > 100:
                         continue
                     # Skip columns with certain keywords
-                    if re.search(r"informe|caso crie|voc[êe] deve|ttulo:", col_str, re.I):
+                    skip_pattern = re.compile(r"informe|caso crie|voc[êe] deve|ttulo:", re.I)
+                    if skip_pattern.search(col_str):
                         continue
                     # Clean column name - normalize first to handle accents, then remove special chars
                     normalized_col = PortugueseTextNormalizer.normalize(col_str)
