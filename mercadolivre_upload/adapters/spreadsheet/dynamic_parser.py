@@ -7,11 +7,11 @@ Handles merged cells, instructional headers, and variable column positions.
 import logging
 import re
 from pathlib import Path
-from typing import Optional
 
 import pandas as pd
 
 from mercadolivre_upload.domain.text_normalizer import PortugueseTextNormalizer
+
 from .exceptions import MissingColumnError, ValidationError
 from .models import FiscalData, Product
 
@@ -49,7 +49,7 @@ class HeaderDetector:
     ]
 
     def __init__(self):
-        self.header_row: Optional[int] = None
+        self.header_row: int | None = None
         self.column_mapping: dict[str, str] = {}  # canonical -> actual column name
 
     def detect_header_row(self, df: pd.DataFrame, max_rows: int = 10) -> int:
@@ -148,7 +148,7 @@ class DynamicExcelParser:
     def __init__(self):
         self.detector = HeaderDetector()
         self.column_mapping: dict[str, str] = {}  # canonical -> actual column name
-        self._data_df: Optional[pd.DataFrame] = None
+        self._data_df: pd.DataFrame | None = None
 
     def _normalize_value(self, value: any) -> str:
         """Normalize a cell value to string."""
@@ -266,7 +266,7 @@ class DynamicExcelParser:
 
         return attributes
 
-    def parse(self, file_path: str | Path, sheet_name: Optional[str] = None) -> list[Product]:
+    def parse(self, file_path: str | Path, sheet_name: str | None = None) -> list[Product]:
         """Parse Excel file with dynamic header detection.
 
         Args:
@@ -371,7 +371,7 @@ class DynamicExcelParser:
             attributes=attributes,
         )
 
-    def get_raw_data(self) -> Optional[pd.DataFrame]:
+    def get_raw_data(self) -> pd.DataFrame | None:
         """Get the raw DataFrame after header detection (for debugging)."""
         return self._data_df
 

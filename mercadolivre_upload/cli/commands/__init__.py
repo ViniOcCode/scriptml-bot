@@ -1,5 +1,5 @@
 """CLI commands module."""
 
-from . import upload, validate, cache_cmd, doctor
+from . import cache_cmd, doctor, upload, validate
 
 __all__ = ["upload", "validate", "cache_cmd", "doctor"]

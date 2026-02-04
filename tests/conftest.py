@@ -2,12 +2,11 @@
 Pytest configuration and shared fixtures.
 """
 import os
-import pytest
 import sys
-import tempfile
-import json
 from pathlib import Path
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import MagicMock, Mock, patch
+
+import pytest
 
 # Add project root to path
 project_root = Path(__file__).parent.parent
@@ -26,24 +25,24 @@ def mock_credentials():
     original_app_id = os.environ.get("ML_APP_ID")
     original_app_secret = os.environ.get("ML_APP_SECRET")
     original_redirect_uri = os.environ.get("ML_REDIRECT_URI")
-    
+
     os.environ["ML_APP_ID"] = "mock_app_id_12345"
     os.environ["ML_APP_SECRET"] = "mock_app_secret_67890"
     os.environ["ML_REDIRECT_URI"] = "http://localhost:8000/callback"
-    
+
     yield
-    
+
     # Restaura valores originais
     if original_app_id is not None:
         os.environ["ML_APP_ID"] = original_app_id
     elif "ML_APP_ID" in os.environ:
         del os.environ["ML_APP_ID"]
-        
+
     if original_app_secret is not None:
         os.environ["ML_APP_SECRET"] = original_app_secret
     elif "ML_APP_SECRET" in os.environ:
         del os.environ["ML_APP_SECRET"]
-        
+
     if original_redirect_uri is not None:
         os.environ["ML_REDIRECT_URI"] = original_redirect_uri
     elif "ML_REDIRECT_URI" in os.environ:
@@ -194,12 +193,12 @@ def mock_api_response():
         response.status_code = status_code
         response.json.return_value = json_data or {}
         response.text = text or str(json_data)
-        
+
         if raise_error:
             response.raise_for_status.side_effect = raise_error
         else:
             response.raise_for_status.return_value = None
-            
+
         return response
     return _create_response
 
@@ -213,7 +212,7 @@ def mock_session_factory():
             responses_dict: Dict mapeando (method, url) -> response mock
         """
         session = Mock()
-        
+
         def mock_request(method, url, **kwargs):
             key = (method.upper(), url)
             # Tentar match exato
@@ -229,13 +228,13 @@ def mock_session_factory():
             default.status_code = 404
             default.json.return_value = {"message": "Not found"}
             return default
-        
+
         session.request = mock_request
         session.get = lambda url, **kw: mock_request("GET", url, **kw)
         session.post = lambda url, **kw: mock_request("POST", url, **kw)
         session.put = lambda url, **kw: mock_request("PUT", url, **kw)
         session.delete = lambda url, **kw: mock_request("DELETE", url, **kw)
-        
+
         return session
     return _create_session
 

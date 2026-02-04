@@ -1,19 +1,16 @@
 """Semantic scoring engine for attributes."""
 
 import logging
-import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 import yaml
 
-from ..attribute_metadata import AttributeMeta
 from ..attribute_classifier import (
-    AttributeClassifier,
     CLASS_LOGISTICS,
-    classify_attribute,
+    AttributeClassifier,
 )
+from ..attribute_metadata import AttributeMeta
 
 logger = logging.getLogger(__name__)
 
@@ -26,11 +23,11 @@ def _load_scoring_config() -> dict:
     """
     try:
         config_path = Path("config/generic_mappings.yaml")
-        with open(config_path, 'r', encoding='utf-8') as f:
+        with open(config_path, encoding='utf-8') as f:
             config = yaml.safe_load(f)
-        
+
         scoring_config = config.get('scoring', {})
-        
+
         return {
             'base_score': scoring_config.get('base_score', 100),
             'penalties': scoring_config.get('penalties', {}),
@@ -73,7 +70,7 @@ class SemanticScorer:
     Uses configuration from config/generic_mappings.yaml as the single source of truth.
     """
 
-    def __init__(self, attribute_metadata: list[AttributeMeta], config: Optional[dict] = None):
+    def __init__(self, attribute_metadata: list[AttributeMeta], config: dict | None = None):
         """Initialize the scorer.
         
         Args:
@@ -82,7 +79,7 @@ class SemanticScorer:
         """
         self.metadata = {attr.id: attr for attr in attribute_metadata}
         self.classifier = AttributeClassifier()
-        
+
         # Load scoring weights from config (single source of truth), allow override
         if config:
             self.scoring_config = config.get('scoring', {})
@@ -120,7 +117,7 @@ class SemanticScorer:
         base_score = self.scoring_config.get('base_score', 100)
         penalties = self.scoring_config.get('penalties', {})
         bonuses = self.scoring_config.get('bonuses', {})
-        
+
         score = base_score
         classification = self.classifier.classify(meta)
 

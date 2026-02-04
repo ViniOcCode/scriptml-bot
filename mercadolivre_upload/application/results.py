@@ -1,7 +1,6 @@
 """Result types for publish operations."""
 
 from dataclasses import dataclass
-from typing import Any, Optional
 
 
 @dataclass
@@ -9,11 +8,11 @@ class PublishResult:
     """Result of a publish operation."""
 
     success: bool
-    item_id: Optional[str] = None
-    permalink: Optional[str] = None
+    item_id: str | None = None
+    permalink: str | None = None
     errors: list[str] = None
     warnings: list[str] = None
-    raw_response: Optional[dict] = None
+    raw_response: dict | None = None
 
     def __post_init__(self):
         if self.errors is None:

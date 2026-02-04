@@ -1,8 +1,8 @@
 """Authentication module for Mercado Livre API."""
 
-from .token_manager import TokenManager
+from .exceptions import AuthError, OAuthError, TokenExpiredError
 from .oauth import OAuthHandler
-from .exceptions import AuthError, TokenExpiredError, OAuthError
+from .token_manager import TokenManager
 
 # Alias for compatibility
 AuthManager = TokenManager

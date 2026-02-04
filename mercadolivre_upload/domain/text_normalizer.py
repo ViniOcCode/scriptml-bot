@@ -17,7 +17,7 @@ class PortugueseTextNormalizer:
     - Whitespace normalization
     - Special character handling
     """
-    
+
     # Common Portuguese accent mappings
     ACCENT_MAP = {
         'á': 'a', 'à': 'a', 'ã': 'a', 'â': 'a', 'ä': 'a',
@@ -29,7 +29,7 @@ class PortugueseTextNormalizer:
         'ñ': 'n',
         'ý': 'y', 'ÿ': 'y',
     }
-    
+
     @staticmethod
     def normalize(text: str) -> str:
         """Normalize Portuguese text for comparison.
@@ -52,22 +52,22 @@ class PortugueseTextNormalizer:
         """
         if not text:
             return ""
-            
+
         # Convert to lowercase
         text = text.lower().strip()
-        
+
         # Remove accents using NFKD decomposition
         text = unicodedata.normalize('NFKD', text)
         text = ''.join(c for c in text if not unicodedata.combining(c))
-        
+
         # Remove special characters, keep only alphanumeric and spaces
         text = ''.join(c for c in text if c.isalnum() or c.isspace())
-        
+
         # Normalize whitespace (multiple spaces -> single space)
         text = ' '.join(text.split())
-        
+
         return text
-    
+
     @staticmethod
     def normalize_keep_accents(text: str) -> str:
         """Normalize without removing accents.
@@ -83,12 +83,12 @@ class PortugueseTextNormalizer:
         """
         if not text:
             return ""
-            
+
         text = text.lower().strip()
         text = ''.join(c for c in text if c.isalnum() or c.isspace() or unicodedata.category(c).startswith('M'))
         text = ' '.join(text.split())
         return text
-    
+
     @staticmethod
     def similarity(a: str, b: str) -> float:
         """Calculate similarity ratio between two strings.
@@ -110,12 +110,12 @@ class PortugueseTextNormalizer:
         """
         norm_a = PortugueseTextNormalizer.normalize(a)
         norm_b = PortugueseTextNormalizer.normalize(b)
-        
+
         if not norm_a or not norm_b:
             return 0.0
-            
+
         return SequenceMatcher(None, norm_a, norm_b).ratio()
-    
+
     @staticmethod
     def partial_similarity(a: str, b: str) -> float:
         """Calculate partial similarity (good for substring matching).
@@ -132,21 +132,21 @@ class PortugueseTextNormalizer:
         """
         norm_a = PortugueseTextNormalizer.normalize(a)
         norm_b = PortugueseTextNormalizer.normalize(b)
-        
+
         if not norm_a or not norm_b:
             return 0.0
-        
+
         # Ensure a is the shorter string
         if len(norm_a) > len(norm_b):
             norm_a, norm_b = norm_b, norm_a
-        
+
         # If one is contained within the other, high similarity
         if norm_a in norm_b:
             return 0.9 + (0.1 * len(norm_a) / len(norm_b))
-        
+
         # Otherwise use standard similarity
         return SequenceMatcher(None, norm_a, norm_b).ratio()
-    
+
     @staticmethod
     def tokenize(text: str) -> list[str]:
         """Tokenize text into words.
@@ -159,7 +159,7 @@ class PortugueseTextNormalizer:
         """
         normalized = PortugueseTextNormalizer.normalize(text)
         return normalized.split()
-    
+
     @staticmethod
     def acronym_match(a: str, b: str) -> float:
         """Check if strings match by acronym.
@@ -170,18 +170,18 @@ class PortugueseTextNormalizer:
         """
         norm_a = PortugueseTextNormalizer.normalize(a)
         norm_b = PortugueseTextNormalizer.normalize(b)
-        
+
         # Get first letters of each word in b
         words_b = norm_b.split()
         acronym_b = ''.join(word[0] for word in words_b if word)
-        
+
         if norm_a == acronym_b:
             return 1.0
-        
+
         # Check if a is contained in acronym
         if norm_a in acronym_b or acronym_b in norm_a:
             return 0.8
-        
+
         return 0.0
 
 

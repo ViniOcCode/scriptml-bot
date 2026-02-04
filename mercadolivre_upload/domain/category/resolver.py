@@ -4,10 +4,10 @@ Domain layer defines the interface (port) for category resolution.
 Infrastructure layer provides the implementation (adapter).
 """
 
+import logging
 import unicodedata
 from difflib import SequenceMatcher
-from typing import Optional, Protocol
-import logging
+from typing import Protocol
 
 from ..attribute_metadata import AttributeMeta
 
@@ -153,9 +153,9 @@ class CategoryResolver:
 
     def _search_in_hierarchy(
         self, name: str, parent_id: str, parent_name: str = "",
-        visited: Optional[set] = None, depth: int = 0, max_depth: int = 5,
+        visited: set | None = None, depth: int = 0, max_depth: int = 5,
         min_similarity: float = 0.8
-    ) -> Optional[str]:
+    ) -> str | None:
         """Search for category name in hierarchy starting from parent.
 
         Args:
@@ -269,7 +269,7 @@ class CategoryResolver:
         # Recursively resolve to leaf
         return self.resolve_to_leaf(best_child["id"])
 
-    def find_category(self, name: str, site_id: str = "MLB") -> Optional[str]:
+    def find_category(self, name: str, site_id: str = "MLB") -> str | None:
         """Find category ID by name using predictor-first strategy.
 
         Tries fuzzy matching on root categories first (fast),
@@ -322,7 +322,7 @@ class CategoryResolver:
 
     def predict_category_from_title(
         self, title: str, site_id: str = "MLB"
-    ) -> Optional[str]:
+    ) -> str | None:
         """Predict category based on product title using ML domain discovery.
 
         Args:
@@ -364,10 +364,10 @@ class CategoryResolver:
         return None
 
     def find_category_by_name_or_title(
-        self, name: Optional[str] = None,
-        title: Optional[str] = None,
+        self, name: str | None = None,
+        title: str | None = None,
         site_id: str = "MLB"
-    ) -> Optional[str]:
+    ) -> str | None:
         """Find category by name, falling back to title-based prediction.
 
         Args:
@@ -386,7 +386,7 @@ class CategoryResolver:
 
         # Fallback to title-based prediction
         if title:
-            logger.info(f"Category name not found, trying domain discovery with title...")
+            logger.info("Category name not found, trying domain discovery with title...")
             result = self.predict_category_from_title(title, site_id)
             if result:
                 return result

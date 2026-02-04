@@ -6,7 +6,7 @@ Adapts external Excel input to domain Product entities.
 import logging
 import re
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import pandas as pd
 
@@ -202,7 +202,7 @@ class SpreadsheetParser:
 
         return attributes
 
-    def _parse_row(self, row: pd.Series) -> Optional[Product]:
+    def _parse_row(self, row: pd.Series) -> Product | None:
         """Parse a DataFrame row into a Product."""
         sku = str(self._get_value(row, "sku", "")).strip()
         title = str(self._get_value(row, "title", "")).strip()

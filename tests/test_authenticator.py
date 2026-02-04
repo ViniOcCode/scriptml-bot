@@ -7,7 +7,6 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
-
 from auth.authenticator import (
     AuthCredentials,
     AuthError,
@@ -329,8 +328,8 @@ class TestAuthManager:
     @patch("auth.authenticator.urllib.request.urlopen")
     def test_make_token_request_http_error(self, mock_urlopen, auth_manager):
         """Testa erro HTTP na requisição de token."""
-        from urllib.error import HTTPError
         from io import BytesIO
+        from urllib.error import HTTPError
 
         # Cria um mock de HTTPError que funciona como contexto
         mock_error = HTTPError(
@@ -409,7 +408,7 @@ class TestBackwardCompatibility:
         """Testa que get_auth_status retorna dict compatível."""
         auth = AuthManager(auto_save=False)
         auth.set_token("token", expires_in=3600)
-        
+
         status = auth.get_auth_status()
         assert isinstance(status, dict)
         assert "authenticated" in status

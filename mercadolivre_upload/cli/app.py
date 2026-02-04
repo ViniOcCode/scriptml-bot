@@ -5,7 +5,6 @@ Apenas inicialização e configuração. Comandos estão em cli/commands/.
 
 import json
 import logging
-from pathlib import Path
 
 import typer
 from rich.console import Console
@@ -68,7 +67,7 @@ def print_result(result: dict, success_message: str = "", error_message: str = "
 
 
 # Importar comandos
-from .commands import upload, validate, cache_cmd, doctor
+from .commands import cache_cmd, doctor, upload, validate
 
 app.add_typer(upload.app, name="upload")
 app.add_typer(validate.app, name="validate")

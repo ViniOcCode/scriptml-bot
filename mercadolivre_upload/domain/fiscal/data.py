@@ -9,7 +9,7 @@ Uses configuration from config/fiscal_config.yaml as the single source of truth 
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import yaml
 
@@ -24,9 +24,9 @@ def _load_fiscal_defaults() -> dict:
     """
     try:
         config_path = Path("config/fiscal_config.yaml")
-        with open(config_path, 'r', encoding='utf-8') as f:
+        with open(config_path, encoding='utf-8') as f:
             config = yaml.safe_load(f)
-        
+
         return config.get('fiscal_defaults', {})
     except Exception as e:
         logger.warning(f"Could not load fiscal defaults from config: {e}. Using empty defaults.")
@@ -71,21 +71,21 @@ class FiscalData:
     origin_detail: str = ""  # Origin detail code (e.g., "0" for national, range 0-8)
 
     # Optional tax fields
-    cest: Optional[str] = None  # CEST code
-    csosn: Optional[str] = None  # CSOSN for Simples Nacional (e.g., "500")
-    tax_rule_id: Optional[int] = None  # Tax rule ID (for Regime Normal, leave empty for Simples)
-    cfop: Optional[str] = None  # CFOP code
-    fci: Optional[str] = None  # FCI (Ficha de Conteúdo de Importação)
-    ex_tipi: Optional[str] = None  # EX TIPI code
-    ean: Optional[str] = None  # EAN/GTIN barcode
+    cest: str | None = None  # CEST code
+    csosn: str | None = None  # CSOSN for Simples Nacional (e.g., "500")
+    tax_rule_id: int | None = None  # Tax rule ID (for Regime Normal, leave empty for Simples)
+    cfop: str | None = None  # CFOP code
+    fci: str | None = None  # FCI (Ficha de Conteúdo de Importação)
+    ex_tipi: str | None = None  # EX TIPI code
+    ean: str | None = None  # EAN/GTIN barcode
 
     # ANVISA fields (for medical products)
-    med_anvisa_code: Optional[str] = None  # ANVISA code or "ISENTO"
-    med_exemption_reason: Optional[str] = None  # Reason for exemption
+    med_anvisa_code: str | None = None  # ANVISA code or "ISENTO"
+    med_exemption_reason: str | None = None  # Reason for exemption
 
     # Weight information
-    net_weight: Optional[float] = None  # Net weight in grams
-    gross_weight: Optional[float] = None  # Gross weight in grams
+    net_weight: float | None = None  # Net weight in grams
+    gross_weight: float | None = None  # Gross weight in grams
 
     # Additional attributes storage
     attributes: dict[str, Any] = field(default_factory=dict)
@@ -94,14 +94,14 @@ class FiscalData:
         """Normalize fiscal data using config defaults."""
         # Load defaults from config (single source of truth)
         defaults = _load_fiscal_defaults()
-        
+
         self.sku = str(self.sku).strip() if self.sku else ""
         self.title = str(self.title).strip() if self.title else ""
         # Use config defaults for type and measurement_unit
         self.type = str(self.type).strip() if self.type else defaults.get('type', 'single')
         self.measurement_unit = str(self.measurement_unit).strip() if self.measurement_unit else defaults.get('measurement_unit', 'UN')
         self.ncm = str(self.ncm).strip() if self.ncm else ""
-        
+
         # Sanitize origin_type - map common values to codes
         origin_type_str = str(self.origin_type).strip() if self.origin_type else ""
         origin_type_map = {
@@ -116,7 +116,7 @@ class FiscalData:
             "nacional-mercadoria": "8",
         }
         self.origin_type = origin_type_map.get(origin_type_str.lower(), origin_type_str)
-        
+
         # Sanitize origin_detail - extract just the number if it's a long string
         origin_detail_str = str(self.origin_detail).strip() if self.origin_detail else ""
         if origin_detail_str:

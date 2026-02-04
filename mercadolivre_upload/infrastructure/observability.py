@@ -11,19 +11,16 @@ Fornece:
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import logging.handlers
 import os
 import sys
-import time
 import traceback
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Coroutine, Literal, TypeVar
+from typing import Any, Literal
 
 # Verifica disponibilidade de bibliotecas opcionais
 try:
@@ -45,10 +42,7 @@ except ImportError:
     RICH_AVAILABLE = False
 
 # Importa infraestrutura existente
-from mercadolivre_upload.infrastructure.config import get_settings
 from mercadolivre_upload.infrastructure.logging import JSONFormatter, get_logger
-from mercadolivre_upload.infrastructure.metrics import MetricsCollector, collector
-
 
 # ============================================================================
 # Constantes e Configurações
@@ -98,12 +92,12 @@ class StructuredLogger:
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.max_bytes = max_bytes
         self.backup_count = backup_count
-        
+
         # Cria logger
         self._logger = logging.getLogger(f"observability.{name}")
         self._logger.setLevel(getattr(logging, level.upper()))
         self._logger.handlers.clear()
-        
+
         # Handler para arquivo JSON
         log_file = self.log_dir / f"{name}.jsonl"
         file_handler = logging.handlers.RotatingFileHandler(
@@ -114,20 +108,20 @@ class StructuredLogger:
         )
         file_handler.setFormatter(JSONFormatter())
         self._logger.addHandler(file_handler)
-        
+
         # Handler para console (formato legível)
         console_handler = logging.StreamHandler(sys.stdout)
         console_format = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
         console_handler.setFormatter(logging.Formatter(console_format))
         self._logger.addHandler(console_handler)
-        
+
         # Contexto base
         self._base_context = {
             "logger_name": name,
             "hostname": os.uname().nodename if hasattr(os, "uname") else "unknown",
             "pid": os.getpid(),
         }
-        
+
         self._logger.info(f"StructuredLogger initialized: {name}")
 
     def _log(
@@ -156,20 +150,20 @@ class StructuredLogger:
             "component": component or self.name,
             "correlation_id": correlation_id,
         }
-        
+
         if extra:
             log_data["extra"] = extra
-            
+
         if exception:
             log_data["exception"] = {
                 "type": type(exception).__name__,
                 "message": str(exception),
                 "traceback": traceback.format_exc() if exception else None,
             }
-        
+
         # Remove campos None
         log_data = {k: v for k, v in log_data.items() if v is not None}
-        
+
         # Log com extra para JSONFormatter capturar
         log_method = getattr(self._logger, level.lower())
         log_method(message, extra={"_structured": log_data})
@@ -267,14 +261,14 @@ class HourlyStats:
     successes: int = 0
     failures: int = 0
     total_duration_ms: float = 0.0
-    
+
     @property
     def success_rate(self) -> float:
         """Taxa de sucesso (0-1)."""
         if self.uploads == 0:
             return 0.0
         return self.successes / self.uploads
-    
+
     @property
     def avg_duration_ms(self) -> float:
         """Duração média em ms."""
@@ -306,7 +300,7 @@ class BusinessMetricsCollector:
         self._product_status: dict[str, int] = {}
         self._recent_operations: deque[dict[str, Any]] = deque(maxlen=1000)
         self._start_time = datetime.now()
-        
+
     def record_upload(
         self,
         success: bool,
@@ -323,22 +317,22 @@ class BusinessMetricsCollector:
             error_category: Categoria do erro se falhou.
         """
         hour = datetime.now().strftime("%Y-%m-%d %H:00")
-        
+
         if hour not in self._hourly_stats:
             self._cleanup_old_hours()
             self._hourly_stats[hour] = HourlyStats(hour=hour)
-        
+
         stats = self._hourly_stats[hour]
         stats.uploads += 1
         stats.total_duration_ms += duration_ms
-        
+
         if success:
             stats.successes += 1
         else:
             stats.failures += 1
             if error_category:
                 self._error_counts[error_category] = self._error_counts.get(error_category, 0) + 1
-        
+
         # Registra operação recente
         self._recent_operations.append({
             "timestamp": datetime.now().isoformat(),
@@ -347,7 +341,7 @@ class BusinessMetricsCollector:
             "product_id": product_id,
             "error_category": error_category,
         })
-    
+
     def record_product_status(self, status: str, count: int = 1) -> None:
         """Registra produtos por status.
         
@@ -356,32 +350,32 @@ class BusinessMetricsCollector:
             count: Quantidade.
         """
         self._product_status[status] = self._product_status.get(status, 0) + count
-    
+
     def _cleanup_old_hours(self) -> None:
         """Remove horas antigas do histórico."""
         cutoff = (datetime.now() - timedelta(hours=self.max_history_hours)).strftime("%Y-%m-%d %H:00")
         self._hourly_stats = {
-            k: v for k, v in self._hourly_stats.items() 
+            k: v for k, v in self._hourly_stats.items()
             if k >= cutoff
         }
-    
+
     # Métricas calculadas
-    
+
     @property
     def total_uploads(self) -> int:
         """Total de uploads no período."""
         return sum(s.uploads for s in self._hourly_stats.values())
-    
+
     @property
     def total_successes(self) -> int:
         """Total de sucessos."""
         return sum(s.successes for s in self._hourly_stats.values())
-    
+
     @property
     def total_failures(self) -> int:
         """Total de falhas."""
         return sum(s.failures for s in self._hourly_stats.values())
-    
+
     @property
     def overall_success_rate(self) -> float:
         """Taxa de sucesso geral (0-1)."""
@@ -389,7 +383,7 @@ class BusinessMetricsCollector:
         if total == 0:
             return 0.0
         return self.total_successes / total
-    
+
     @property
     def avg_duration_ms(self) -> float:
         """Duração média geral em ms."""
@@ -398,32 +392,32 @@ class BusinessMetricsCollector:
         if total_uploads == 0:
             return 0.0
         return total_duration / total_uploads
-    
+
     @property
     def uploads_per_hour(self) -> list[HourlyStats]:
         """Lista de estatísticas por hora ordenadas."""
         return sorted(self._hourly_stats.values(), key=lambda x: x.hour)
-    
+
     @property
     def error_breakdown(self) -> dict[str, int]:
         """Contagem de erros por categoria."""
         return dict(self._error_counts)
-    
+
     @property
     def product_status_breakdown(self) -> dict[str, int]:
         """Contagem de produtos por status."""
         return dict(self._product_status)
-    
+
     @property
     def recent_failures(self) -> list[dict[str, Any]]:
         """Últimas operações com falha."""
         return [op for op in self._recent_operations if not op["success"]][-10:]
-    
+
     @property
     def uptime_seconds(self) -> float:
         """Tempo de execução em segundos."""
         return (datetime.now() - self._start_time).total_seconds()
-    
+
     def get_summary(self) -> dict[str, Any]:
         """Retorna resumo completo das métricas."""
         return {
@@ -461,7 +455,7 @@ class Alert:
     component: str = ""
     correlation_id: str | None = None
     details: dict[str, Any] = field(default_factory=dict)
-    
+
     def to_slack(self) -> dict[str, Any]:
         """Converte para formato Slack webhook."""
         colors = {
@@ -470,7 +464,7 @@ class Alert:
             "error": "#ff0000",
             "critical": "#990000",
         }
-        
+
         return {
             "attachments": [{
                 "color": colors.get(self.level, "#808080"),
@@ -479,14 +473,14 @@ class Alert:
                 "fields": [
                     {"title": "Component", "value": self.component, "short": True},
                     {"title": "Time", "value": self.timestamp.isoformat(), "short": True},
-                    *[{"title": k, "value": str(v), "short": True} 
+                    *[{"title": k, "value": str(v), "short": True}
                       for k, v in self.details.items()],
                 ],
                 "footer": "mercadolivre-upload",
                 "ts": int(self.timestamp.timestamp()),
             }]
         }
-    
+
     def to_discord(self) -> dict[str, Any]:
         """Converte para formato Discord webhook."""
         colors = {
@@ -495,7 +489,7 @@ class Alert:
             "error": 0xff0000,
             "critical": 0x990000,
         }
-        
+
         embed = {
             "title": f"[{self.level.upper()}] {self.title}",
             "description": self.message,
@@ -506,10 +500,10 @@ class Alert:
                 {"name": "Component", "value": self.component, "inline": True},
             ],
         }
-        
+
         for k, v in self.details.items():
             embed["fields"].append({"name": k, "value": str(v)[:1024], "inline": True})
-        
+
         return {"embeds": [embed]}
 
 
@@ -542,22 +536,22 @@ class AlertManager:
         self.discord_webhook = discord_webhook or os.getenv("DISCORD_WEBHOOK_URL")
         self.rate_limit = rate_limit_per_minute
         self.enabled = enabled and (self.slack_webhook or self.discord_webhook)
-        
+
         self._alert_history: deque[datetime] = deque()
         self._alert_queue: asyncio.Queue[Alert] | None = None
         self._logger = get_logger("observability.alerts")
-    
+
     def _check_rate_limit(self) -> bool:
         """Verifica se pode enviar alerta respeitando rate limit."""
         now = datetime.now()
         one_minute_ago = now - timedelta(minutes=1)
-        
+
         # Remove alertas antigos
         while self._alert_history and self._alert_history[0] < one_minute_ago:
             self._alert_history.popleft()
-        
+
         return len(self._alert_history) < self.rate_limit
-    
+
     async def send_alert(self, alert: Alert) -> bool:
         """Envia um alerta via webhooks configurados.
         
@@ -570,72 +564,70 @@ class AlertManager:
         if not self.enabled:
             self._logger.debug(f"Alertas desabilitados: {alert.title}")
             return False
-        
+
         if not self._check_rate_limit():
             self._logger.warning(f"Rate limit excedido para alertas: {alert.title}")
             return False
-        
+
         success = True
-        
+
         if self.slack_webhook and AIOHTTP_AVAILABLE:
             success = await self._send_slack(alert) and success
-            
+
         if self.discord_webhook and AIOHTTP_AVAILABLE:
             success = await self._send_discord(alert) and success
-        
+
         if success:
             self._alert_history.append(datetime.now())
-        
+
         return success
-    
+
     async def _send_slack(self, alert: Alert) -> bool:
         """Envia alerta para Slack."""
         if not self.slack_webhook:
             return True
-            
+
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    self.slack_webhook,
-                    json=alert.to_slack(),
-                    timeout=aiohttp.ClientTimeout(total=10),
-                ) as response:
-                    if response.status == 200:
-                        self._logger.info(f"Alerta enviado ao Slack: {alert.title}")
-                        return True
-                    else:
-                        self._logger.error(
-                            f"Falha ao enviar alerta Slack: {response.status}"
-                        )
-                        return False
+            async with aiohttp.ClientSession() as session, session.post(
+                self.slack_webhook,
+                json=alert.to_slack(),
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as response:
+                if response.status == 200:
+                    self._logger.info(f"Alerta enviado ao Slack: {alert.title}")
+                    return True
+                else:
+                    self._logger.error(
+                        f"Falha ao enviar alerta Slack: {response.status}"
+                    )
+                    return False
         except Exception as e:
             self._logger.error(f"Erro ao enviar alerta Slack: {e}")
             return False
-    
+
     async def _send_discord(self, alert: Alert) -> bool:
         """Envia alerta para Discord."""
         if not self.discord_webhook:
             return True
-            
+
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    self.discord_webhook,
-                    json=alert.to_discord(),
-                    timeout=aiohttp.ClientTimeout(total=10),
-                ) as response:
-                    if response.status in (200, 204):
-                        self._logger.info(f"Alerta enviado ao Discord: {alert.title}")
-                        return True
-                    else:
-                        self._logger.error(
-                            f"Falha ao enviar alerta Discord: {response.status}"
-                        )
-                        return False
+            async with aiohttp.ClientSession() as session, session.post(
+                self.discord_webhook,
+                json=alert.to_discord(),
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as response:
+                if response.status in (200, 204):
+                    self._logger.info(f"Alerta enviado ao Discord: {alert.title}")
+                    return True
+                else:
+                    self._logger.error(
+                        f"Falha ao enviar alerta Discord: {response.status}"
+                    )
+                    return False
         except Exception as e:
             self._logger.error(f"Erro ao enviar alerta Discord: {e}")
             return False
-    
+
     async def alert(
         self,
         level: AlertLevel,
@@ -667,7 +659,7 @@ class AlertManager:
             details=details or {},
         )
         return await self.send_alert(alert)
-    
+
     async def info(
         self,
         title: str,
@@ -677,7 +669,7 @@ class AlertManager:
     ) -> bool:
         """Envia alerta informativo."""
         return await self.alert("info", title, message, component, **kwargs)
-    
+
     async def warning(
         self,
         title: str,
@@ -687,7 +679,7 @@ class AlertManager:
     ) -> bool:
         """Envia alerta de aviso."""
         return await self.alert("warning", title, message, component, **kwargs)
-    
+
     async def error(
         self,
         title: str,
@@ -697,7 +689,7 @@ class AlertManager:
     ) -> bool:
         """Envia alerta de erro."""
         return await self.alert("error", title, message, component, **kwargs)
-    
+
     async def critical(
         self,
         title: str,
@@ -736,7 +728,7 @@ class Dashboard:
         """
         if not RICH_AVAILABLE:
             raise ImportError("Rich é necessário para o Dashboard. Instale com: pip install rich")
-        
+
         self.metrics = metrics_collector or BusinessMetricsCollector()
         self.refresh_rate = refresh_rate
         self.console = Console()
@@ -771,25 +763,25 @@ class Dashboard:
         table = Table(title="Métricas de Negócio", border_style="blue")
         table.add_column("Métrica", style="cyan")
         table.add_column("Valor", justify="right", style="green")
-        
+
         # Métricas principais
         table.add_row("Total Uploads", str(self.metrics.total_uploads))
         table.add_row(
-            "Taxa de Sucesso", 
+            "Taxa de Sucesso",
             f"{self.metrics.overall_success_rate * 100:.1f}%"
         )
         table.add_row(
-            "Tempo Médio", 
+            "Tempo Médio",
             f"{self.metrics.avg_duration_ms:.0f} ms"
         )
         table.add_row("Sucessos", str(self.metrics.total_successes))
         table.add_row("Falhas", str(self.metrics.total_failures))
-        
+
         uptime = self.metrics.uptime_seconds
         hours = int(uptime // 3600)
         minutes = int((uptime % 3600) // 60)
         table.add_row("Uptime", f"{hours}h {minutes}m")
-        
+
         return table
 
     def _create_hourly_chart(self) -> Table:
@@ -799,7 +791,7 @@ class Dashboard:
         table.add_column("Uploads", justify="right")
         table.add_column("Taxa Sucesso", justify="right")
         table.add_column("Tempo Médio", justify="right")
-        
+
         for stats in self.metrics.uploads_per_hour[-8:]:  # Últimas 8 horas
             success_color = "green" if stats.success_rate >= 0.9 else "yellow" if stats.success_rate >= 0.7 else "red"
             table.add_row(
@@ -808,7 +800,7 @@ class Dashboard:
                 Text(f"{stats.success_rate * 100:.1f}%", style=success_color),
                 f"{stats.avg_duration_ms:.0f}ms",
             )
-        
+
         return table
 
     def _create_status_table(self) -> Table:
@@ -816,13 +808,13 @@ class Dashboard:
         table = Table(title="Status dos Produtos", border_style="green")
         table.add_column("Status", style="cyan")
         table.add_column("Quantidade", justify="right", style="green")
-        
+
         for status, count in self.metrics.product_status_breakdown.items():
             table.add_row(status, str(count))
-        
+
         if not self.metrics.product_status_breakdown:
             table.add_row("-", "0")
-        
+
         return table
 
     def _create_errors_table(self) -> Table:
@@ -830,23 +822,23 @@ class Dashboard:
         table = Table(title="Erros por Categoria", border_style="red")
         table.add_column("Categoria", style="cyan")
         table.add_column("Contagem", justify="right", style="red")
-        
+
         for category, count in sorted(
-            self.metrics.error_breakdown.items(), 
-            key=lambda x: x[1], 
+            self.metrics.error_breakdown.items(),
+            key=lambda x: x[1],
             reverse=True
         )[:5]:
             table.add_row(category, str(count))
-        
+
         if not self.metrics.error_breakdown:
             table.add_row("-", "0")
-        
+
         return table
 
     def _create_footer(self) -> Panel:
         """Cria o rodapé com operações recentes."""
         recent = self.metrics.recent_failures[-5:]
-        
+
         if not recent:
             content = "Nenhuma falha recente"
         else:
@@ -856,15 +848,15 @@ class Dashboard:
                 error = op.get("error_category", "unknown")
                 lines.append(f"[{time_str}] {error}")
             content = "\n".join(lines)
-        
+
         return Panel(content, title="Últimas Falhas", border_style="red")
 
     def _render(self) -> Layout:
         """Renderiza o dashboard completo."""
         layout = self._create_layout()
-        
+
         layout["header"].update(self._create_header())
-        
+
         # Painel esquerdo: métricas principais e por hora
         left_layout = Layout()
         left_layout.split_column(
@@ -872,7 +864,7 @@ class Dashboard:
             Layout(self._create_hourly_chart()),
         )
         layout["left"].update(left_layout)
-        
+
         # Painel direito: status e erros
         right_layout = Layout()
         right_layout.split_column(
@@ -880,16 +872,16 @@ class Dashboard:
             Layout(self._create_errors_table()),
         )
         layout["right"].update(right_layout)
-        
+
         layout["footer"].update(self._create_footer())
-        
+
         return layout
 
     async def start(self) -> None:
         """Inicia o dashboard em tempo real."""
         self._running = True
         self._logger.info("Iniciando dashboard")
-        
+
         with Live(
             self._render(),
             console=self.console,
@@ -941,11 +933,11 @@ class ObservabilityManager:
         self.logger = StructuredLogger(component_name)
         self.metrics = BusinessMetricsCollector()
         self.alerts = AlertManager(enabled=enable_alerts) if enable_alerts else None
-        
+
         self._dashboard: Dashboard | None = None
         if enable_dashboard and RICH_AVAILABLE:
             self._dashboard = Dashboard(self.metrics)
-        
+
         self._logger = get_logger("observability.manager")
 
     async def record_upload(
@@ -967,7 +959,7 @@ class ObservabilityManager:
         """
         # Registra métrica
         self.metrics.record_upload(success, duration_ms, product_id, error_category)
-        
+
         # Log estruturado
         self.logger.log_operation(
             operation="product_upload",
@@ -980,7 +972,7 @@ class ObservabilityManager:
                 "error_category": error_category,
             },
         )
-        
+
         # Alerta em caso de falha crítica
         if not success and error_category in ["api_error", "auth_error", "timeout"]:
             if self.alerts:
@@ -1073,7 +1065,7 @@ async def log_product_upload(
     """
     # Registra métricas
     business_metrics.record_upload(success, duration_ms, product_id, error_category)
-    
+
     # Log estruturado
     observability_logger.log_operation(
         operation="product_upload",

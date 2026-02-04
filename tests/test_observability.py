@@ -14,14 +14,12 @@ from pathlib import Path
 # Ensure mercadolivre_upload is importable
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-import asyncio
-import json
 import os
 import sys
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 # Ensure mercadolivre_upload is importable
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -31,7 +29,6 @@ import pytest
 # Importa do módulo de infraestrutura (conftest.py já adiciona o path)
 from mercadolivre_upload.infrastructure.observability import (
     Alert,
-    AlertLevel,
     AlertManager,
     BusinessMetricsCollector,
     Dashboard,
@@ -44,7 +41,6 @@ from mercadolivre_upload.infrastructure.observability import (
     log_product_upload,
     observability_logger,
 )
-
 
 # =============================================================================
 # Fixtures
@@ -90,20 +86,19 @@ def mock_aiohttp():
     with patch(
         "mercadolivre_upload.infrastructure.observability.AIOHTTP_AVAILABLE",
         True,
-    ):
-        with patch("aiohttp.ClientSession") as mock_session:
-            mock_response = AsyncMock()
-            mock_response.status = 200
-            mock_context = AsyncMock()
-            mock_context.__aenter__ = AsyncMock(return_value=mock_response)
-            mock_context.__aexit__ = AsyncMock(return_value=None)
-            mock_session.return_value.__aenter__ = AsyncMock(
-                return_value=MagicMock(
-                    post=MagicMock(return_value=mock_context)
-                )
+    ), patch("aiohttp.ClientSession") as mock_session:
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_context = AsyncMock()
+        mock_context.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_context.__aexit__ = AsyncMock(return_value=None)
+        mock_session.return_value.__aenter__ = AsyncMock(
+            return_value=MagicMock(
+                post=MagicMock(return_value=mock_context)
             )
-            mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
-            yield mock_session
+        )
+        mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
+        yield mock_session
 
 
 # =============================================================================
@@ -122,7 +117,7 @@ class TestStructuredLogger:
             backup_count=3,
             level="INFO",
         )
-        
+
         assert logger.name == "test_init"
         assert logger.log_dir == temp_log_dir
         assert logger.max_bytes == 1024
@@ -134,17 +129,17 @@ class TestStructuredLogger:
         # Força flush dos handlers
         for handler in structured_logger._logger.handlers:
             handler.flush()
-        
+
         structured_logger.debug("debug message", component="test", correlation_id="123")
         structured_logger.info("info message", component="test")
         structured_logger.warning("warning message")
         structured_logger.error("error message", exception=ValueError("test error"))
         structured_logger.critical("critical message")
-        
+
         # Força flush novamente
         for handler in structured_logger._logger.handlers:
             handler.flush()
-        
+
         # Verifica se arquivo foi criado
         log_files = list(temp_log_dir.glob("*.jsonl"))
         assert len(log_files) > 0
@@ -159,11 +154,11 @@ class TestStructuredLogger:
             correlation_id="corr-123",
             extra={"product_id": "MLB123"},
         )
-        
+
         # Força flush
         for handler in structured_logger._logger.handlers:
             handler.flush()
-        
+
         # Verifica arquivo
         log_file = temp_log_dir / "test_logger.jsonl"
         assert log_file.exists()
@@ -175,14 +170,14 @@ class TestStructuredLogger:
             "number": 42,
             "nested": {"key": "value"},
         }
-        
+
         structured_logger.info(
             "test message",
             component="test",
             correlation_id="abc",
             extra=extra,
         )
-        
+
         # Verifica que não lança exceção
         assert True
 
@@ -207,7 +202,7 @@ class TestBusinessMetricsCollector:
             duration_ms=100.0,
             product_id="MLB123",
         )
-        
+
         assert metrics_collector.total_uploads == 1
         assert metrics_collector.total_successes == 1
         assert metrics_collector.total_failures == 0
@@ -221,7 +216,7 @@ class TestBusinessMetricsCollector:
             product_id="MLB456",
             error_category="api_error",
         )
-        
+
         assert metrics_collector.total_uploads == 1
         assert metrics_collector.total_successes == 0
         assert metrics_collector.total_failures == 1
@@ -232,7 +227,7 @@ class TestBusinessMetricsCollector:
         metrics_collector.record_upload(success=True, duration_ms=100.0)
         metrics_collector.record_upload(success=True, duration_ms=200.0)
         metrics_collector.record_upload(success=True, duration_ms=300.0)
-        
+
         assert metrics_collector.avg_duration_ms == 200.0
 
     def test_uploads_per_hour(self, metrics_collector):
@@ -240,10 +235,10 @@ class TestBusinessMetricsCollector:
         # Simula uploads
         metrics_collector.record_upload(success=True, duration_ms=100.0)
         metrics_collector.record_upload(success=False, duration_ms=50.0, error_category="timeout")
-        
+
         hourly = metrics_collector.uploads_per_hour
         assert len(hourly) >= 1
-        
+
         current_hour = hourly[-1]
         assert current_hour.uploads == 2
         assert current_hour.successes == 1
@@ -260,7 +255,7 @@ class TestBusinessMetricsCollector:
         metrics_collector.record_upload(
             success=False, duration_ms=50.0, error_category="timeout"
         )
-        
+
         errors = metrics_collector.error_breakdown
         assert errors["api_error"] == 2
         assert errors["timeout"] == 1
@@ -270,7 +265,7 @@ class TestBusinessMetricsCollector:
         metrics_collector.record_product_status("pending", 5)
         metrics_collector.record_product_status("published", 10)
         metrics_collector.record_product_status("failed", 2)
-        
+
         status = metrics_collector.product_status_breakdown
         assert status["pending"] == 5
         assert status["published"] == 10
@@ -284,7 +279,7 @@ class TestBusinessMetricsCollector:
             product_id="MLB123",
             error_category="api_error",
         )
-        
+
         failures = metrics_collector.recent_failures
         assert len(failures) == 1
         assert failures[0]["product_id"] == "MLB123"
@@ -295,22 +290,22 @@ class TestBusinessMetricsCollector:
         # Cria dados antigos manualmente
         old_hour = (datetime.now() - timedelta(hours=25)).strftime("%Y-%m-%d %H:00")
         metrics_collector._hourly_stats[old_hour] = HourlyStats(hour=old_hour, uploads=10)
-        
+
         # Cria dados recentes
         metrics_collector.record_upload(success=True, duration_ms=100.0)
-        
+
         # Limpa horas antigas
         metrics_collector._cleanup_old_hours()
-        
+
         # Verifica que hora antiga foi removida
         assert old_hour not in metrics_collector._hourly_stats
 
     def test_get_summary(self, metrics_collector):
         """Testa geração de resumo."""
         metrics_collector.record_upload(success=True, duration_ms=100.0)
-        
+
         summary = metrics_collector.get_summary()
-        
+
         assert "uptime_seconds" in summary
         assert "total_uploads" in summary
         assert "success_rate" in summary
@@ -362,7 +357,7 @@ class TestAlert:
             component="test_component",
             details={"key": "value"},
         )
-        
+
         assert alert.level == "error"
         assert alert.title == "Test Alert"
         assert alert.component == "test_component"
@@ -376,9 +371,9 @@ class TestAlert:
             component="api",
             details={"endpoint": "/products"},
         )
-        
+
         slack_data = alert.to_slack()
-        
+
         assert "attachments" in slack_data
         assert slack_data["attachments"][0]["color"] == "#990000"
         assert "Critical Error" in slack_data["attachments"][0]["title"]
@@ -391,9 +386,9 @@ class TestAlert:
             message="Check this out",
             component="worker",
         )
-        
+
         discord_data = alert.to_discord()
-        
+
         assert "embeds" in discord_data
         assert discord_data["embeds"][0]["color"] == 0xFF9900
 
@@ -426,11 +421,11 @@ class TestAlertManager:
     def test_rate_limit(self, alert_manager_mock):
         """Testa rate limiting."""
         assert alert_manager_mock._check_rate_limit()
-        
+
         # Adiciona alertas até o limite
         for _ in range(MAX_ALERTS_PER_MINUTE := 10):
             alert_manager_mock._alert_history.append(datetime.now())
-        
+
         assert not alert_manager_mock._check_rate_limit()
 
     @pytest.mark.asyncio
@@ -438,7 +433,7 @@ class TestAlertManager:
         """Testa envio quando desabilitado."""
         manager = AlertManager(enabled=False)
         alert = Alert(level="info", title="Test", message="Test")
-        
+
         result = await manager.send_alert(alert)
         assert result is False
 
@@ -447,12 +442,12 @@ class TestAlertManager:
         """Testa métodos de conveniência para alertas."""
         with patch.object(alert_manager_mock, "send_alert", new_callable=AsyncMock) as mock_send:
             mock_send.return_value = True
-            
+
             await alert_manager_mock.info("Info Title", "Info message")
             await alert_manager_mock.warning("Warning Title", "Warning message")
             await alert_manager_mock.error("Error Title", "Error message")
             await alert_manager_mock.critical("Critical Title", "Critical message")
-            
+
             assert mock_send.call_count == 4
 
 
@@ -468,9 +463,8 @@ class TestDashboard:
         with patch(
             "mercadolivre_upload.infrastructure.observability.RICH_AVAILABLE",
             False,
-        ):
-            with pytest.raises(ImportError):
-                Dashboard()
+        ), pytest.raises(ImportError):
+            Dashboard()
 
     @pytest.mark.skipif(
         not pytest.importorskip("rich", reason="rich não instalado"),
@@ -484,7 +478,7 @@ class TestDashboard:
         ):
             metrics = BusinessMetricsCollector()
             dashboard = Dashboard(metrics)
-            
+
             assert dashboard.metrics == metrics
             assert dashboard.refresh_rate == 1.0
 
@@ -496,7 +490,7 @@ class TestDashboard:
         ):
             dashboard = Dashboard(metrics_collector)
             layout = dashboard._create_layout()
-            
+
             assert "header" in layout
             assert "main" in layout
             assert "footer" in layout
@@ -509,10 +503,10 @@ class TestDashboard:
         ):
             metrics_collector.record_upload(success=True, duration_ms=100.0)
             metrics_collector.record_upload(success=False, duration_ms=50.0)
-            
+
             dashboard = Dashboard(metrics_collector)
             table = dashboard._create_metrics_table()
-            
+
             assert table is not None
 
     def test_create_hourly_chart(self, metrics_collector):
@@ -522,10 +516,10 @@ class TestDashboard:
             True,
         ):
             metrics_collector.record_upload(success=True, duration_ms=100.0)
-            
+
             dashboard = Dashboard(metrics_collector)
             table = dashboard._create_hourly_chart()
-            
+
             assert table is not None
 
 
@@ -543,7 +537,7 @@ class TestObservabilityManager:
             enable_alerts=False,
             enable_dashboard=False,
         )
-        
+
         assert manager.component == "test_component"
         assert manager.logger is not None
         assert manager.metrics is not None
@@ -565,14 +559,14 @@ class TestObservabilityManager:
             component_name="publisher",
             enable_alerts=False,
         )
-        
+
         await manager.record_upload(
             success=True,
             duration_ms=100.0,
             product_id="MLB123",
             correlation_id="corr-123",
         )
-        
+
         assert manager.metrics.total_uploads == 1
         assert manager.metrics.total_successes == 1
 
@@ -583,11 +577,11 @@ class TestObservabilityManager:
             component_name="publisher",
             enable_alerts=False,  # Mock para não enviar realmente
         )
-        
+
         # Mock do alert manager
         manager.alerts = AsyncMock()
         manager.alerts.error = AsyncMock(return_value=True)
-        
+
         await manager.record_upload(
             success=False,
             duration_ms=50.0,
@@ -595,20 +589,20 @@ class TestObservabilityManager:
             error_category="api_error",
             correlation_id="corr-456",
         )
-        
+
         assert manager.metrics.total_uploads == 1
         assert manager.metrics.total_failures == 1
 
     def test_get_health_status(self):
         """Testa obtenção de status de saúde."""
         manager = ObservabilityManager(enable_alerts=False)
-        
+
         # Cenário saudável
         manager.metrics.record_upload(success=True, duration_ms=100.0)
         manager.metrics.record_upload(success=True, duration_ms=100.0)
-        
+
         health = manager.get_health_status()
-        
+
         assert health["component"] == "publish_product"
         assert health["healthy"] is True
         assert health["success_rate"] == 1.0
@@ -617,13 +611,13 @@ class TestObservabilityManager:
     def test_get_health_status_unhealthy(self):
         """Testa status de saúde quando não saudável."""
         manager = ObservabilityManager(enable_alerts=False)
-        
+
         # Cenário não saudável (< 80% sucesso)
         for _ in range(5):
             manager.metrics.record_upload(success=False, duration_ms=50.0)
-        
+
         health = manager.get_health_status()
-        
+
         assert health["healthy"] is False
 
 
@@ -642,7 +636,7 @@ class TestObservabilityIntegration:
             component="integration_test",
             enable_alerts=False,
         )
-        
+
         # Simula uploads
         for i in range(10):
             await manager.record_upload(
@@ -651,7 +645,7 @@ class TestObservabilityIntegration:
                 product_id=f"MLB{i}",
                 correlation_id=f"corr-{i}",
             )
-        
+
         # Verifica métricas
         assert manager.metrics.total_uploads == 10
         assert manager.metrics.total_successes == 8
@@ -663,7 +657,7 @@ class TestObservabilityIntegration:
         """Testa função de conveniência log_product_upload."""
         # Limpa métricas globais
         business_metrics._hourly_stats.clear()
-        
+
         await log_product_upload(
             success=True,
             duration_ms=150.0,
@@ -671,7 +665,7 @@ class TestObservabilityIntegration:
             error_category=None,
             correlation_id="test-corr",
         )
-        
+
         assert business_metrics.total_uploads >= 1
 
 
@@ -714,7 +708,7 @@ class TestErrorHandling:
                 "Error occurred",
                 exception=e,
             )
-        
+
         assert True  # Não deve lançar exceção
 
     def test_metrics_with_invalid_duration(self, metrics_collector):
@@ -723,7 +717,7 @@ class TestErrorHandling:
             success=True,
             duration_ms=-100.0,  # Valor negativo
         )
-        
+
         # Deve aceitar mas resultados podem ser estranhos
         assert metrics_collector.total_uploads == 1
 
@@ -734,9 +728,9 @@ class TestErrorHandling:
             slack_webhook="https://invalid.url",
             enabled=True,
         )
-        
+
         alert = Alert(level="error", title="Test", message="Test")
-        
+
         # Deve retornar False em caso de erro
         result = await manager.send_alert(alert)
         assert result is False
@@ -749,5 +743,5 @@ class TestErrorHandling:
         ):
             with pytest.raises(ImportError) as exc_info:
                 Dashboard()
-            
+
             assert "Rich é necessário" in str(exc_info.value)

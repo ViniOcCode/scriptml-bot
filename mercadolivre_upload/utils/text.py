@@ -28,22 +28,22 @@ def normalize_column_name(name: str) -> str:
     """
     if not name:
         return ""
-    
+
     # Lowercase e strip
     text = name.lower().strip()
-    
+
     # Remove acentos
     text = ''.join(
         c for c in unicodedata.normalize('NFKD', text)
         if not unicodedata.combining(c)
     )
-    
+
     # Substitui não-alfanuméricos por underscore
     text = re.sub(r'[^a-z0-9]+', '_', text)
-    
+
     # Remove underscores duplicados
     text = re.sub(r'_+', '_', text)
-    
+
     return text.strip('_')
 
 
@@ -59,15 +59,15 @@ def normalize_text(text: str, keep_accents: bool = False) -> str:
     """
     if not text:
         return ""
-    
+
     text = text.lower().strip()
-    
+
     if not keep_accents:
         text = ''.join(
             c for c in unicodedata.normalize('NFKD', text)
             if not unicodedata.combining(c)
         )
-    
+
     return text
 
 
@@ -85,20 +85,20 @@ def normalize_for_fuzzy_matching(text: str) -> str:
     """
     if not text:
         return ""
-    
+
     # Lowercase
     text = text.lower()
-    
+
     # Remove acentos
     text = ''.join(
         c for c in unicodedata.normalize('NFKD', text)
         if not unicodedata.combining(c)
     )
-    
+
     # Remove pontuação
     text = re.sub(r'[^\w\s]', '', text)
-    
+
     # Remove múltiplos espaços
     text = re.sub(r'\s+', ' ', text)
-    
+
     return text.strip()

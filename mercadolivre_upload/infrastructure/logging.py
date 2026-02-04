@@ -15,7 +15,7 @@ import logging.handlers
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal, TextIO
+from typing import Literal, TextIO
 
 # Diretório padrão para logs
 DEFAULT_LOG_DIR = Path.home() / ".mercadolivre_upload" / "logs"

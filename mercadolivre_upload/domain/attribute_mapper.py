@@ -4,9 +4,9 @@ Uses fuzzy string matching to automatically map Excel column names
 to Mercado Livre API attribute definitions.
 """
 
+import logging
 import unicodedata
 from difflib import SequenceMatcher
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -163,7 +163,7 @@ class AttributeMapper:
                 # Apply same cleaning as parser: remove non-alphanumeric chars (except spaces)
                 normalized_col = re.sub(r"[^a-zA-Z0-9_\s]", "", col).strip().lower()
                 normalized_explicit_mappings[normalized_col] = mapping_config
-        
+
         if normalized_explicit_mappings:
             for col, value in product_attributes.items():
                 # Apply same cleaning as parser
@@ -178,7 +178,7 @@ class AttributeMapper:
                             "id": mapping_config["id"],
                             "name": mapping_config.get("name", mapping_config["id"]),
                         }
-                        
+
                         # Determine value_name
                         if "value_name" in mapping_config:
                             sale_term["value_name"] = mapping_config["value_name"]
@@ -186,7 +186,7 @@ class AttributeMapper:
                             sale_term["value_name"] = value
                         else:
                             sale_term["value_name"] = ""
-                        
+
                         # Build values array
                         if "value_struct" in mapping_config:
                             sale_term["value_struct"] = mapping_config["value_struct"]
@@ -204,7 +204,7 @@ class AttributeMapper:
                                 "struct": None
                             }]
                             sale_term["value_type"] = mapping_config.get("value_type", "list")
-                        
+
                         sale_terms_list.append(sale_term)
                         logger.info(f"Explicitly mapped '{col}' -> sale_terms[{mapping_config['id']}]")
                     elif target == "listing_type_id":
@@ -223,7 +223,7 @@ class AttributeMapper:
                             "_listing_type_id": mapped_value,  # Special marker for publisher
                         })
                         logger.info(f"Explicitly mapped '{col}' -> listing_type_id={mapped_value}")
-                    
+
                     else:
                         # Regular attribute mapping
                         # Sanitize numeric values: convert comma to dot for decimals
@@ -232,14 +232,14 @@ class AttributeMapper:
                             if "," in value and value.replace(",", "").replace(".", "").isdigit():
                                 # Brazilian format: 0,220 -> 0.220
                                 value = value.replace(",", ".")
-                        
+
                         # Apply unit suffix if configured
                         unit_suffix = mapping_config.get("unit_suffix", "")
                         if unit_suffix and value:
                             # Check if value already has the unit
                             if not str(value).lower().endswith(unit_suffix.strip().lower()):
                                 value = f"{value}{unit_suffix}"
-                        
+
                         ml_attributes_list.append({
                             "id": mapping_config["id"],
                             "name": mapping_config.get("name", mapping_config["id"]),

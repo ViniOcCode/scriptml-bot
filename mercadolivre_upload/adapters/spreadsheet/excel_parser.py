@@ -2,7 +2,6 @@
 
 import logging
 from pathlib import Path
-from typing import Optional
 
 import pandas as pd
 import yaml
@@ -21,14 +20,14 @@ def _load_config_mappings() -> dict:
     """
     try:
         mappings = {}
-        
+
         # Load standard fields from generic_mappings.yaml
         config_path = Path("config/generic_mappings.yaml")
-        with open(config_path, 'r', encoding='utf-8') as f:
+        with open(config_path, encoding='utf-8') as f:
             config = yaml.safe_load(f)
-        
+
         standard_fields = config.get('standard_fields', {})
-        
+
         for field_name, field_config in standard_fields.items():
             patterns = field_config.get('patterns', [])
             exact_matches = field_config.get('exact_matches', [])
@@ -36,14 +35,14 @@ def _load_config_mappings() -> dict:
             all_patterns = list(dict.fromkeys(patterns + exact_matches))  # Preserve order, remove duplicates
             if all_patterns:
                 mappings[field_name] = all_patterns
-        
+
         # Load fiscal fields from fiscal_config.yaml
         fiscal_config_path = Path("config/fiscal_config.yaml")
-        with open(fiscal_config_path, 'r', encoding='utf-8') as f:
+        with open(fiscal_config_path, encoding='utf-8') as f:
             fiscal_config = yaml.safe_load(f)
-        
+
         fiscal_fields = fiscal_config.get('fiscal_fields', {})
-        
+
         for field_name, field_config in fiscal_fields.items():
             patterns = field_config.get('patterns', [])
             exact_matches = field_config.get('exact_matches', [])
@@ -51,7 +50,7 @@ def _load_config_mappings() -> dict:
             all_patterns = list(dict.fromkeys(patterns + exact_matches))  # Preserve order, remove duplicates
             if all_patterns:
                 mappings[field_name] = all_patterns
-        
+
         return mappings
     except Exception as e:
         logger.warning(f"Could not load config mappings: {e}. Using empty mappings.")
@@ -84,7 +83,7 @@ class ExcelParser:
     REQUIRED_COLUMNS = ["sku", "title", "description", "price", "available_quantity", "condition"]
     FISCAL_COLUMNS = ["ncm", "cfop", "origin"]
 
-    def __init__(self, column_mappings: Optional[dict] = None):
+    def __init__(self, column_mappings: dict | None = None):
         """Initialize the parser.
 
         Args:
@@ -342,7 +341,7 @@ class ExcelParser:
             attributes=attributes,
         )
 
-    def parse(self, file_path: str | Path, sheet_name: Optional[str] = None) -> list[Product]:
+    def parse(self, file_path: str | Path, sheet_name: str | None = None) -> list[Product]:
         """Parse an Excel file and return list of products.
 
         Args:
@@ -415,7 +414,7 @@ class ExcelParser:
         logger.info(f"Successfully parsed {len(products)} products")
         return products
 
-    def parse_safely(self, file_path: str | Path, sheet_name: Optional[str] = None) -> tuple[list[Product], list[str]]:
+    def parse_safely(self, file_path: str | Path, sheet_name: str | None = None) -> tuple[list[Product], list[str]]:
         """Parse an Excel file and return products with errors.
 
         Similar to parse(), but returns all errors instead of raising.

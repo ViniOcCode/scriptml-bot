@@ -1,7 +1,6 @@
 """Data models for Excel parser."""
 
 from dataclasses import dataclass, field
-from typing import Optional
 
 
 @dataclass
@@ -18,7 +17,7 @@ class FiscalData:
     ncm: str
     cfop: str
     origin: str
-    cest: Optional[str] = None
+    cest: str | None = None
 
     def to_dict(self) -> dict:
         """Convert to dictionary for API payload."""
@@ -83,6 +82,6 @@ class Product:
             "attributes": self.attributes,
         }
 
-    def get_attribute(self, name: str, default: Optional[str] = None) -> Optional[str]:
+    def get_attribute(self, name: str, default: str | None = None) -> str | None:
         """Get an attribute value by name."""
         return self.attributes.get(name, default)

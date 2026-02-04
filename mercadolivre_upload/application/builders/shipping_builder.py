@@ -1,17 +1,16 @@
 """Shipping builder for ML items."""
-from typing import Optional
 
 
 class ShippingBuilder:
     """Builds shipping configuration for ML items."""
-    
-    def __init__(self, config: Optional[dict] = None):
+
+    def __init__(self, config: dict | None = None):
         self.config = config or {}
-    
-    def build(self, mode: Optional[str] = None) -> dict:
+
+    def build(self, mode: str | None = None) -> dict:
         """Build shipping config."""
         defaults = self.config.get('shipping', {})
-        
+
         return {
             'mode': mode or defaults.get('mode', 'me2'),
             'local_pick_up': defaults.get('local_pick_up', False),

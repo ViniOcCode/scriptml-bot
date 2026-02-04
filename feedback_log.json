@@ -1382,5 +1382,69 @@
     "cause_type": "warning",
     "attribute_id": null,
     "message": "User has not mode me1"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-02-03T19:45:34.295450",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-02-03T19:45:34.295686",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17510CRIANCAU",
+    "timestamp": "2026-02-03T19:45:40.781576",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17510CRIANCAU",
+    "timestamp": "2026-02-03T19:45:40.781597",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-02-04T12:54:34.989254",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-02-04T12:54:34.989487",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17510CRIANCAU",
+    "timestamp": "2026-02-04T12:54:41.670066",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17510CRIANCAU",
+    "timestamp": "2026-02-04T12:54:41.670086",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
   }
 ]

@@ -4,7 +4,6 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import Optional
 
 from .exceptions import TokenExpiredError
 from .oauth import OAuthHandler
@@ -24,8 +23,8 @@ class TokenManager:
 
     def __init__(
         self,
-        token_path: Optional[str] = None,
-        oauth_handler: Optional[OAuthHandler] = None,
+        token_path: str | None = None,
+        oauth_handler: OAuthHandler | None = None,
     ):
         """Initialize the token manager.
 
@@ -35,7 +34,7 @@ class TokenManager:
         """
         self.token_path = Path(token_path or os.getenv("MERCADO_LIVRE_TOKEN_PATH", "tokens.json"))
         self.oauth_handler = oauth_handler or OAuthHandler()
-        self._tokens: Optional[dict] = None
+        self._tokens: dict | None = None
 
     def load_tokens(self) -> dict:
         """Load tokens from the JSON file.
@@ -48,7 +47,7 @@ class TokenManager:
             json.JSONDecodeError: If token file is invalid JSON
         """
         if self._tokens is None:
-            with open(self.token_path, "r", encoding="utf-8") as f:
+            with open(self.token_path, encoding="utf-8") as f:
                 self._tokens = json.load(f)
         return self._tokens
 

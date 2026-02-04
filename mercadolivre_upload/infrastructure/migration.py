@@ -41,14 +41,14 @@ Example:
 
 from __future__ import annotations
 
+import logging
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum, auto
 from pathlib import Path
-from typing import Any, Callable, Optional, TypeVar, Generic
-import logging
+from typing import Any, Generic, TypeVar
 
 try:
     import pandas as pd
@@ -76,12 +76,12 @@ class FieldType(Enum):
     DATETIME = auto()
     LIST = auto()
     JSON = auto()
-    
+
     def validate(self, value: Any) -> bool:
         """Valida se um valor corresponde ao tipo."""
         if value is None or value == "":
             return True  # Valores vazios são permitidos
-        
+
         validators = {
             FieldType.STRING: lambda x: isinstance(x, (str, int, float)),
             FieldType.INTEGER: lambda x: isinstance(x, int) or (
@@ -104,14 +104,14 @@ class FieldType(Enum):
             ),
             FieldType.JSON: lambda x: True,  # JSON aceita qualquer estrutura
         }
-        
+
         return validators.get(self, lambda x: False)(value)
-    
+
     def cast(self, value: Any) -> Any:
         """Converte um valor para o tipo apropriado."""
         if value is None or value == "":
             return self.default_value()
-        
+
         try:
             if self == FieldType.STRING:
                 return str(value)
@@ -160,9 +160,9 @@ class FieldType(Enum):
         except (ValueError, TypeError) as e:
             logger.warning(f"Erro ao converter valor '{value}' para {self}: {e}")
             return self.default_value()
-        
+
         return value
-    
+
     def default_value(self) -> Any:
         """Retorna o valor padrão para o tipo."""
         defaults = {
@@ -187,11 +187,11 @@ class Field:
     default: Any = None
     description: str = ""
     aliases: list[str] = field(default_factory=list)
-    
+
     def __post_init__(self):
         if self.default is None:
             self.default = self.field_type.default_value()
-    
+
     def normalize_name(self, name: str) -> bool:
         """Verifica se um nome corresponde a este campo (inclui aliases)."""
         name_lower = name.lower().strip()
@@ -201,18 +201,18 @@ class Field:
 
 class Version:
     """Representa e compara versões semânticas."""
-    
+
     def __init__(self, version_str: str):
         self.original = version_str
         self.parts = self._parse(version_str)
-    
+
     def _parse(self, version_str: str) -> tuple[int, ...]:
         """Parseia string de versão em componentes numéricos."""
         # Remove prefixo 'v' se existir
         version_str = version_str.lstrip("vV")
         # Separa por pontos
         parts = re.split(r"[.-]", version_str)
-        
+
         result = []
         for part in parts:
             try:
@@ -220,32 +220,32 @@ class Version:
             except ValueError:
                 # Ignora partes não numéricas (como "beta", "rc", etc.)
                 pass
-        
+
         return tuple(result) if result else (0,)
-    
+
     def __str__(self) -> str:
         return self.original
-    
+
     def __repr__(self) -> str:
         return f"Version('{self.original}')"
-    
+
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Version):
             return NotImplemented
         return self.parts == other.parts
-    
+
     def __lt__(self, other: Version) -> bool:
         return self.parts < other.parts
-    
+
     def __le__(self, other: Version) -> bool:
         return self.parts <= other.parts
-    
+
     def __gt__(self, other: Version) -> bool:
         return self.parts > other.parts
-    
+
     def __ge__(self, other: Version) -> bool:
         return self.parts >= other.parts
-    
+
     def __hash__(self) -> int:
         return hash(self.parts)
 
@@ -266,37 +266,37 @@ class SchemaVersion:
     description: str = ""
     created_at: datetime = field(default_factory=datetime.now)
     deprecated_fields: list[str] = field(default_factory=list)
-    
+
     def __post_init__(self):
         self._version = Version(self.version)
-    
+
     @property
     def version_obj(self) -> Version:
         """Retorna objeto Version para comparações."""
         return self._version
-    
+
     def get_field_names(self) -> set[str]:
         """Retorna conjunto de nomes de campos."""
         return set(self.fields.keys())
-    
+
     def get_required_fields(self) -> list[str]:
         """Retorna lista de campos obrigatórios."""
         return [name for name, field in self.fields.items() if field.required]
-    
+
     def has_field(self, name: str) -> bool:
         """Verifica se o schema tem um campo (considera aliases)."""
         for field in self.fields.values():
             if field.normalize_name(name):
                 return True
         return False
-    
-    def get_field_by_name(self, name: str) -> Optional[Field]:
+
+    def get_field_by_name(self, name: str) -> Field | None:
         """Retorna campo pelo nome ou alias."""
         for field in self.fields.values():
             if field.normalize_name(name):
                 return field
         return None
-    
+
     def validate_data(self, data: dict[str, Any]) -> list[str]:
         """Valida dados contra este schema.
         
@@ -304,14 +304,14 @@ class SchemaVersion:
             Lista de erros de validação (vazia se válido)
         """
         errors = []
-        
+
         # Verifica campos obrigatórios
         for name, field in self.fields.items():
             if field.required:
                 value = data.get(name)
                 if value is None or value == "":
                     errors.append(f"Campo obrigatório ausente: {name}")
-        
+
         # Valida tipos
         for name, value in data.items():
             field = self.get_field_by_name(name)
@@ -322,7 +322,7 @@ class SchemaVersion:
                         f"esperado {field.field_type.name}, "
                         f"recebido {type(value).__name__}"
                     )
-        
+
         return errors
 
 
@@ -348,7 +348,7 @@ class Migration(ABC, Generic[T]):
     source_version: str
     target_version: str
     description: str = ""
-    
+
     @abstractmethod
     def migrate(self, data: T) -> T:
         """Migra dados da versão source para target.
@@ -360,14 +360,14 @@ class Migration(ABC, Generic[T]):
             Dados migrados para versão target
         """
         pass
-    
+
     def can_migrate(self, from_version: str, to_version: str) -> bool:
         """Verifica se esta migração pode ser aplicada."""
         return (
             Version(from_version) == Version(self.source_version) and
             Version(to_version) == Version(self.target_version)
         )
-    
+
     def applies_to_path(self, from_version: Version, to_version: Version) -> bool:
         """Verifica se esta migração faz parte do caminho entre duas versões."""
         src = Version(self.source_version)
@@ -386,7 +386,7 @@ class MigrationResult:
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     stats: dict[str, int] = field(default_factory=dict)
-    
+
     @property
     def migration_count(self) -> int:
         """Número de migrações aplicadas."""
@@ -413,30 +413,30 @@ class MigrationManager:
         >>> if result.success:
         ...     print(f"Migrado para {result.target_version}")
     """
-    
+
     def __init__(
         self,
-        schemas: Optional[list[SchemaVersion]] = None,
-        migrations: Optional[list[Migration]] = None,
-        target_version: Optional[str] = None,
+        schemas: list[SchemaVersion] | None = None,
+        migrations: list[Migration] | None = None,
+        target_version: str | None = None,
     ):
         self.schemas: dict[str, SchemaVersion] = {}
         self.migrations: list[Migration] = []
         self.target_version = target_version
-        
+
         if schemas:
             for schema in schemas:
                 self.register_schema(schema)
-        
+
         if migrations:
             for migration in migrations:
                 self.register_migration(migration)
-    
+
     def register_schema(self, schema: SchemaVersion) -> None:
         """Registra uma versão de schema."""
         self.schemas[schema.version] = schema
         logger.debug(f"Schema registrado: {schema.version}")
-    
+
     def register_migration(self, migration: Migration) -> None:
         """Registra uma migração."""
         self.migrations.append(migration)
@@ -444,21 +444,21 @@ class MigrationManager:
             f"Migração registrada: {migration.source_version} -> "
             f"{migration.target_version}"
         )
-    
-    def get_schema(self, version: str) -> Optional[SchemaVersion]:
+
+    def get_schema(self, version: str) -> SchemaVersion | None:
         """Retorna schema pela versão."""
         return self.schemas.get(version)
-    
-    def get_latest_version(self) -> Optional[str]:
+
+    def get_latest_version(self) -> str | None:
         """Retorna a versão mais recente registrada."""
         if not self.schemas:
             return None
-        
+
         versions = [(Version(v), v) for v in self.schemas.keys()]
         versions.sort(reverse=True)
         return versions[0][1] if versions else None
-    
-    def detect_version(self, data: dict[str, Any]) -> Optional[str]:
+
+    def detect_version(self, data: dict[str, Any]) -> str | None:
         """Detecta a versão dos dados com base nos campos presentes.
         
         Algoritmo:
@@ -473,17 +473,17 @@ class MigrationManager:
         explicit_version = data.get("_schema_version") or data.get("__version")
         if explicit_version and explicit_version in self.schemas:
             return explicit_version
-        
+
         # 2. Compara campos com schemas
         data_fields = set(data.keys())
-        best_match: Optional[tuple[str, float]] = None
-        
+        best_match: tuple[str, float] | None = None
+
         for version, schema in self.schemas.items():
             schema_fields = schema.get_field_names()
-            
+
             # Ignora campos de metadados
             data_fields_clean = {f for f in data_fields if not f.startswith("_")}
-            
+
             # Calcula score de correspondência
             if schema_fields:
                 # Campos em comum
@@ -492,7 +492,7 @@ class MigrationManager:
                 extra = data_fields_clean - schema_fields
                 # Campos faltantes (do schema que não estão nos dados)
                 missing = schema_fields - data_fields_clean
-                
+
                 # Score: mais campos em comum é melhor
                 # Penalidade leve para campos extras
                 # Penalidade maior para campos obrigatórios faltantes
@@ -500,27 +500,27 @@ class MigrationManager:
                 required_missing = sum(
                     1 for f in missing if schema.fields.get(f) and schema.fields[f].required
                 )
-                
+
                 # Penalidades
                 extra_penalty = min(len(extra) * 0.05, 0.3)  # Max 0.3 de penalidade
                 missing_penalty = required_missing * 0.3
-                
+
                 score = coverage - extra_penalty - missing_penalty
-                
+
                 # Bônus para schemas que cobrem mais campos dos dados
                 if data_fields_clean:
                     field_match_ratio = len(common) / len(data_fields_clean)
                     score += field_match_ratio * 0.1
-                
+
                 if best_match is None or score > best_match[1]:
                     best_match = (version, score)
-        
+
         # Retorna apenas se score é razoável (> 0.2)
         if best_match and best_match[1] > 0.2:
             return best_match[0]
-        
+
         return None
-    
+
     def find_migration_path(
         self,
         from_version: str,
@@ -535,42 +535,42 @@ class MigrationManager:
         """
         if from_version == to_version:
             return []
-        
+
         from_v = Version(from_version)
         to_v = Version(to_version)
-        
+
         if from_v > to_v:
             raise ValueError(
                 f"Não é possível migrar de {from_version} para {to_version} "
                 "(downgrade não suportado)"
             )
-        
+
         # BFS para encontrar caminho
         from collections import deque
-        
+
         queue: deque[tuple[Version, list[Migration]]] = deque([(from_v, [])])
         visited: set[Version] = {from_v}
-        
+
         while queue:
             current, path = queue.popleft()
-            
+
             if current == to_v:
                 return path
-            
+
             # Encontra migrações possíveis a partir da versão atual
             for migration in self.migrations:
                 migration_src = Version(migration.source_version)
                 migration_tgt = Version(migration.target_version)
-                
+
                 if migration_src == current and migration_tgt not in visited:
                     visited.add(migration_tgt)
                     queue.append((migration_tgt, path + [migration]))
-        
+
         raise ValueError(
             f"Não foi encontrado caminho de migração de {from_version} "
             f"para {to_version}"
         )
-    
+
     def migrate_data(
         self,
         data: T,
@@ -593,16 +593,16 @@ class MigrationManager:
             source_version=from_version,
             target_version=to_version,
         )
-        
+
         try:
             # Encontra caminho de migração
             path = self.find_migration_path(from_version, to_version)
-            
+
             if not path:
                 result.success = True
                 result.warnings.append("Nenhuma migração necessária")
                 return result
-            
+
             # Aplica migrações em sequência
             current_data = data
             for migration in path:
@@ -610,7 +610,7 @@ class MigrationManager:
                     f"Aplicando migração: {migration.source_version} -> "
                     f"{migration.target_version}"
                 )
-                
+
                 try:
                     current_data = migration.migrate(current_data)
                     result.applied_migrations.append(
@@ -622,23 +622,23 @@ class MigrationManager:
                         f"{migration.target_version}: {e}"
                     )
                     return result
-            
+
             result.data = current_data
             result.success = True
             result.stats["migrations_applied"] = len(path)
-            
+
         except ValueError as e:
             result.errors.append(str(e))
         except Exception as e:
             result.errors.append(f"Erro inesperado: {e}")
             logger.exception("Erro durante migração")
-        
+
         return result
-    
+
     def auto_migrate(
         self,
         data: T,
-        target_version: Optional[str] = None,
+        target_version: str | None = None,
     ) -> MigrationResult:
         """Detecta versão e migra automaticamente para a versão alvo.
         
@@ -651,7 +651,7 @@ class MigrationManager:
         """
         # Detecta versão dos dados
         detected = self.detect_version(data)
-        
+
         if detected is None:
             return MigrationResult(
                 success=False,
@@ -660,10 +660,10 @@ class MigrationManager:
                 target_version=target_version or self.target_version or "latest",
                 errors=["Não foi possível detectar a versão dos dados"],
             )
-        
+
         # Determina versão alvo
         tgt = target_version or self.target_version or self.get_latest_version()
-        
+
         if tgt is None:
             return MigrationResult(
                 success=False,
@@ -672,15 +672,15 @@ class MigrationManager:
                 target_version="unknown",
                 errors=["Nenhuma versão alvo definida"],
             )
-        
+
         return self.migrate_data(data, detected, tgt)
-    
+
     def migrate_spreadsheet(
         self,
         file_path: Path,
-        target_version: Optional[str] = None,
-        output_path: Optional[Path] = None,
-        sheet_name: Optional[str] = None,
+        target_version: str | None = None,
+        output_path: Path | None = None,
+        sheet_name: str | None = None,
     ) -> MigrationResult:
         """Migra uma planilha Excel para uma nova versão do schema.
         
@@ -701,7 +701,7 @@ class MigrationManager:
                 target_version=target_version or "latest",
                 errors=["pandas não está instalado"],
             )
-        
+
         if not HAS_OPENPYXL:
             return MigrationResult(
                 success=False,
@@ -710,26 +710,26 @@ class MigrationManager:
                 target_version=target_version or "latest",
                 errors=["openpyxl não está instalado"],
             )
-        
+
         try:
             # Lê planilha - se sheet_name for None, lê primeira aba
             if sheet_name is None:
                 # Obtém nome da primeira aba
                 xl = pd.ExcelFile(file_path)
                 sheet_name = xl.sheet_names[0] if xl.sheet_names else "Sheet1"
-            
+
             df = pd.read_excel(file_path, sheet_name=sheet_name)
-            
+
             # Garante que df é um DataFrame (não dict de múltiplas abas)
             if isinstance(df, dict):
                 df = list(df.values())[0]
-            
+
             # Adiciona metadado de versão se existir
             version_info = {}
-            
+
             # Converte para lista de dicionários
             records = df.to_dict("records")
-            
+
             # Detecta versão do primeiro registro
             if not records:
                 return MigrationResult(
@@ -739,11 +739,11 @@ class MigrationManager:
                     target_version=target_version or "latest",
                     errors=["Planilha está vazia"],
                 )
-            
+
             # Detecta versão baseada nos campos
             sample = records[0]
             detected = self.detect_version(sample)
-            
+
             if detected is None:
                 return MigrationResult(
                     success=False,
@@ -755,10 +755,10 @@ class MigrationManager:
                         f"Campos encontrados: {list(sample.keys())}"
                     ],
                 )
-            
+
             # Determina versão alvo
             tgt = target_version or self.target_version or self.get_latest_version()
-            
+
             if tgt is None:
                 return MigrationResult(
                     success=False,
@@ -767,15 +767,15 @@ class MigrationManager:
                     target_version="unknown",
                     errors=["Nenhuma versão alvo definida"],
                 )
-            
+
             # Migra cada registro
             migrated_records = []
             errors = []
             warnings = []
-            
+
             for i, record in enumerate(records):
                 result = self.migrate_data(record, detected, tgt)
-                
+
                 if result.success:
                     migrated_records.append(result.data)
                     if result.warnings:
@@ -784,24 +784,24 @@ class MigrationManager:
                     errors.extend([f"Linha {i+2}: {e}" for e in result.errors])
                     # Mantém registro original em caso de erro
                     migrated_records.append(record)
-            
+
             # Cria DataFrame com dados migrados
             migrated_df = pd.DataFrame(migrated_records)
-            
+
             # Determina caminho de saída
             out = output_path or file_path
-            
+
             # Salva planilha
             with pd.ExcelWriter(out, engine="openpyxl") as writer:
                 migrated_df.to_excel(writer, sheet_name=sheet_name or "Sheet1", index=False)
-                
+
                 # Adiciona metadados em aba separada
                 metadata_df = pd.DataFrame({
                     "propriedade": ["schema_version", "migrated_from", "migrated_at"],
                     "valor": [tgt, detected, datetime.now().isoformat()],
                 })
                 metadata_df.to_excel(writer, sheet_name="_schema_metadata", index=False)
-            
+
             return MigrationResult(
                 success=len(errors) == 0 or len(migrated_records) > 0,
                 data=out,
@@ -815,7 +815,7 @@ class MigrationManager:
                     "errors_count": len(errors),
                 },
             )
-            
+
         except Exception as e:
             logger.exception("Erro ao migrar planilha")
             return MigrationResult(
@@ -885,14 +885,14 @@ class V1ToV2Migration(Migration[dict]):
     source_version = "1.0"
     target_version = "2.0"
     description = "Adiciona campos GTIN, brand, model e attributes"
-    
+
     def migrate(self, data: dict) -> dict:
         # Adiciona campos novos com valores padrão
         data["gtin"] = data.get("gtin", "")
         data["brand"] = data.get("brand", "")
         data["model"] = data.get("model", "")
         data["attributes"] = data.get("attributes", {})
-        
+
         # Converte atributos de string para dict se necessário
         if isinstance(data["attributes"], str) and data["attributes"]:
             try:
@@ -901,7 +901,7 @@ class V1ToV2Migration(Migration[dict]):
             except json.JSONDecodeError:
                 # Se não for JSON válido, trata como string simples
                 data["attributes"] = {"raw": data["attributes"]}
-        
+
         return data
 
 
@@ -910,17 +910,17 @@ class V2ToV3Migration(Migration[dict]):
     source_version = "2.0"
     target_version = "3.0"
     description = "Adiciona vídeo, sale_terms, variations e channels"
-    
+
     def migrate(self, data: dict) -> dict:
         data["video_id"] = data.get("video_id", "")
         data["sale_terms"] = data.get("sale_terms", {})
         data["variations"] = data.get("variations", [])
         data["channels"] = data.get("channels", ["marketplace"])
-        
+
         # Normaliza canais
         if isinstance(data["channels"], str):
             data["channels"] = [c.strip() for c in data["channels"].split(",")]
-        
+
         return data
 
 

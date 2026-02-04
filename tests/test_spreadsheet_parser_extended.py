@@ -14,9 +14,8 @@ actual file system operations.
 
 import sys
 import tempfile
-from io import BytesIO
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import patch
 
 import pandas as pd
 import pytest
@@ -47,7 +46,7 @@ class TestSpreadsheetParserCSV:
     def test_csv_with_comma_delimiter_via_pandas_mock(self):
         """Test CSV parsing with comma delimiter using mocked pandas."""
         parser = SpreadsheetParser()
-        
+
         # Create expected DataFrame
         expected_df = pd.DataFrame({
             "titulo": ["Product 1", "Product 2"],
@@ -57,18 +56,18 @@ class TestSpreadsheetParserCSV:
 
         with patch("pandas.read_excel") as mock_read_excel:
             mock_read_excel.return_value = expected_df
-            
+
             # Temporarily add .csv to supported extensions for testing
             original_extensions = parser.SUPPORTED_EXTENSIONS.copy()
             parser.SUPPORTED_EXTENSIONS.add(".csv")
-            
+
             with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as tmp:
                 tmp_path = Path(tmp.name)
                 tmp_path.touch()
-                
+
                 try:
                     result = parser.parse(tmp_path)
-                    
+
                     assert len(result) == 2
                     assert result[0]["titulo"] == "Product 1"
                     assert result[0]["preco"] == 99.99
@@ -80,7 +79,7 @@ class TestSpreadsheetParserCSV:
     def test_csv_with_semicolon_delimiter(self):
         """Test CSV parsing with semicolon delimiter (common in some locales)."""
         parser = SpreadsheetParser()
-        
+
         expected_df = pd.DataFrame({
             "titulo": ["Product 1", "Product 2"],
             "preco": [99.99, 199.99],
@@ -88,17 +87,17 @@ class TestSpreadsheetParserCSV:
 
         with patch("pandas.read_excel") as mock_read_excel:
             mock_read_excel.return_value = expected_df
-            
+
             original_extensions = parser.SUPPORTED_EXTENSIONS.copy()
             parser.SUPPORTED_EXTENSIONS.add(".csv")
-            
+
             with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as tmp:
                 tmp_path = Path(tmp.name)
                 tmp_path.touch()
-                
+
                 try:
                     result = parser.parse(tmp_path)
-                    
+
                     assert len(result) == 2
                     # Verify pandas read_excel was called
                     mock_read_excel.assert_called_once()
@@ -109,7 +108,7 @@ class TestSpreadsheetParserCSV:
     def test_csv_with_tab_delimiter(self):
         """Test CSV parsing with tab delimiter (TSV format)."""
         parser = SpreadsheetParser()
-        
+
         expected_df = pd.DataFrame({
             "titulo": ["Product 1", "Product 2"],
             "preco": [99.99, 199.99],
@@ -117,14 +116,14 @@ class TestSpreadsheetParserCSV:
 
         with patch("pandas.read_excel") as mock_read_excel:
             mock_read_excel.return_value = expected_df
-            
+
             original_extensions = parser.SUPPORTED_EXTENSIONS.copy()
             parser.SUPPORTED_EXTENSIONS.add(".csv")
-            
+
             with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as tmp:
                 tmp_path = Path(tmp.name)
                 tmp_path.touch()
-                
+
                 try:
                     result = parser.parse(tmp_path)
                     assert len(result) == 2
@@ -135,7 +134,7 @@ class TestSpreadsheetParserCSV:
     def test_csv_with_pipe_delimiter(self):
         """Test CSV parsing with pipe delimiter."""
         parser = SpreadsheetParser()
-        
+
         expected_df = pd.DataFrame({
             "titulo": ["Product 1"],
             "preco": [99.99],
@@ -143,14 +142,14 @@ class TestSpreadsheetParserCSV:
 
         with patch("pandas.read_excel") as mock_read_excel:
             mock_read_excel.return_value = expected_df
-            
+
             original_extensions = parser.SUPPORTED_EXTENSIONS.copy()
             parser.SUPPORTED_EXTENSIONS.add(".csv")
-            
+
             with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as tmp:
                 tmp_path = Path(tmp.name)
                 tmp_path.touch()
-                
+
                 try:
                     result = parser.parse(tmp_path)
                     assert len(result) == 1
@@ -180,10 +179,10 @@ class TestSpreadsheetParserExcel:
         """
         df = pd.DataFrame(data)
         temp_file = Path(tempfile.gettempdir()) / filename
-        
+
         with pd.ExcelWriter(temp_file, engine="openpyxl") as writer:
             df.to_excel(writer, sheet_name=sheet_name, index=False)
-        
+
         return temp_file
 
     def test_parse_xlsx_success(self):
@@ -219,20 +218,20 @@ class TestSpreadsheetParserExcel:
             "categoria": ["MLB123"],
             "moeda": ["BRL"],
         }
-        
+
         with patch("pandas.read_excel") as mock_read_excel:
             mock_read_excel.return_value = pd.DataFrame(data)
-            
+
             with tempfile.NamedTemporaryFile(suffix=".xls", delete=False) as tmp:
                 tmp_path = Path(tmp.name)
                 tmp_path.touch()
-                
+
                 try:
                     result = parser.parse(tmp_path)
-                    
+
                     assert len(result) == 1
                     assert result[0]["titulo"] == "Product 1"
-                    
+
                     # Verify xlrd engine is used for .xls files
                     call_kwargs = mock_read_excel.call_args[1]
                     assert call_kwargs.get("engine") == "xlrd"
@@ -245,7 +244,7 @@ class TestSpreadsheetParserExcel:
 
         # Create Excel with multiple sheets
         temp_file = Path(tempfile.gettempdir()) / "multi_sheet.xlsx"
-        
+
         df1 = pd.DataFrame({
             "titulo": ["Product A"],
             "preco": [100.00],
@@ -254,7 +253,7 @@ class TestSpreadsheetParserExcel:
             "titulo": ["Product B"],
             "preco": [200.00],
         })
-        
+
         with pd.ExcelWriter(temp_file, engine="openpyxl") as writer:
             df1.to_excel(writer, sheet_name="Products", index=False)
             df2.to_excel(writer, sheet_name="Inventory", index=False)
@@ -262,7 +261,7 @@ class TestSpreadsheetParserExcel:
         try:
             # Parse second sheet
             result = parser.parse(temp_file, sheet_name="Inventory")
-            
+
             assert len(result) == 1
             assert result[0]["titulo"] == "Product B"
             assert result[0]["preco"] == 200.00
@@ -274,7 +273,7 @@ class TestSpreadsheetParserExcel:
         parser = SpreadsheetParser()
 
         temp_file = Path(tempfile.gettempdir()) / "multi_sheet_idx.xlsx"
-        
+
         df1 = pd.DataFrame({
             "titulo": ["First Sheet Product"],
             "preco": [100.00],
@@ -283,7 +282,7 @@ class TestSpreadsheetParserExcel:
             "titulo": ["Second Sheet Product"],
             "preco": [200.00],
         })
-        
+
         with pd.ExcelWriter(temp_file, engine="openpyxl") as writer:
             df1.to_excel(writer, sheet_name="Sheet1", index=False)
             df2.to_excel(writer, sheet_name="Sheet2", index=False)
@@ -291,7 +290,7 @@ class TestSpreadsheetParserExcel:
         try:
             # Parse second sheet by index
             result = parser.parse(temp_file, sheet_name=1)
-            
+
             assert len(result) == 1
             assert result[0]["titulo"] == "Second Sheet Product"
         finally:
@@ -303,7 +302,7 @@ class TestSpreadsheetParserExcel:
 
         # Create Excel where headers are in row 2 (index 1)
         temp_file = Path(tempfile.gettempdir()) / "header_row.xlsx"
-        
+
         # Create data with header in second row
         raw_data = [
             ["Ignore", "This", "Row"],
@@ -312,13 +311,13 @@ class TestSpreadsheetParserExcel:
             ["Product 2", 199.99, "MLB456"],
         ]
         df = pd.DataFrame(raw_data)
-        
+
         with pd.ExcelWriter(temp_file, engine="openpyxl") as writer:
             df.to_excel(writer, sheet_name="Sheet1", index=False, header=False)
 
         try:
             result = parser.parse(temp_file, header_row=1)
-            
+
             assert len(result) == 2
             assert result[0]["titulo"] == "Product 1"
             assert result[1]["preco"] == 199.99
@@ -442,7 +441,7 @@ class TestColumnMapping:
     def test_custom_column_mapping(self):
         """Test custom column mapping."""
         parser = SpreadsheetParser()
-        
+
         custom_mapping = {
             "my_title": "titulo",
             "my_price": "preco",
@@ -510,14 +509,14 @@ class TestColumnMapping:
     def test_get_column_mapping_returns_copy(self):
         """Test that get_column_mapping returns a copy, not a reference."""
         parser = SpreadsheetParser()
-        
+
         mapping1 = parser.get_column_mapping()
         mapping2 = parser.get_column_mapping()
-        
+
         # Should be equal but not the same object
         assert mapping1 == mapping2
         assert mapping1 is not mapping2
-        
+
         # Modifying one should not affect the other
         mapping1["new_key"] = "new_value"
         assert "new_key" not in parser.get_column_mapping()
@@ -525,13 +524,13 @@ class TestColumnMapping:
     def test_set_column_mapping_creates_copy(self):
         """Test that set_column_mapping creates a copy of the mapping."""
         parser = SpreadsheetParser()
-        
+
         original_mapping = {"col1": "field1", "col2": "field2"}
         parser.set_column_mapping(original_mapping)
-        
+
         # Modify original
         original_mapping["col3"] = "field3"
-        
+
         # Parser's mapping should not be affected
         assert "col3" not in parser.get_column_mapping()
 
@@ -545,7 +544,7 @@ class TestErrorHandling:
 
         with pytest.raises(FileNotFoundError) as exc_info:
             parser.parse("/nonexistent/path/to/file.xlsx")
-        
+
         assert "Arquivo não encontrado" in str(exc_info.value)
 
     def test_file_not_found_with_path_object(self):
@@ -554,7 +553,7 @@ class TestErrorHandling:
 
         with pytest.raises(FileNotFoundError) as exc_info:
             parser.parse(Path("/nonexistent/path/file.xlsx"))
-        
+
         assert "Arquivo não encontrado" in str(exc_info.value)
 
     def test_path_is_directory_error(self):
@@ -564,7 +563,7 @@ class TestErrorHandling:
         with tempfile.TemporaryDirectory() as tmp_dir:
             with pytest.raises(ValueError) as exc_info:
                 parser.parse(tmp_dir)
-            
+
             assert "Caminho não é um arquivo" in str(exc_info.value)
 
     def test_invalid_extension_error(self):
@@ -578,7 +577,7 @@ class TestErrorHandling:
         try:
             with pytest.raises(ValueError) as exc_info:
                 parser.parse(tmp_path)
-            
+
             assert "Formato de arquivo não suportado" in str(exc_info.value)
             assert ".txt" in str(exc_info.value)
         finally:
@@ -595,7 +594,7 @@ class TestErrorHandling:
         try:
             with pytest.raises(ValueError) as exc_info:
                 parser.parse(tmp_path)
-            
+
             assert "Formato de arquivo não suportado" in str(exc_info.value)
         finally:
             tmp_path.unlink(missing_ok=True)
@@ -611,7 +610,7 @@ class TestErrorHandling:
         try:
             with pytest.raises(ValueError) as exc_info:
                 parser.parse(tmp_path)
-            
+
             assert "Erro ao ler arquivo Excel" in str(exc_info.value)
         finally:
             tmp_path.unlink(missing_ok=True)
@@ -627,7 +626,7 @@ class TestErrorHandling:
         try:
             with pytest.raises(ValueError) as exc_info:
                 parser.parse(tmp_path)
-            
+
             assert "Erro ao ler arquivo Excel" in str(exc_info.value)
         finally:
             tmp_path.unlink(missing_ok=True)
@@ -643,10 +642,10 @@ class TestErrorHandling:
         try:
             with patch("pandas.read_excel") as mock_read:
                 mock_read.side_effect = pd.errors.EmptyDataError("No columns")
-                
+
                 with pytest.raises(ValueError) as exc_info:
                     parser.parse(tmp_path)
-                
+
                 assert "Erro ao ler arquivo Excel" in str(exc_info.value)
                 assert exc_info.value.__cause__ is not None
         finally:
@@ -657,7 +656,7 @@ class TestErrorHandling:
         parser = SpreadsheetParser()
 
         is_valid, errors = parser.validate_file("/nonexistent/file.xlsx")
-        
+
         assert is_valid is False
         assert len(errors) == 1
         assert "não encontrado" in errors[0].lower()
@@ -668,7 +667,7 @@ class TestErrorHandling:
 
         with tempfile.TemporaryDirectory() as tmp_dir:
             is_valid, errors = parser.validate_file(tmp_dir)
-            
+
             assert is_valid is False
             assert any("não é um arquivo" in e.lower() for e in errors)
 
@@ -682,7 +681,7 @@ class TestErrorHandling:
 
         try:
             is_valid, errors = parser.validate_file(tmp_path)
-            
+
             assert is_valid is False
             assert any("não suportado" in e.lower() for e in errors)
         finally:
@@ -698,7 +697,7 @@ class TestErrorHandling:
 
         try:
             is_valid, errors = parser.validate_file(temp_file)
-            
+
             assert is_valid is True
             assert errors == []
         finally:
@@ -827,17 +826,17 @@ class TestNullAndEmptyValues:
             result = parser.parse(temp_file)
 
             assert len(result) == 3
-            
+
             # Product 1: has all fields
             assert result[0]["preco"] == 99.99
             assert result[0]["quantidade"] == 10
             assert "sku" not in result[0]  # Empty string removed
-            
+
             # Product 2: missing preco (NaN), has others
             assert "preco" not in result[1]
             assert result[1]["quantidade"] == 20
             assert result[1]["sku"] == "SKU002"
-            
+
             # Product 3: missing quantidade (None), has others
             assert result[2]["preco"] == 299.99
             assert "quantidade" not in result[2]
@@ -954,9 +953,9 @@ class TestEncoding:
             result = parser.parse(temp_file)
 
             assert len(result) == 3
-            assert "São Paulo" == result[0]["titulo"]
-            assert "Ação" == result[1]["titulo"]
-            assert "Empreiteira" == result[2]["titulo"]
+            assert result[0]["titulo"] == "São Paulo"
+            assert result[1]["titulo"] == "Ação"
+            assert result[2]["titulo"] == "Empreiteira"
         finally:
             temp_file.unlink(missing_ok=True)
 
@@ -991,7 +990,7 @@ class TestEncoding:
     def test_csv_encoding_mock(self):
         """Test CSV encoding handling with mocked pandas."""
         parser = SpreadsheetParser()
-        
+
         # Mock DataFrame with UTF-8 content
         expected_df = pd.DataFrame({
             "titulo": ["Café", "Maçã"],
@@ -1000,17 +999,17 @@ class TestEncoding:
 
         with patch("pandas.read_excel") as mock_read_excel:
             mock_read_excel.return_value = expected_df
-            
+
             original_extensions = parser.SUPPORTED_EXTENSIONS.copy()
             parser.SUPPORTED_EXTENSIONS.add(".csv")
-            
+
             with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as tmp:
                 tmp_path = Path(tmp.name)
                 tmp_path.touch()
-                
+
                 try:
                     result = parser.parse(tmp_path)
-                    
+
                     assert len(result) == 2
                     assert result[0]["titulo"] == "Café"
                     assert result[1]["titulo"] == "Maçã"
@@ -1140,7 +1139,7 @@ class TestIntegrationScenarios:
             result = parser.parse(temp_file)
 
             assert len(result) == 3
-            
+
             # Verify all expected fields are present
             expected_fields = [
                 "titulo", "preco", "categoria", "moeda",
@@ -1148,7 +1147,7 @@ class TestIntegrationScenarios:
             ]
             for field in expected_fields:
                 assert field in result[0], f"Field {field} not found in parsed data"
-            
+
             # Verify specific values
             assert result[0]["titulo"] == "Smartphone Samsung Galaxy S23"
             assert result[0]["preco"] == 3999.99
@@ -1200,16 +1199,16 @@ class TestIntegrationScenarios:
             result = parser.parse(temp_file)
 
             assert len(result) == 3
-            
+
             # Product 1: missing moeda
             assert "moeda" not in result[0]
             assert result[0]["preco"] == 99.99
-            
+
             # Product 2: missing categoria, empty descricao
             assert "categoria" not in result[1]
             assert "descricao" not in result[1]  # Empty string removed
             assert result[1]["moeda"] == "USD"
-            
+
             # Product 3: all required present
             assert result[2]["categoria"] == "MLB789"
             assert result[2]["moeda"] == "BRL"
@@ -1231,7 +1230,7 @@ class TestLoggerIntegration:
     def test_info_logging_on_parse(self, caplog):
         """Test that info messages are logged during parsing."""
         import logging
-        
+
         parser = SpreadsheetParser()
 
         data = {
@@ -1250,13 +1249,13 @@ class TestLoggerIntegration:
         # Should have logged reading message
         assert any("Lendo planilha" in record.message for record in caplog.records)
         # Should have logged parsed count
-        assert any("Parsed" in record.message and "registros" in record.message 
+        assert any("Parsed" in record.message and "registros" in record.message
                    for record in caplog.records)
 
     def test_warning_logging_on_empty(self, caplog):
         """Test that warning is logged for empty file."""
         import logging
-        
+
         parser = SpreadsheetParser()
 
         df = pd.DataFrame()

@@ -2,10 +2,10 @@
 
 class MockMLApiClient:
     """Mock client that simulates API responses."""
-    
+
     def __init__(self, auth_manager=None):
         self.auth = auth_manager
-    
+
     def get_category(self, category_id):
         """Return mock category."""
         return {
@@ -13,7 +13,7 @@ class MockMLApiClient:
             "name": "Livros Infantis",
             "path_from_root": [{"id": "MLB437616", "name": "Livros"}]
         }
-    
+
     def publish_item(self, item_data):
         """Simulate publishing."""
         import random

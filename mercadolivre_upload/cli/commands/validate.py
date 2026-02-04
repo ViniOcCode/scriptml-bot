@@ -8,8 +8,8 @@ from rich.console import Console
 from rich.panel import Panel
 
 from mercadolivre_upload.adapters.spreadsheet.parser import SpreadsheetParser
-from mercadolivre_upload.api.client import MLApiClient
 from mercadolivre_upload.api.category_adapter import CategoryAdapter
+from mercadolivre_upload.api.client import MLApiClient
 from mercadolivre_upload.domain.category.resolver import CategoryResolver
 from mercadolivre_upload.infrastructure.cache.attribute_cache import AttributeCache
 
@@ -30,15 +30,15 @@ def validate(
 ):
     """Validate products without publishing (dry-run)."""
     console.print(Panel.fit("Pre-Validation", style="yellow"))
-    
+
     # Initialize components
     cache = AttributeCache(cache_dir=str(cache_dir))
     api_client = MLApiClient()
     category_adapter = CategoryAdapter(api_client)
     category_resolver = CategoryResolver(category_adapter, attribute_cache=cache)
-    
+
     parser = SpreadsheetParser()
-    
+
     # Parse products
     try:
         products = parser.parse(excel)
@@ -46,7 +46,7 @@ def validate(
     except Exception as e:
         err_console.print(f"[red]Error parsing Excel: {e}[/red]")
         raise typer.Exit(1)
-    
+
     # Validate products
     errors = []
     for product in products:
@@ -57,7 +57,7 @@ def validate(
             errors.append(f"{product.sku}: Invalid price")
         if not product.sku:
             errors.append(f"Product {product.title[:30]}: Missing SKU")
-    
+
     if errors:
         console.print(f"[red]✗ Validation failed: {len(errors)} errors[/red]")
         if detailed:

@@ -8,13 +8,12 @@
 
 import logging
 from pathlib import Path
-from typing import Optional
 
+from mercadolivre_upload.adapters.spreadsheet.dynamic_parser import DynamicExcelParser
+from mercadolivre_upload.adapters.spreadsheet.models import Product
 from mercadolivre_upload.api.category_resolver import CategoryResolver
 from mercadolivre_upload.api.client import MLApiClient
 from mercadolivre_upload.auth.manager import AuthManager
-from mercadolivre_upload.adapters.spreadsheet.dynamic_parser import DynamicExcelParser
-from mercadolivre_upload.adapters.spreadsheet.models import Product
 from mercadolivre_upload.publisher.publisher import Publisher
 
 logger = logging.getLogger(__name__)
@@ -27,7 +26,7 @@ class MLPipeline:
         self,
         excel_path: Path,
         images_path: Path,
-        auth_manager: Optional[AuthManager] = None,
+        auth_manager: AuthManager | None = None,
         dry_run: bool = False,
     ):
         """Initialize pipeline.
@@ -72,9 +71,9 @@ class MLPipeline:
 
         for product in self.products:
             if not product.sku:
-                errors.append(f"Missing SKU")
+                errors.append("Missing SKU")
             if not product.title:
-                errors.append(f"Missing title")
+                errors.append("Missing title")
             if product.price <= 0:
                 errors.append(f"Invalid price for {product.sku}")
             if product.available_quantity < 1:

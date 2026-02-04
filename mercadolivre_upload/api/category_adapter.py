@@ -4,7 +4,6 @@ Infrastructure layer - depends on external API.
 """
 
 import logging
-from typing import Protocol
 
 from mercadolivre_upload.api.client import MLApiClient
 from mercadolivre_upload.domain.category.resolver import CategoryApiPort

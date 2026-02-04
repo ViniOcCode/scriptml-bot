@@ -1,7 +1,7 @@
 """Extended validators for Mercado Livre products."""
-from typing import Any
-from abc import ABC, abstractmethod
 import re
+from abc import ABC, abstractmethod
+from typing import Any
 from urllib.parse import urlparse
 
 from .base import ValidationResult, ValidationSeverity

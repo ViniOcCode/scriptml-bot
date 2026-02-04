@@ -1,5 +1,5 @@
 """Category domain module."""
 
-from mercadolivre_upload.domain.category.resolver import CategoryResolver, CategoryApiPort
+from mercadolivre_upload.domain.category.resolver import CategoryApiPort, CategoryResolver
 
 __all__ = ["CategoryResolver", "CategoryApiPort"]

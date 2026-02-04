@@ -12,17 +12,18 @@ from __future__ import annotations
 import functools
 import time
 from collections import Counter, defaultdict
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Literal, TypeVar
+from typing import Any, TypeVar
 
 # Tentativa de importar prometheus_client (opcional)
 try:
+    from prometheus_client import CONTENT_TYPE_LATEST, generate_latest, start_http_server
     from prometheus_client import Counter as PrometheusCounter
     from prometheus_client import Histogram as PrometheusHistogram
     from prometheus_client import Summary as PrometheusSummary
-    from prometheus_client import start_http_server, generate_latest, CONTENT_TYPE_LATEST
 
     PROMETHEUS_AVAILABLE = True
 except ImportError:

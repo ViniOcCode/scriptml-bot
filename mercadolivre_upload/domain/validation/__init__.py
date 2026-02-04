@@ -1,9 +1,9 @@
 """Validation package for attribute sanitization and scoring."""
 
-from .structural import StructuralValidator, ValidationResult
-from .scoring import SemanticScorer, ScoredAttribute
-from .sanitizer import AttributeSanitizer
 from .feedback import ValidationFeedback
+from .sanitizer import AttributeSanitizer
+from .scoring import ScoredAttribute, SemanticScorer
+from .structural import StructuralValidator, ValidationResult
 
 __all__ = [
     "StructuralValidator",

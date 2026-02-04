@@ -17,7 +17,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Optional, Protocol, Tuple
+from typing import Any, Protocol
 
 from .data import FiscalData
 
@@ -41,17 +41,17 @@ class FiscalSubmissionResult:
     item_id: str
     sku: str
     status: FiscalSubmissionStatus
-    fiscal_data: Optional[FiscalData] = None
-    response: Optional[dict[str, Any]] = None
-    error_message: Optional[str] = None
-    error_code: Optional[str] = None
+    fiscal_data: FiscalData | None = None
+    response: dict[str, Any] | None = None
+    error_message: str | None = None
+    error_code: str | None = None
     retry_count: int = 0
 
 
 class FiscalApiPort(Protocol):
     """Port for fiscal API operations."""
 
-    def check_fiscal_data_exists(self, sku: str) -> tuple[bool, Optional[dict[str, Any]]]:
+    def check_fiscal_data_exists(self, sku: str) -> tuple[bool, dict[str, Any] | None]:
         """Check if fiscal data exists for a SKU.
 
         Args:
@@ -94,7 +94,7 @@ class RetryConfig:
         base_delay: float = 1.0,
         max_delay: float = 60.0,
         exponential_base: float = 2.0,
-        retryable_status_codes: Optional[set[int]] = None
+        retryable_status_codes: set[int] | None = None
     ):
         self.max_retries = max_retries
         self.base_delay = base_delay
@@ -124,7 +124,7 @@ class FiscalService:
     def __init__(
         self,
         api_client: FiscalApiPort,
-        retry_config: Optional[RetryConfig] = None,
+        retry_config: RetryConfig | None = None,
         can_invoice_wait_delay: float = 60.0,
         can_invoice_max_retries: int = 5
     ):
@@ -147,7 +147,7 @@ class FiscalService:
         operation_name: str,
         sku: str,
         item_id: str
-    ) -> Tuple[Any, int]:
+    ) -> tuple[Any, int]:
         """Execute an operation with retry logic.
 
         Args:
@@ -159,7 +159,7 @@ class FiscalService:
         Returns:
             Tuple of (result, retry_count)
         """
-        last_exception: Optional[Exception] = None
+        last_exception: Exception | None = None
 
         for attempt in range(self.retry_config.max_retries + 1):
             try:
@@ -208,7 +208,7 @@ class FiscalService:
         self,
         item_id: str,
         sku: str
-    ) -> Tuple[bool, Optional[dict[str, Any]], int]:
+    ) -> tuple[bool, dict[str, Any] | None, int]:
         """Wait for item to be ready for fiscal data submission.
 
         Polls the fiscal_information endpoint (GET /items/fiscal_information/{SKU})
@@ -497,7 +497,7 @@ class FiscalService:
                 retry_count=previous_retry_count
             )
 
-    def _extract_error_code(self, exception: Exception) -> Optional[str]:
+    def _extract_error_code(self, exception: Exception) -> str | None:
         """Extract error code from API exception."""
         response = getattr(exception, 'response', None)
         if response is None:
@@ -576,7 +576,7 @@ class FiscalService:
         self,
         sku: str,
         item_id: str = ""
-    ) -> Tuple[bool, Optional[dict[str, Any]], int]:
+    ) -> tuple[bool, dict[str, Any] | None, int]:
         """Check if fiscal data exists for a SKU.
 
         Args:
@@ -602,7 +602,7 @@ class FiscalService:
         self,
         fiscal_data: FiscalData,
         item_id: str = ""
-    ) -> Tuple[dict[str, Any], int]:
+    ) -> tuple[dict[str, Any], int]:
         """Register fiscal data for a product.
 
         Args:
@@ -635,7 +635,7 @@ class FiscalService:
         self,
         item_id: str,
         sku: str = ""
-    ) -> Tuple[bool, dict[str, Any], int]:
+    ) -> tuple[bool, dict[str, Any], int]:
         """Verify if an item is ready for invoice generation.
 
         Args:

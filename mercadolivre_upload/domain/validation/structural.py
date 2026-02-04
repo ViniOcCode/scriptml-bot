@@ -3,7 +3,6 @@
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Optional
 
 from ..attribute_metadata import AttributeMeta
 

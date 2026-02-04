@@ -4,18 +4,18 @@ Handles attribute mapping, validation, scoring, and sanitization.
 """
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 from mercadolivre_upload.domain.attribute_mapper import AttributeMapper
 from mercadolivre_upload.domain.cache_attribute_mapper import CachedAttributeMapper
+from mercadolivre_upload.domain.category.resolver import CategoryResolver
 from mercadolivre_upload.domain.product.model import Product
 from mercadolivre_upload.domain.validation import (
-    StructuralValidator,
-    SemanticScorer,
     AttributeSanitizer,
+    SemanticScorer,
+    StructuralValidator,
     ValidationFeedback,
 )
-from mercadolivre_upload.domain.category.resolver import CategoryResolver
 
 logger = logging.getLogger(__name__)
 
@@ -26,9 +26,9 @@ class AttributeBuilderService:
     def __init__(
         self,
         category_resolver: CategoryResolver,
-        config: Optional[dict] = None,
+        config: dict | None = None,
         min_attribute_score: int = 50,
-        feedback: Optional[ValidationFeedback] = None,
+        feedback: ValidationFeedback | None = None,
     ):
         """Initialize attribute builder.
 
@@ -43,10 +43,10 @@ class AttributeBuilderService:
         self.min_attribute_score = min_attribute_score
         self.feedback = feedback
         self._attr_metadata_cache: dict[str, list] = {}
-        self._cache_mapper: Optional[CachedAttributeMapper] = None
-        self._current_category_id: Optional[str] = None
+        self._cache_mapper: CachedAttributeMapper | None = None
+        self._current_category_id: str | None = None
 
-    def set_cache_mapper(self, cache_mapper: Optional[CachedAttributeMapper]) -> None:
+    def set_cache_mapper(self, cache_mapper: CachedAttributeMapper | None) -> None:
         """Set the cache mapper for attribute lookup."""
         self._cache_mapper = cache_mapper
 
@@ -113,9 +113,7 @@ class AttributeBuilderService:
             cache_attr_ids = {attr["id"] for attr in ml_attributes if "id" in attr}
             for attr in fuzzy_attributes:
                 # Skip special markers (like _listing_type_id)
-                if "id" not in attr:
-                    ml_attributes.append(attr)
-                elif attr["id"] not in cache_attr_ids:
+                if "id" not in attr or attr["id"] not in cache_attr_ids:
                     ml_attributes.append(attr)
 
             # Merge sale_terms

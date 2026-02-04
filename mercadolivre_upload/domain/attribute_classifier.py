@@ -2,7 +2,6 @@
 
 import logging
 from pathlib import Path
-from typing import Optional
 
 import yaml
 
@@ -26,11 +25,11 @@ def _load_classification_config() -> dict:
     """
     try:
         config_path = Path("config/generic_mappings.yaml")
-        with open(config_path, 'r', encoding='utf-8') as f:
+        with open(config_path, encoding='utf-8') as f:
             config = yaml.safe_load(f)
-        
+
         classification_config = config.get('attribute_classification', {})
-        
+
         return {
             'logistics_patterns': set(classification_config.get('logistics_patterns', [])),
             'commercial_patterns': set(classification_config.get('commercial_patterns', [])),
@@ -49,7 +48,7 @@ class AttributeClassifier:
     Uses configuration from config/generic_mappings.yaml as the single source of truth.
     """
 
-    def __init__(self, config: Optional[dict] = None):
+    def __init__(self, config: dict | None = None):
         """Initialize the classifier.
         
         Args:

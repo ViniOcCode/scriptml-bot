@@ -6,7 +6,7 @@ Uses configuration from config/generic_mappings.yaml as the single source of tru
 
 import logging
 from pathlib import Path
-from typing import Optional, Protocol
+from typing import Protocol
 
 import yaml
 
@@ -21,11 +21,11 @@ def _load_shipping_config() -> dict:
     """
     try:
         config_path = Path("config/generic_mappings.yaml")
-        with open(config_path, 'r', encoding='utf-8') as f:
+        with open(config_path, encoding='utf-8') as f:
             config = yaml.safe_load(f)
-        
+
         shipping_config = config.get('shipping', {})
-        
+
         return {
             'mode_priority': shipping_config.get('mode_priority', ['me1', 'me2']),
             'default_mode': shipping_config.get('default_mode', 'not_specified'),
@@ -53,7 +53,7 @@ class ShippingResolver:
     Prioritizes me1 over me2 based on mode_priority configuration.
     """
 
-    def __init__(self, provider: ShippingModeProviderPort, config: Optional[dict] = None):
+    def __init__(self, provider: ShippingModeProviderPort, config: dict | None = None):
         """Initialize resolver.
 
         Args:
@@ -61,8 +61,8 @@ class ShippingResolver:
             config: Optional custom config to override file-based config
         """
         self.provider = provider
-        self._cached_modes: Optional[list[str]] = None
-        
+        self._cached_modes: list[str] | None = None
+
         # Load shipping config from config file (single source of truth), allow override
         if config:
             self.mode_priority = config.get('mode_priority', ['me1', 'me2'])
@@ -122,7 +122,7 @@ class ShippingResolver:
             # Get user's shipping modes from the API response
             # The user can have multiple shipping modes available
             user_shipping_modes = user_info.get("shipping_modes", [])
-            
+
             if user_shipping_modes:
                 # Use the shipping modes returned by the API
                 available_modes = [mode for mode in user_shipping_modes if mode in ["me1", "me2"]]
@@ -136,7 +136,7 @@ class ShippingResolver:
                 # Check if user has any shipping configuration that indicates mode availability
                 seller_reputation = user_info.get("seller_reputation", {})
                 power_seller_status = seller_reputation.get("power_seller_status")
-                
+
                 # Power sellers typically have access to me2
                 if power_seller_status:
                     available_modes = ["me2"]

@@ -1,8 +1,8 @@
 """Validadores base para produtos do Mercado Livre."""
-from typing import Any, Protocol
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum, auto
+from typing import Any, Protocol
 
 
 class ValidationSeverity(Enum):
@@ -18,11 +18,11 @@ class ValidationResult:
     field: str
     message: str
     severity: ValidationSeverity
-    
+
     def is_error(self) -> bool:
         """Verifica se é um erro."""
         return self.severity == ValidationSeverity.ERROR
-    
+
     def is_warning(self) -> bool:
         """Verifica se é um aviso."""
         return self.severity == ValidationSeverity.WARNING
@@ -30,7 +30,7 @@ class ValidationResult:
 
 class ValidationRule(Protocol):
     """Protocolo para regras de validação."""
-    
+
     def validate(self, data: dict[str, Any]) -> ValidationResult | None:
         """Valida os dados."""
         ...
@@ -100,7 +100,7 @@ class BaseValidator(ABC):
             Lista de resultados.
         """
         results: list[ValidationResult] = []
-        
+
         for rule in self._rules:
             result = rule.validate(data)
             if result:
@@ -109,7 +109,7 @@ class BaseValidator(ABC):
                     self._errors.append(result)
                 elif result.is_warning():
                     self._warnings.append(result)
-        
+
         return results
 
 
@@ -129,21 +129,21 @@ class RequiredFieldRule:
     def validate(self, data: dict[str, Any]) -> ValidationResult | None:
         """Valida se o campo está presente e não vazio."""
         value = data.get(self.field)
-        
+
         if value is None:
             return ValidationResult(
                 field=self.field,
                 message=f"Campo obrigatório ausente: {self.field}",
                 severity=self.severity
             )
-        
+
         if isinstance(value, str) and not value.strip():
             return ValidationResult(
                 field=self.field,
                 message=f"Campo não pode ser vazio: {self.field}",
                 severity=self.severity
             )
-        
+
         return None
 
 
@@ -173,27 +173,27 @@ class LengthRule:
     def validate(self, data: dict[str, Any]) -> ValidationResult | None:
         """Valida o tamanho do campo."""
         value = data.get(self.field)
-        
+
         if value is None:
             return None
-        
+
         str_value = str(value)
         length = len(str_value)
-        
+
         if self.min_length is not None and length < self.min_length:
             return ValidationResult(
                 field=self.field,
                 message=f"{self.field} deve ter no mínimo {self.min_length} caracteres",
                 severity=self.severity
             )
-        
+
         if self.max_length is not None and length > self.max_length:
             return ValidationResult(
                 field=self.field,
                 message=f"{self.field} deve ter no máximo {self.max_length} caracteres",
                 severity=self.severity
             )
-        
+
         return None
 
 
@@ -224,16 +224,16 @@ class RangeRule:
         """Valida o intervalo do valor."""
         if self.field not in data:
             return None
-            
+
         value = data[self.field]
-        
+
         if value is None:
             return ValidationResult(
                 field=self.field,
                 message=f"{self.field} deve ser um número válido",
                 severity=self.severity
             )
-        
+
         try:
             num_value = float(value)
         except (ValueError, TypeError):
@@ -242,21 +242,21 @@ class RangeRule:
                 message=f"{self.field} deve ser um número válido",
                 severity=self.severity
             )
-        
+
         if self.min_value is not None and num_value < self.min_value:
             return ValidationResult(
                 field=self.field,
                 message=f"{self.field} deve ser no mínimo {self.min_value}",
                 severity=self.severity
             )
-        
+
         if self.max_value is not None and num_value > self.max_value:
             return ValidationResult(
                 field=self.field,
                 message=f"{self.field} deve ser no máximo {self.max_value}",
                 severity=self.severity
             )
-        
+
         return None
 
 
@@ -271,9 +271,9 @@ def create_validator(rules: list[ValidationRule] | None = None) -> BaseValidator
     """
     from .product_validator import ProductValidator
     validator = ProductValidator()
-    
+
     if rules:
         for rule in rules:
             validator.add_rule(rule)
-    
+
     return validator

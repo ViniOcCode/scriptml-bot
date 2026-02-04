@@ -3,7 +3,6 @@
 import logging
 import re
 from pathlib import Path
-from typing import Optional
 
 import pandas as pd
 import yaml
@@ -19,21 +18,21 @@ def _load_header_config() -> dict:
     """
     try:
         config_path = Path("config/generic_mappings.yaml")
-        with open(config_path, 'r', encoding='utf-8') as f:
+        with open(config_path, encoding='utf-8') as f:
             config = yaml.safe_load(f)
-        
+
         header_config = config.get('header_detection', {})
-        
+
         # Convert column_patterns from config format (dict of lists) to regex patterns
         column_patterns = {}
         for col_name, patterns in header_config.get('column_patterns', {}).items():
             column_patterns[col_name] = patterns if isinstance(patterns, list) else [patterns]
-        
+
         # Convert header_indicators from config format (list of dicts) to tuples
         header_indicators = []
         for indicator in header_config.get('header_indicators', []):
             header_indicators.append((indicator['pattern'], indicator['weight']))
-        
+
         return {
             'column_patterns': column_patterns,
             'header_indicators': header_indicators,
@@ -56,18 +55,18 @@ class HeaderDetector:
     Uses configuration from config/generic_mappings.yaml as the single source of truth.
     """
 
-    def __init__(self, config: Optional[dict] = None):
+    def __init__(self, config: dict | None = None):
         """Initialize the header detector.
         
         Args:
             config: Optional custom config. If not provided, loads from config file.
         """
-        self.header_row: Optional[int] = None
+        self.header_row: int | None = None
         self.column_mapping: dict[str, str] = {}
-        
+
         # Load config from file (single source of truth)
         header_config = config or _load_header_config()
-        
+
         self.COLUMN_PATTERNS = header_config.get('column_patterns', {})
         self.HEADER_INDICATORS = header_config.get('header_indicators', [])
         self.MAX_CELL_LENGTH = header_config.get('max_cell_length', 100)

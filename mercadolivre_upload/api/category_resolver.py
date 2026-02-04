@@ -1,7 +1,6 @@
 """Category resolver for matching ML category names to IDs."""
 
 import logging
-from typing import Optional
 
 from mercadolivre_upload.api.client import MLApiClient
 
@@ -53,8 +52,8 @@ class CategoryResolver:
         return self._children_cache[category_id]
 
     def _search_in_hierarchy(
-        self, name: str, parent_id: str, visited: Optional[set] = None
-    ) -> Optional[str]:
+        self, name: str, parent_id: str, visited: set | None = None
+    ) -> str | None:
         """Search for category name in hierarchy starting from parent.
 
         Args:
@@ -100,7 +99,7 @@ class CategoryResolver:
 
         return None
 
-    def find_category(self, name: str, site_id: str = "MLB") -> Optional[str]:
+    def find_category(self, name: str, site_id: str = "MLB") -> str | None:
         """Find category ID by name.
 
         Searches through the category hierarchy (root categories and their children).

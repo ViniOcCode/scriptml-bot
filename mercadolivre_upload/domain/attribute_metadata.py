@@ -1,7 +1,6 @@
 """Attribute metadata models for normalized ML API representation."""
 
 from dataclasses import dataclass, field
-from typing import Optional
 
 
 @dataclass
@@ -13,12 +12,12 @@ class AttributeMeta:
     value_type: str  # "string", "number", "boolean", "list"
     required: bool
     tags: set[str] = field(default_factory=set)
-    allowed_values: Optional[set[str]] = None
-    relevance: Optional[float] = None  # 0.0 to 1.0 from ML API
+    allowed_values: set[str] | None = None
+    relevance: float | None = None  # 0.0 to 1.0 from ML API
     hierarchy: str = "none"  # "parent", "child", "none"
-    validation_pattern: Optional[str] = None  # Regex pattern if provided
-    max_length: Optional[int] = None
-    tooltip: Optional[str] = None  # Help text from ML
+    validation_pattern: str | None = None  # Regex pattern if provided
+    max_length: int | None = None
+    tooltip: str | None = None  # Help text from ML
 
     @classmethod
     def from_ml_api(cls, api_data: dict) -> "AttributeMeta":

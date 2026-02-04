@@ -3,11 +3,10 @@
 import logging
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Optional
 
 import yaml
 
-from ..attribute_classifier import AttributeClassifier, CLASS_EDITORIAL
+from ..attribute_classifier import CLASS_EDITORIAL, AttributeClassifier
 from .scoring import ScoredAttribute
 
 logger = logging.getLogger(__name__)
@@ -21,9 +20,9 @@ def _load_protected_attributes() -> set:
     """
     try:
         config_path = Path("config/generic_mappings.yaml")
-        with open(config_path, 'r', encoding='utf-8') as f:
+        with open(config_path, encoding='utf-8') as f:
             config = yaml.safe_load(f)
-        
+
         protected = config.get('protected_attributes', [])
         return set(protected)
     except Exception as e:
@@ -39,9 +38,9 @@ def _load_similarity_threshold() -> float:
     """
     try:
         config_path = Path("config/generic_mappings.yaml")
-        with open(config_path, 'r', encoding='utf-8') as f:
+        with open(config_path, encoding='utf-8') as f:
             config = yaml.safe_load(f)
-        
+
         return config.get('similarity', {}).get('redundancy_threshold', 0.9)
     except Exception as e:
         logger.warning(f"Could not load similarity threshold from config: {e}. Using default 0.9.")
@@ -63,7 +62,7 @@ class AttributeSanitizer:
     - Editorial attributes (they provide useful product info)
     """
 
-    def __init__(self, min_score: int = 40, config: Optional[dict] = None):
+    def __init__(self, min_score: int = 40, config: dict | None = None):
         """Initialize the sanitizer.
         
         Args:
@@ -72,7 +71,7 @@ class AttributeSanitizer:
         """
         self.min_score = min_score
         self.classifier = AttributeClassifier()
-        
+
         # Load from config (single source of truth), allow override
         if config:
             self.protected_attributes = set(config.get('protected_attributes', []))
@@ -149,7 +148,7 @@ class AttributeSanitizer:
 
     def get_dropped_reason(
         self, attr: ScoredAttribute
-    ) -> Optional[str]:
+    ) -> str | None:
         """Get the reason an attribute would be dropped."""
         if attr.score < self.min_score:
             return f"score too low ({attr.score} < {self.min_score})"

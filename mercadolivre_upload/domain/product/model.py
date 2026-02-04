@@ -1,7 +1,7 @@
 """Product domain model."""
 
 from dataclasses import dataclass, field
-from typing import Optional
+from pathlib import Path
 
 from mercadolivre_upload.domain.fiscal.data import FiscalData
 
@@ -21,8 +21,8 @@ class Product:
     condition: str  # "new" or "used"
     fiscal: FiscalData
     attributes: dict[str, str] = field(default_factory=dict)
-    clip_file_path: Optional[Path] = None  # New field for video file path
-    clip_uuid: Optional[str] = None # New field for clip UUID
+    clip_file_path: Path | None = None  # New field for video file path
+    clip_uuid: str | None = None # New field for clip UUID
 
     def __post_init__(self):
         """Validate product data."""
@@ -48,7 +48,7 @@ class Product:
             "clip_uuid": self.clip_uuid, # Include clip_uuid
         }
 
-    def get_attribute(self, name: str, default: Optional[str] = None) -> Optional[str]:
+    def get_attribute(self, name: str, default: str | None = None) -> str | None:
         """Get attribute value."""
         return self.attributes.get(name, default)
 

@@ -1,7 +1,6 @@
 """OAuth handler for Mercado Livre API authentication."""
 
 import os
-from typing import Optional
 from urllib.parse import urlencode
 
 import requests
@@ -30,9 +29,9 @@ class OAuthHandler:
 
     def __init__(
         self,
-        client_id: Optional[str] = None,
-        client_secret: Optional[str] = None,
-        redirect_uri: Optional[str] = None,
+        client_id: str | None = None,
+        client_secret: str | None = None,
+        redirect_uri: str | None = None,
     ):
         """Initialize the OAuth handler.
 
@@ -47,7 +46,7 @@ class OAuthHandler:
             "MERCADO_LIVRE_REDIRECT_URI", "http://localhost:8000/callback"
         )
 
-    def get_authorization_url(self, state: Optional[str] = None) -> str:
+    def get_authorization_url(self, state: str | None = None) -> str:
         """Generate the authorization URL for OAuth flow.
 
         Args:
@@ -159,7 +158,7 @@ class OAuthHandler:
         }
 
     def add_auth_header(
-        self, headers: Optional[dict] = None, token: Optional[str] = None
+        self, headers: dict | None = None, token: str | None = None
     ) -> dict:
         """Add Bearer token authorization header to request headers.
 

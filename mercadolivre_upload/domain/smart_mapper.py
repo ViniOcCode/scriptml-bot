@@ -7,7 +7,7 @@ using fuzzy matching against ML API attribute names (which are already in Portug
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import yaml
 
@@ -30,7 +30,7 @@ class ColumnMapping:
 class UnmappedColumn:
     """Column that couldn't be mapped."""
     excel_column: str
-    best_guess: Optional[str]
+    best_guess: str | None
     confidence: float
     reason: str
 
@@ -44,7 +44,7 @@ class SmartAttributeMapper:
     3. Fuzzy matches Excel columns directly against API attribute names
     4. Returns ML attribute IDs ready for API submission
     """
-    
+
     def __init__(
         self,
         api_client: Any,  # MLApiClient
@@ -63,7 +63,7 @@ class SmartAttributeMapper:
         self.config = self._load_config(config_path)
         self.min_confidence = min_confidence
         self._category_cache: dict[str, list[dict]] = {}
-        
+
     def _load_config(self, config_path: str) -> dict:
         """Load generic mappings from YAML config.
         
@@ -73,26 +73,26 @@ class SmartAttributeMapper:
         if not config_file.exists():
             logger.warning(f"Config file not found: {config_path}")
             return {}
-        
+
         try:
-            with open(config_file, 'r', encoding='utf-8') as f:
+            with open(config_file, encoding='utf-8') as f:
                 config = yaml.safe_load(f)
             logger.info(f"Loaded config from {config_path}")
-            
+
             # Also load fiscal fields from fiscal_config.yaml
             fiscal_config_path = Path("config/fiscal_config.yaml")
             if fiscal_config_path.exists():
-                with open(fiscal_config_path, 'r', encoding='utf-8') as f:
+                with open(fiscal_config_path, encoding='utf-8') as f:
                     fiscal_config = yaml.safe_load(f)
                 # Merge fiscal fields into config
                 config['fiscal_fields'] = fiscal_config.get('fiscal_fields', {})
                 logger.info(f"Loaded fiscal config from {fiscal_config_path}")
-            
+
             return config
         except Exception as e:
             logger.error(f"Failed to load config: {e}")
             return {}
-    
+
     def map_columns(
         self,
         excel_headers: list[str],
@@ -109,22 +109,22 @@ class SmartAttributeMapper:
         """
         mappings: list[ColumnMapping] = []
         unmapped: list[UnmappedColumn] = []
-        
+
         # Get ML API attributes for this category
         ml_attributes = self._get_category_attributes(category_id)
-        
+
         # Build index of normalized ML attribute names -> attribute IDs
         ml_index = self._build_ml_index(ml_attributes)
-        
+
         for excel_col in excel_headers:
             # Skip excluded columns
             if self._is_excluded(excel_col):
                 logger.debug(f"Skipping excluded column: {excel_col}")
                 continue
-            
+
             # Try to map this column
             mapping = self._map_single_column(excel_col, ml_index)
-            
+
             if mapping:
                 mappings.append(mapping)
                 logger.info(
@@ -139,14 +139,14 @@ class SmartAttributeMapper:
                     reason="No match found above confidence threshold"
                 ))
                 logger.warning(f"Could not map column: {excel_col}")
-        
+
         return mappings, unmapped
-    
+
     def _get_category_attributes(self, category_id: str) -> list[dict]:
         """Fetch attributes from ML API (with caching)."""
         if category_id in self._category_cache:
             return self._category_cache[category_id]
-        
+
         try:
             attributes = self.api.get_category_attributes(category_id)
             self._category_cache[category_id] = attributes
@@ -155,7 +155,7 @@ class SmartAttributeMapper:
         except Exception as e:
             logger.error(f"Failed to fetch attributes for {category_id}: {e}")
             return []
-    
+
     def _build_ml_index(self, attributes: list[dict]) -> dict[str, str]:
         """Build index of normalized attribute names -> IDs.
         
@@ -169,18 +169,18 @@ class SmartAttributeMapper:
         for attr in attributes:
             attr_id = attr.get('id', '')
             attr_name = attr.get('name', '')
-            
+
             if attr_name:
                 normalized = self.normalizer.normalize(attr_name)
                 index[normalized] = attr_id
-                
+
                 # Also index without "do/da/de" for better matching
                 simplified = self._simplify_portuguese(normalized)
                 if simplified != normalized:
                     index[simplified] = attr_id
-        
+
         return index
-    
+
     def _simplify_portuguese(self, text: str) -> str:
         """Remove common Portuguese articles for better matching.
         
@@ -190,12 +190,12 @@ class SmartAttributeMapper:
         words = text.split()
         simplified = [w for w in words if w not in articles]
         return ' '.join(simplified)
-    
+
     def _map_single_column(
         self,
         excel_col: str,
         ml_index: dict[str, str]
-    ) -> Optional[ColumnMapping]:
+    ) -> ColumnMapping | None:
         """Try to map a single Excel column.
         
         Tries in order:
@@ -205,15 +205,15 @@ class SmartAttributeMapper:
         4. Fuzzy match with ML API attributes
         """
         normalized = self.normalizer.normalize(excel_col)
-        
+
         # 1. Check standard fields (exact match)
         if mapping := self._match_standard_field_exact(excel_col, normalized):
             return mapping
-        
+
         # 2. Check standard fields (pattern match)
         if mapping := self._match_standard_field_pattern(excel_col, normalized):
             return mapping
-        
+
         # 3. Check ML API attributes (exact match)
         if attr_id := ml_index.get(normalized):
             return ColumnMapping(
@@ -223,25 +223,25 @@ class SmartAttributeMapper:
                 mapping_type='exact_api',
                 is_standard_field=False
             )
-        
+
         # 4. Fuzzy match against ML API attributes
         if mapping := self._fuzzy_match_api(excel_col, normalized, ml_index):
             return mapping
-        
+
         return None
-    
+
     def _match_standard_field_exact(
         self,
         excel_col: str,
         normalized: str
-    ) -> Optional[ColumnMapping]:
+    ) -> ColumnMapping | None:
         """Match against standard fields using exact matches."""
         standard_fields = self.config.get('standard_fields', {})
-        
+
         for field_name, field_config in standard_fields.items():
             exact_matches = field_config.get('exact_matches', [])
             normalized_exacts = [self.normalizer.normalize(m) for m in exact_matches]
-            
+
             if normalized in normalized_exacts:
                 return ColumnMapping(
                     excel_column=excel_col,
@@ -250,21 +250,21 @@ class SmartAttributeMapper:
                     mapping_type='exact_standard',
                     is_standard_field=True
                 )
-        
+
         return None
-    
+
     def _match_standard_field_pattern(
         self,
         excel_col: str,
         normalized: str
-    ) -> Optional[ColumnMapping]:
+    ) -> ColumnMapping | None:
         """Match against standard fields using patterns."""
         standard_fields = self.config.get('standard_fields', {})
         fiscal_fields = self.config.get('fiscal_fields', {})
         image_fields = self.config.get('image_fields', {})
-        
+
         all_fields = {**standard_fields, **fiscal_fields, **image_fields}
-        
+
         for field_name, field_config in all_fields.items():
             # Check exclude patterns first
             exclude_patterns = field_config.get('exclude_patterns', [])
@@ -285,30 +285,30 @@ class SmartAttributeMapper:
                             mapping_type='pattern_standard',
                             is_standard_field=True
                         )
-        
+
         return None
-    
+
     def _fuzzy_match_api(
         self,
         excel_col: str,
         normalized: str,
         ml_index: dict[str, str]
-    ) -> Optional[ColumnMapping]:
+    ) -> ColumnMapping | None:
         """Fuzzy match against ML API attribute names."""
         best_score = 0.0
         best_match = None
-        
+
         for ml_name, attr_id in ml_index.items():
             score = self.normalizer.similarity(normalized, ml_name)
-            
+
             # Boost score for partial matches (e.g., "Editora" vs "Editora do livro")
             if normalized in ml_name or ml_name in normalized:
                 score = max(score, 0.9)
-            
+
             if score > best_score:
                 best_score = score
                 best_match = attr_id
-        
+
         if best_match and best_score >= self.min_confidence:
             return ColumnMapping(
                 excel_column=excel_col,
@@ -317,20 +317,20 @@ class SmartAttributeMapper:
                 mapping_type='fuzzy_api',
                 is_standard_field=False
             )
-        
+
         return None
-    
+
     def _is_excluded(self, column: str) -> bool:
         """Check if column should be excluded from mapping."""
         excluded = self.config.get('excluded_columns', [])
         normalized_col = self.normalizer.normalize(column)
-        
+
         for excluded_col in excluded:
             if self.normalizer.normalize(excluded_col) == normalized_col:
                 return True
-        
+
         return False
-    
+
     def get_mapping_summary(
         self,
         mappings: list[ColumnMapping],
@@ -338,14 +338,14 @@ class SmartAttributeMapper:
     ) -> dict:
         """Generate a summary of the mapping results."""
         total = len(mappings) + len(unmapped)
-        
+
         by_type = {}
         for m in mappings:
             by_type[m.mapping_type] = by_type.get(m.mapping_type, 0) + 1
-        
+
         standard_count = sum(1 for m in mappings if m.is_standard_field)
         attribute_count = len(mappings) - standard_count
-        
+
         return {
             'total_columns': total,
             'mapped': len(mappings),

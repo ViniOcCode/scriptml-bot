@@ -4,7 +4,6 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from .scoring import ScoredAttribute
 
@@ -22,9 +21,9 @@ class ValidationFeedback:
         """Load existing feedback from file."""
         if self.feedback_file.exists():
             try:
-                with open(self.feedback_file, "r", encoding="utf-8") as f:
+                with open(self.feedback_file, encoding="utf-8") as f:
                     return json.load(f)
-            except (json.JSONDecodeError, IOError) as e:
+            except (OSError, json.JSONDecodeError) as e:
                 logger.error(f"Failed to load feedback: {e}")
                 return []
         return []
@@ -34,7 +33,7 @@ class ValidationFeedback:
         try:
             with open(self.feedback_file, "w", encoding="utf-8") as f:
                 json.dump(self.feedback, f, indent=2, ensure_ascii=False)
-        except IOError as e:
+        except OSError as e:
             logger.error(f"Failed to save feedback: {e}")
 
     def record_validation_result(
@@ -76,7 +75,7 @@ class ValidationFeedback:
         self._save_feedback()
         logger.debug(f"Recorded feedback for {sku}")
 
-    def _extract_attribute_id(self, message: str) -> Optional[str]:
+    def _extract_attribute_id(self, message: str) -> str | None:
         """Extract attribute ID from error message."""
         # Common patterns in ML validation errors
         # Example: "Attribute [BRAND] is required"
