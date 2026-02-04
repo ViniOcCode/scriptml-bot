@@ -1,9 +1,9 @@
 """Mercado Livre API client."""
 
 import logging
-from typing import Optional
 
 import requests
+import re
 
 from mercadolivre_upload.auth import AuthManager
 
@@ -11,11 +11,28 @@ logger = logging.getLogger(__name__)
 
 BASE_URL = "https://api.mercadolibre.com"
 
+# Item ID validation pattern (e.g., MLB1234567890)
+ITEM_ID_PATTERN = re.compile(r'^ML[A-Z]\d+$')
+
+def validate_item_id(item_id: str | None) -> None:
+    """Validate Mercado Livre item ID format (e.g., MLB1234567890).
+
+    Raises:
+        ValueError: If item_id is empty or not in format ML[A-Z]\d+
+    """
+    if not item_id:
+        raise ValueError("item_id cannot be empty or None")
+    if not ITEM_ID_PATTERN.match(item_id):
+        raise ValueError(
+            f"Invalid item_id format: '{item_id}'. Expected format: ML[site_code][digits] (e.g., MLB1234567890)"
+        )
+
+
 
 class MLApiClient:
     """Client for Mercado Livre API."""
 
-    def __init__(self, auth_manager: Optional[AuthManager] = None):
+    def __init__(self, auth_manager: AuthManager | None = None):
         """Initialize API client.
 
         Args:
@@ -36,7 +53,7 @@ class MLApiClient:
 
         return headers
 
-    def get(self, endpoint: str, params: Optional[dict] = None) -> dict:
+    def get(self, endpoint: str, params: dict | None = None) -> dict:
         """Make GET request to API.
 
         Args:
@@ -59,7 +76,7 @@ class MLApiClient:
         return response.json()
 
     def post(
-        self, endpoint: str, data: Optional[dict] = None, json: Optional[dict] = None
+        self, endpoint: str, data: dict | None = None, json: dict | None = None
     ) -> dict:
         """Make POST request to API.
 
@@ -221,10 +238,11 @@ class MLApiClient:
         Raises:
             requests.HTTPError: On API error
         """
+        validate_item_id(item_id)
         endpoint = f"/items/{item_id}/fiscal_info"
         return self.post(endpoint, json=fiscal_data)
 
-    def check_fiscal_data_exists(self, sku: str) -> tuple[bool, Optional[dict]]:
+    def check_fiscal_data_exists(self, sku: str) -> tuple[bool, dict | None]:
         """Check if fiscal data exists for a SKU.
 
         Args:
@@ -263,7 +281,7 @@ class MLApiClient:
         endpoint = "/items/fiscal_information"
         return self.post(endpoint, json=fiscal_data)
 
-    def verify_invoice_readiness(self, item_id: str) -> tuple[bool, Optional[dict]]:
+    def verify_invoice_readiness(self, item_id: str) -> tuple[bool, dict | None]:
         """Verify if an item is ready for invoice generation.
 
         Args:
@@ -277,7 +295,65 @@ class MLApiClient:
         Raises:
             requests.HTTPError: On API error
         """
+        validate_item_id(item_id)
         endpoint = f"/can_invoice/items/{item_id}"
         response = self.get(endpoint)
         is_ready = response.get("status", False) is True
         return is_ready, response
+
+    def upload_clip(
+        self,
+        item_id: str,
+        file_path: str,
+        sites: list[dict] | None = None,
+    ) -> dict:
+        """Upload a video clip for an item.
+
+        Args:
+            item_id: Mercado Livre item ID (e.g., MLB1234567890)
+            file_path: Path to video file (mp4, mov, mpeg, avi)
+            sites: Optional list of sites for clip visibility
+
+        Returns:
+            Upload result with clip UUID
+
+        Raises:
+            requests.HTTPError: On API error
+        """
+        import mimetypes
+        from pathlib import Path
+
+        path = Path(file_path)
+        validate_item_id(item_id)
+
+        # Determine MIME type
+        mime_type, _ = mimetypes.guess_type(str(path))
+        if not mime_type:
+            mime_type = "video/mp4"  # Default fallback
+
+        with open(path, "rb") as f:
+            files = {"file": (path.name, f, mime_type)}
+            data = {}
+            if sites is not None:
+                import json
+                if sites:
+                    data["sites"] = json.dumps(sites)
+                    logger.debug(f"Clip upload targeting specific sites: {sites}")
+                else:
+                    # empty list => omit field to target all sites
+                    logger.debug("Clip upload targeting all sites (empty list normalized to None)")
+
+            headers = {}
+            if self.auth:
+                token = self.auth.get_access_token()
+                if token:
+                    headers["Authorization"] = f"Bearer {token}"
+
+            url = f"{self.base_url}/marketplace/items/{item_id}/clips/upload"
+            logger.debug(f"Uploading clip to {url}")
+            response = self.session.post(
+                url, headers=headers, files=files, data=data, timeout=120
+            )
+            response.raise_for_status()
+
+        return response.json()

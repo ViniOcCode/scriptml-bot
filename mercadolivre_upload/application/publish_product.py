@@ -5,19 +5,17 @@ Orchestrates domain logic and adapters to publish products.
 
 import logging
 import re
-from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
-from mercadolivre_upload.domain.category.resolver import CategoryResolver
-from mercadolivre_upload.domain.product.model import Product
-from mercadolivre_upload.domain.fiscal.data import FiscalData
-from mercadolivre_upload.domain.fiscal.service import FiscalService
 from mercadolivre_upload.domain.cache_attribute_mapper import CachedAttributeMapper
+from mercadolivre_upload.domain.category.resolver import CategoryResolver
+from mercadolivre_upload.domain.fiscal.data import FiscalData
+from mercadolivre_upload.domain.fiscal.service import FiscalService, FiscalSubmissionResult
+from mercadolivre_upload.domain.product.model import Product
 from mercadolivre_upload.domain.validation import ValidationFeedback
 
-from .ports import ImageUploaderPort, ItemPublisherPort, ShippingResolverPort
-from .results import BatchPublishResult, PublishResult
 from .attribute_builder import AttributeBuilderService
+from .ports import ClipUploaderPort, ImageUploaderPort, ItemPublisherPort, ShippingResolverPort
 
 logger = logging.getLogger(__name__)
 
@@ -30,14 +28,15 @@ class PublishProductUseCase:
         category_resolver: CategoryResolver,
         publisher: ItemPublisherPort,
         image_uploader: ImageUploaderPort,
-        shipping_resolver: Optional[ShippingResolverPort] = None,
-        fiscal_service: Optional[FiscalService] = None,
-        config: Optional[dict] = None,
+        shipping_resolver: ShippingResolverPort | None = None,
+        fiscal_service: FiscalService | None = None,
+        clip_uploader: ClipUploaderPort | None = None,
+        config: dict | None = None,
         dry_run: bool = False,
         min_attribute_score: int = 50,
         enable_feedback: bool = True,
         enable_fiscal_submission: bool = True,
-        cache_dir: Optional[str] = None,
+        cache_dir: str | None = None,
     ):
         """Initialize use case.
 
@@ -47,6 +46,7 @@ class PublishProductUseCase:
             image_uploader: Image uploader service
             shipping_resolver: Shipping mode resolver (optional)
             fiscal_service: Fiscal data submission service (optional)
+            clip_uploader: Video clip uploader service (optional)
             config: Configuration dictionary with defaults (optional)
             dry_run: If True, only validate
             min_attribute_score: Minimum score for attributes (0-100)
@@ -59,6 +59,7 @@ class PublishProductUseCase:
         self.image_uploader = image_uploader
         self.shipping_resolver = shipping_resolver
         self.fiscal_service = fiscal_service
+        self.clip_uploader = clip_uploader
         self.config = config or {}
         self.dry_run = dry_run
         self.enable_fiscal_submission = enable_fiscal_submission
@@ -68,6 +69,7 @@ class PublishProductUseCase:
         self.failed = 0
         self.errors: list[str] = []
         self.fiscal_results: list[FiscalSubmissionResult] = []
+        self.clip_results: list[tuple[str, str | None]] = []  # (item_id, clip_uuid or None)
 
         # Initialize feedback system
         self.feedback = ValidationFeedback() if enable_feedback else None
@@ -81,8 +83,8 @@ class PublishProductUseCase:
         )
 
         # Cache mapper instance (initialized per category)
-        self._cache_mapper: Optional[CachedAttributeMapper] = None
-        self._current_category_id: Optional[str] = None
+        self._cache_mapper: CachedAttributeMapper | None = None
+        self._current_category_id: str | None = None
 
         # Pending fiscal data for batch submission
         self._pending_fiscal: list[tuple[str, FiscalData]] = []
@@ -102,7 +104,7 @@ class PublishProductUseCase:
 
         # Fallback: try domain discovery with product titles
         if not category_id and products:
-            logger.info(f"Category not found by name, trying domain discovery...")
+            logger.info("Category not found by name, trying domain discovery...")
             for product in products:
                 if product.title:
                     category_id = self.category_resolver.predict_category_from_title(
@@ -140,6 +142,10 @@ class PublishProductUseCase:
         if not self.dry_run and self._pending_fiscal:
             self._submit_fiscal_batch(self._pending_fiscal)
 
+        # Calculate clip stats
+        clip_success = sum(1 for _, uuid in self.clip_results if uuid) if self.clip_results else 0
+        clip_failed = len(self.clip_results) - clip_success if self.clip_results else 0
+
         return {
             "success": self.failed == 0,
             "published": self.published,
@@ -147,6 +153,8 @@ class PublishProductUseCase:
             "errors": self.errors,
             "fiscal_submitted": len([r for r in self.fiscal_results if r.success]),
             "fiscal_failed": len([r for r in self.fiscal_results if not r.success]),
+            "clips_uploaded": clip_success,
+            "clips_failed": clip_failed,
         }
 
     def _initialize_cache_mapper(self, category_id: str) -> None:
@@ -158,12 +166,12 @@ class PublishProductUseCase:
         # Skip if already initialized for this category
         if self._current_category_id == category_id and self._cache_mapper is not None:
             return
-        
+
         # Skip if no cache directory configured
         if not self.cache_dir:
             logger.debug("No cache_dir configured, skipping cache mapper initialization")
             return
-        
+
         try:
             self._cache_mapper = CachedAttributeMapper(self.cache_dir, category_id)
             self._current_category_id = category_id
@@ -218,7 +226,7 @@ class PublishProductUseCase:
 
         # Load defaults from config (config is the single source of truth)
         core_defaults = self.config.get('core_item_fields', {}).get('defaults', {})
-        
+
         # Build sale_terms: use explicit mappings if available, otherwise use config defaults
         if sale_terms_from_mapping:
             sale_terms = sale_terms_from_mapping
@@ -227,14 +235,14 @@ class PublishProductUseCase:
             # Use config defaults only - no hardcoded fallbacks
             sale_terms = core_defaults.get('sale_terms', [])
             logger.info("Using default sale_terms from config")
-        
+
         # Check if listing_type_id was explicitly mapped from spreadsheet
         explicit_listing_type = None
         for attr in ml_attributes:
             if "_listing_type_id" in attr:
                 explicit_listing_type = attr.pop("_listing_type_id")
                 break
-        
+
         # Determine listing_type_id: explicit > has_pictures_default > free
         if explicit_listing_type:
             listing_type_id = explicit_listing_type
@@ -242,7 +250,7 @@ class PublishProductUseCase:
             listing_type_id = core_defaults.get('listing_type_id')
         else:
             listing_type_id = "free"
-        
+
         # Build item with values from config only (no hardcoded fallbacks)
         item = {
             "title": product.title,
@@ -377,6 +385,24 @@ class PublishProductUseCase:
                 logger.info(f"Queueing fiscal data for {product.sku} (item: {published_item_id})")
                 self._pending_fiscal.append((published_item_id, product.fiscal))
 
+            # Upload clip if available (soft failure - does not fail the product publish)
+            if (
+                self.clip_uploader
+                and published_item_id
+                and product.clip_file_path
+            ):
+                logger.info(f"Uploading clip for {product.sku} (item: {published_item_id})")
+                clip_uuid = self.clip_uploader.upload_clip_for_item(
+                    item_id=published_item_id,
+                    video_path=product.clip_file_path,
+                )
+                self.clip_results.append((published_item_id, clip_uuid))
+                if clip_uuid:
+                    product.clip_uuid = clip_uuid
+                    logger.info(f"Clip uploaded for {product.sku}: {clip_uuid}")
+                else:
+                    logger.warning(f"Clip upload failed for {product.sku} (item will still be published)")
+
             return True
         except Exception as e:
             error_msg = str(e)
@@ -426,6 +452,16 @@ class PublishProductUseCase:
                 "failed": fiscal_failed,
             }
 
+        # Add clip upload results
+        if self.clip_results:
+            clip_success = sum(1 for _, uuid in self.clip_results if uuid)
+            clip_failed = len(self.clip_results) - clip_success
+            stats["clips"] = {
+                "attempted": len(self.clip_results),
+                "success": clip_success,
+                "failed": clip_failed,
+            }
+
         return stats
 
     def get_problematic_attributes(self) -> dict[str, int]:
@@ -460,16 +496,16 @@ class PublishProductUseCase:
         shipping_config = self.config.get('shipping', {})
         default_mode = shipping_config.get('default_mode', 'not_specified')
         modes_config = shipping_config.get('modes', {})
-        
+
         # Determine shipping mode
         shipping_mode = default_mode
         if self.shipping_resolver:
             shipping_mode = self.shipping_resolver.get_best_shipping_mode()
             logger.info(f"Using shipping mode: {shipping_mode}")
-        
+
         # Get mode-specific config
         mode_config = modes_config.get(shipping_mode, {})
-        
+
         # Build complete shipping config matching ML API format
         config_shipping: dict[str, any] = {
             "mode": shipping_mode,
@@ -481,10 +517,10 @@ class PublishProductUseCase:
             "logistic_type": mode_config.get('logistic_type'),
             "store_pick_up": mode_config.get('store_pick_up', False),
         }
-        
+
         # Remove None values to keep payload clean
         config_shipping = {k: v for k, v in config_shipping.items() if v is not None}
-        
+
         logger.info(f"Shipping config for {shipping_mode} mode: {config_shipping}")
         return config_shipping
 
