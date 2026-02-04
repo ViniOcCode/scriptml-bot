@@ -281,18 +281,18 @@ class SchemaVersion:
 
     def get_required_fields(self) -> list[str]:
         """Retorna lista de campos obrigatórios."""
-        return [name for name, field in self.fields.items() if field.required]
+        return [name for name, fld in self.fields.items() if fld.required]
 
     def has_field(self, name: str) -> bool:
         """Verifica se o schema tem um campo (considera aliases)."""
-        for field in self.fields.values():
+        for fld in self.fields.values():
             if field.normalize_name(name):
                 return True
         return False
 
     def get_field_by_name(self, name: str) -> Field | None:
         """Retorna campo pelo nome ou alias."""
-        for field in self.fields.values():
+        for fld in self.fields.values():
             if field.normalize_name(name):
                 return field
         return None
@@ -306,7 +306,7 @@ class SchemaVersion:
         errors = []
 
         # Verifica campos obrigatórios
-        for name, field in self.fields.items():
+        for name, fld in self.fields.items():
             if field.required:
                 value = data.get(name)
                 if value is None or value == "":
@@ -314,9 +314,9 @@ class SchemaVersion:
 
         # Valida tipos
         for name, value in data.items():
-            field = self.get_field_by_name(name)
-            if field and value is not None:
-                if not field.field_type.validate(value):
+            fld = self.get_field_by_name(name)
+            if fld and value is not None:
+                if not fld.field_type.validate(value):
                     errors.append(
                         f"Tipo inválido para '{name}': "
                         f"esperado {field.field_type.name}, "
