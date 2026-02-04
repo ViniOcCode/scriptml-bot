@@ -10,7 +10,6 @@ from rich.panel import Panel
 from mercadolivre_upload.adapters.spreadsheet.parser import SpreadsheetParser
 from mercadolivre_upload.api.category_adapter import CategoryAdapter
 from mercadolivre_upload.api.client import MLApiClient
-from mercadolivre_upload.domain.category.resolver import CategoryResolver
 from mercadolivre_upload.infrastructure.cache.attribute_cache import AttributeCache
 
 logger = logging.getLogger(__name__)
@@ -35,7 +34,6 @@ def validate(
     cache = AttributeCache(cache_dir=str(cache_dir))
     api_client = MLApiClient()
     category_adapter = CategoryAdapter(api_client)
-    category_resolver = CategoryResolver(category_adapter, attribute_cache=cache)
 
     parser = SpreadsheetParser()
 
