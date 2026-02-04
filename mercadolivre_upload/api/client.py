@@ -23,8 +23,11 @@ def validate_item_id(item_id: str | None) -> None:
     if not item_id:
         raise ValueError("item_id cannot be empty or None")
     if not ITEM_ID_PATTERN.match(item_id):
+        # Keep message lines short to satisfy linters
         raise ValueError(
-            f"Invalid item_id format: '{item_id}'. Expected format: ML[site_code][digits] (e.g., MLB1234567890)"
+            "Invalid item_id format: "
+            f"'{item_id}'. Expected format: ML[site_code][digits] "
+            "(e.g., MLB1234567890)"
         )
 
 
@@ -233,6 +236,7 @@ class MLApiClient:
             fiscal_data: Fiscal data payload following ML API format
 
         Returns:
+
             API response
 
         Raises:
