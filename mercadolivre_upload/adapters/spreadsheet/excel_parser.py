@@ -32,7 +32,8 @@ def _load_config_mappings() -> dict:
             patterns = field_config.get('patterns', [])
             exact_matches = field_config.get('exact_matches', [])
             # Combine patterns and exact matches for column matching
-            all_patterns = list(dict.fromkeys(patterns + exact_matches))  # Preserve order, remove duplicates
+            combined = patterns + exact_matches
+            all_patterns = list(dict.fromkeys(combined))  # Preserve order, remove duplicates
             if all_patterns:
                 mappings[field_name] = all_patterns
 
@@ -47,7 +48,8 @@ def _load_config_mappings() -> dict:
             patterns = field_config.get('patterns', [])
             exact_matches = field_config.get('exact_matches', [])
             # Combine patterns and exact matches for column matching
-            all_patterns = list(dict.fromkeys(patterns + exact_matches))  # Preserve order, remove duplicates
+            combined = patterns + exact_matches
+            all_patterns = list(dict.fromkeys(combined))  # Preserve order, remove duplicates
             if all_patterns:
                 mappings[field_name] = all_patterns
 
