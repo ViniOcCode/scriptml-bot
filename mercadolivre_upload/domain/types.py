@@ -1,5 +1,5 @@
 """Type definitions for Mercado Livre API payloads and responses."""
-from typing import TypedDict, Literal, NotRequired
+from typing import Literal, NotRequired, TypedDict
 
 
 class ClipSite(TypedDict):

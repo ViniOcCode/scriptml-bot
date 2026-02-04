@@ -1,5 +1,7 @@
 import pytest
+
 from mercadolivre_upload.api.client import validate_item_id
+
 
 class TestItemIdValidation:
     @pytest.mark.parametrize("valid_id", ["MLB123", "MLA9876543210", "MLC1"])

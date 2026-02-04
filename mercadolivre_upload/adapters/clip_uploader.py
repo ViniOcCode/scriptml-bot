@@ -5,6 +5,7 @@ Infrastructure adapter for uploading video clips to ML.
 
 import logging
 from pathlib import Path
+
 import requests
 
 from mercadolivre_upload.api.client import MLApiClient

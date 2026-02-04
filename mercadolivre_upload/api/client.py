@@ -1,9 +1,9 @@
 """Mercado Livre API client."""
 
 import logging
+import re
 
 import requests
-import re
 
 from mercadolivre_upload.auth import AuthManager
 
@@ -15,7 +15,7 @@ BASE_URL = "https://api.mercadolibre.com"
 ITEM_ID_PATTERN = re.compile(r'^ML[A-Z]\d+$')
 
 def validate_item_id(item_id: str | None) -> None:
-    """Validate Mercado Livre item ID format (e.g., MLB1234567890).
+    r"""Validate Mercado Livre item ID format (e.g., MLB1234567890).
 
     Raises:
         ValueError: If item_id is empty or not in format ML[A-Z]\d+
