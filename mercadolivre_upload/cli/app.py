@@ -67,7 +67,7 @@ def print_result(result: dict, success_message: str = "", error_message: str = "
 
 
 # Importar comandos
-from .commands import cache_cmd, doctor, upload, validate
+from .commands import cache_cmd, doctor, upload, validate  # noqa: E402
 
 app.add_typer(upload.app, name="upload")
 app.add_typer(validate.app, name="validate")
