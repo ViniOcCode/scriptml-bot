@@ -593,3 +593,7 @@ class PublishProductUseCase:
             logger.info(f"Successfully submitted fiscal data for {success_count} items")
         if failed_count:
             logger.warning(f"Failed to submit fiscal data for {failed_count} items")
+
+
+# Backwards-compatible export expected by tests
+PublishProductService = PublishProductUseCase
