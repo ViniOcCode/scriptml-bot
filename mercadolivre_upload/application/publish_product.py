@@ -76,8 +76,14 @@ class PublishProductUseCase:
         self.fiscal_results: list[FiscalSubmissionResult] = []
         self.clip_results: list[dict] = []  # ClipUploadSummary dicts
 
-        # Initialize CBT ID extractor (needs API client from publisher)
-        api_client = getattr(publisher, "client", None) if hasattr(publisher, "client") else None
+        # Initialize CBT ID extractor (attempt to find an API client to perform fallback GETs)
+        api_client = None
+        if hasattr(publisher, "get") and callable(getattr(publisher, "get")):
+            # publisher is already an API client (e.g., MLApiClient)
+            api_client = publisher
+        elif hasattr(publisher, "client"):
+            # publisher may be an adapter exposing an underlying client
+            api_client = getattr(publisher, "client", None)
         self.cbt_extractor = CbtIdExtractor(api_client=api_client)
 
         # Initialize feedback system

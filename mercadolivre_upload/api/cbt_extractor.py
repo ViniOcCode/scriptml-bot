@@ -48,32 +48,55 @@ class CbtIdExtractor:
         """
         # Strategy 1: Direct cbt_item_id field
         cbt_id = result.get("cbt_item_id")
-        if cbt_id and self._is_valid_cbt_id(cbt_id):
-            logger.debug(f"CBT ID extracted from cbt_item_id field: {cbt_id}")
-            return cbt_id
-        
+        if cbt_id:
+            if self._is_valid_cbt_id(cbt_id):
+                logger.debug(f"CBT ID extracted from cbt_item_id field: {cbt_id}")
+                return cbt_id
+            # Accept numeric-only values and normalize to CBT prefix
+            normalized = self._normalize_if_digits(cbt_id)
+            if normalized:
+                logger.debug(f"Normalized numeric cbt_item_id to CBT ID: {normalized}")
+                return normalized
+
         # Strategy 2: id field if it's a CBT ID
         item_id = result.get("id")
-        if item_id and self._is_valid_cbt_id(item_id):
-            logger.debug(f"CBT ID extracted from id field: {item_id}")
-            return item_id
-        
+        if item_id:
+            if self._is_valid_cbt_id(item_id):
+                logger.debug(f"CBT ID extracted from id field: {item_id}")
+                return item_id
+            normalized = self._normalize_if_digits(item_id)
+            if normalized:
+                logger.debug(f"Normalized numeric id field to CBT ID: {normalized}")
+                return normalized
+
         # Strategy 3: parent_id from marketplace_items
         marketplace_items = result.get("marketplace_items", [])
         if marketplace_items:
             for mkt_item in marketplace_items:
                 parent_id = mkt_item.get("parent_id")
-                if parent_id and self._is_valid_cbt_id(parent_id):
-                    logger.debug(
-                        f"CBT ID extracted from marketplace_items[].parent_id: {parent_id}"
-                    )
-                    return parent_id
+                if parent_id:
+                    if self._is_valid_cbt_id(parent_id):
+                        logger.debug(
+                            f"CBT ID extracted from marketplace_items[].parent_id: {parent_id}"
+                        )
+                        return parent_id
+                    normalized = self._normalize_if_digits(parent_id)
+                    if normalized:
+                        logger.debug(
+                            f"Normalized numeric marketplace_items[].parent_id to CBT ID: {normalized}"
+                        )
+                        return normalized
 
         # Strategy 4: top-level parent_item_id (some endpoints use this field)
         parent_item_id = result.get("parent_item_id")
-        if parent_item_id and self._is_valid_cbt_id(parent_item_id):
-            logger.debug(f"CBT ID extracted from parent_item_id field: {parent_item_id}")
-            return parent_item_id
+        if parent_item_id:
+            if self._is_valid_cbt_id(parent_item_id):
+                logger.debug(f"CBT ID extracted from parent_item_id field: {parent_item_id}")
+                return parent_item_id
+            normalized = self._normalize_if_digits(parent_item_id)
+            if normalized:
+                logger.debug(f"Normalized numeric parent_item_id to CBT ID: {normalized}")
+                return normalized
 
         # Strategy 5: search nested structures like item_relations for any CBT ID
         item_relations = result.get("item_relations")
@@ -126,6 +149,22 @@ class CbtIdExtractor:
             True if item_id starts with "CBT", False otherwise
         """
         return isinstance(item_id, str) and item_id.startswith("CBT")
+
+    def _normalize_if_digits(self, val) -> str | None:
+        """Normalize numeric IDs to CBT-prefixed strings when appropriate.
+
+        If the API returns numeric parent IDs (e.g. 2796239245) instead of the
+        "CBT"-prefixed form, normalize them to the canonical CBT string.
+        """
+        if val is None:
+            return None
+        if isinstance(val, int):
+            return f"CBT{val}"
+        if isinstance(val, str):
+            s = val.strip()
+            if s.isdigit():
+                return f"CBT{s}"
+        return None
     
     def _search_for_cbt_in_structure(self, obj) -> str | None:
         """Recursively search a nested structure for the first CBT ID string.
@@ -134,12 +173,21 @@ class CbtIdExtractor:
         structures such as item_relations, nested dicts, or lists.
         """
         if isinstance(obj, str):
-            return obj if self._is_valid_cbt_id(obj) else None
+            if self._is_valid_cbt_id(obj):
+                return obj
+            # Accept numeric strings and normalize
+            normalized = self._normalize_if_digits(obj)
+            if normalized:
+                return normalized
+            return None
         if isinstance(obj, dict):
-            # Search values and keys
+            # Search keys and values
             for k, v in obj.items():
                 if isinstance(k, str) and self._is_valid_cbt_id(k):
                     return k
+                normalized_key = self._normalize_if_digits(k) if isinstance(k, str) else None
+                if normalized_key:
+                    return normalized_key
                 found = self._search_for_cbt_in_structure(v)
                 if found:
                     return found
@@ -169,13 +217,21 @@ class CbtIdExtractor:
             
             # Try cbt_item_id field
             cbt_id = item_data.get("cbt_item_id")
-            if cbt_id and self._is_valid_cbt_id(cbt_id):
-                return cbt_id
+            if cbt_id:
+                if self._is_valid_cbt_id(cbt_id):
+                    return cbt_id
+                normalized = self._normalize_if_digits(cbt_id)
+                if normalized:
+                    return normalized
             
             # Try parent_id and parent_item_id fields
             parent_id = item_data.get("parent_id") or item_data.get("parent_item_id")
-            if parent_id and self._is_valid_cbt_id(parent_id):
-                return parent_id
+            if parent_id:
+                if self._is_valid_cbt_id(parent_id):
+                    return parent_id
+                normalized = self._normalize_if_digits(parent_id)
+                if normalized:
+                    return normalized
             
             # Search common nested structures for CBT IDs (item_relations etc.)
             found = self._search_for_cbt_in_structure(item_data)
