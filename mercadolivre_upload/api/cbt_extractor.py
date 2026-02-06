@@ -172,6 +172,7 @@ class CbtIdExtractor:
         This is a defensive helper to discover CBT IDs inside unexpected
         structures such as item_relations, nested dicts, or lists.
         """
+        # Strings with CBT prefix or numeric strings that can be normalized
         if isinstance(obj, str):
             if self._is_valid_cbt_id(obj):
                 return obj
@@ -180,6 +181,9 @@ class CbtIdExtractor:
             if normalized:
                 return normalized
             return None
+        # Direct integers (some APIs may return numeric IDs)
+        if isinstance(obj, int):
+            return f"CBT{obj}"
         if isinstance(obj, dict):
             # Search keys and values
             for k, v in obj.items():
