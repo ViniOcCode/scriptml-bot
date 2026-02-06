@@ -86,8 +86,6 @@ class ClipUploader:
             for f in sku_dir.iterdir()
             if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS
         )
-        if clips:
-            logger.debug(f"Found {len(clips)} clip(s) for SKU {sku}: {[c.name for c in clips]}")
         return clips
 
     def _calculate_hash(self, path: Path) -> str:
@@ -191,19 +189,16 @@ class ClipUploader:
         """
         summary = ClipUploadSummary(item_id=item_id)
         
-        # Defensive validation: clips only work with CBT parent items
+        # Clips require CBT parent IDs (Global Selling)
         if not item_id.startswith("CBT"):
             logger.warning(
-                f"Item ID '{item_id}' does not appear to be a CBT parent item. "
-                f"Clips upload requires CBT item IDs, not marketplace-specific IDs. "
-                f"Skipping clip upload for {sku}."
+                f"Skipping clip upload for {sku}: item_id '{item_id}' is not a CBT parent. "
+                f"Clips API requires CBT IDs from Global Selling items."
             )
             return summary
         
         clips = self.find_clips_for_sku(sku)
-
         if not clips:
-            logger.debug(f"No clips found for SKU {sku}")
             return summary
 
         seen_hashes: set[str] = set()
@@ -233,7 +228,7 @@ class ClipUploader:
                 summary.clips_failed += 1
 
         logger.info(
-            f"Clips for SKU {sku} (item {item_id}): "
+            f"Clips for {sku}: "
             f"{summary.clips_uploaded} uploaded, "
             f"{summary.clips_failed} failed, "
             f"{summary.clips_skipped} skipped"

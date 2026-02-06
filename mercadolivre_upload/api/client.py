@@ -386,13 +386,12 @@ class MLApiClient:
                     headers["Authorization"] = f"Bearer {token}"
 
             url = f"{self.base_url}/marketplace/items/{item_id}/clips/upload"
-            logger.debug(f"Uploading clip to {url}")
             
             try:
                 response = self.session.post(url, headers=headers, files=files, data=data, timeout=120)
                 response.raise_for_status()
             except Exception as e:
-                # Log detailed info about the failure to aid debugging
+                # Log error details for debugging
                 resp = getattr(e, "response", None)
                 status_code = getattr(resp, "status_code", "unknown")
                 error_body = {}
@@ -400,20 +399,17 @@ class MLApiClient:
                     try:
                         error_body = resp.json()
                     except Exception:
-                        # Non-JSON body (text/html or empty)
                         try:
                             error_body = {"text": resp.text}
                         except Exception:
-                            error_body = {}
+                            pass
+                
                 api_message = error_body.get("message", "") if isinstance(error_body, dict) else ""
                 error_status = error_body.get("error_status", "") if isinstance(error_body, dict) else ""
                 logger.error(
                     f"Clip upload failed for item {item_id}: "
                     f"[{status_code}] {error_status}: {api_message}"
                 )
-                logger.debug(f"Full exception: {repr(e)}")
-                logger.debug(f"Full error response: {error_body}")
-                # Re-raise to let caller handle retries/logging
                 raise
 
         return response.json()
