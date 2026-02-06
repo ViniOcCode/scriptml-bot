@@ -9,6 +9,7 @@ from typing import Any
 
 from auth.authenticator import AuthManager
 from mercadolivre_upload.adapters.spreadsheet.parser import SpreadsheetParser
+from mercadolivre_upload.api.cbt_extractor import CbtIdExtractor
 from mercadolivre_upload.application.builders.product_builder import ProductBuilder
 from mercadolivre_upload.domain.cache_attribute_mapper import CachedAttributeMapper
 from mercadolivre_upload.domain.category.resolver import CategoryResolver
@@ -74,6 +75,10 @@ class PublishProductUseCase:
         self.errors: list[str] = []
         self.fiscal_results: list[FiscalSubmissionResult] = []
         self.clip_results: list[dict] = []  # ClipUploadSummary dicts
+
+        # Initialize CBT ID extractor (needs API client from publisher)
+        api_client = getattr(publisher, "client", None) if hasattr(publisher, "client") else None
+        self.cbt_extractor = CbtIdExtractor(api_client=api_client)
 
         # Initialize feedback system
         self.feedback = ValidationFeedback() if enable_feedback else None
@@ -527,10 +532,14 @@ class PublishProductUseCase:
         try:
             result = self.publisher.create_item(item)
             published_item_id = result.get("id")
-            # Extract CBT parent item ID for clips upload (Global Selling API requirement)
-            # Clips can only be uploaded to CBT parent items, not marketplace-specific items
-            cbt_item_id = result.get("cbt_item_id") or published_item_id
+            
+            # Extract CBT parent item ID using robust extraction strategy
+            cbt_item_id = self.cbt_extractor.extract_cbt_id(result)
+            
             logger.info(f"Published {product.sku}: {published_item_id}")
+            if cbt_item_id and cbt_item_id != published_item_id:
+                logger.debug(f"CBT parent item ID for {product.sku}: {cbt_item_id}")
+            
             self.published += 1
 
             # Record successful validation feedback
