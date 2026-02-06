@@ -31,6 +31,11 @@ def validate(
     console.print(Panel.fit("Pre-Validation", style="yellow"))
 
     # Initialize components
+    # Defensive: if cache_dir is OptionInfo, use default
+    if isinstance(cache_dir, typer.models.OptionInfo):
+        cache_dir = Path("cache/categories")
+    elif not isinstance(cache_dir, Path):
+        cache_dir = Path(cache_dir)
     cache = AttributeCache(cache_dir=str(cache_dir))
     api_client = MLApiClient()
     category_adapter = CategoryAdapter(api_client)

@@ -55,8 +55,11 @@ def upload(
     # Load configuration
     config = load_config()
 
-    # Ensure cache_dir is a Path object
-    cache_dir = Path(cache_dir) if not isinstance(cache_dir, Path) else cache_dir
+    # Defensive: if cache_dir is OptionInfo, use default
+    if isinstance(cache_dir, typer.models.OptionInfo):
+        cache_dir = Path("cache/categories")
+    elif not isinstance(cache_dir, Path):
+        cache_dir = Path(cache_dir)
 
     # Initialize infrastructure
     auth_manager = AuthManager()
