@@ -1,4 +1,8 @@
-"""Mercado Livre API client."""
+"""Mercado Livre API client.
+
+Uses ResilientHTTPClient for automatic retry, backoff, jitter and rate limiting.
+All HTTP config is read from infrastructure.config.Settings or sensible defaults.
+"""
 
 import logging
 import re
@@ -6,125 +10,133 @@ import re
 import requests
 
 from mercadolivre_upload.auth import AuthManager
+from mercadolivre_upload.infrastructure.http import (
+    NON_IDEMPOTENT,
+    SAFE_RETRY,
+    UPLOAD_RETRY,
+    ResilientHTTPClient,
+    RetryPolicy,
+    TokenBucketLimiter,
+)
 
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://api.mercadolibre.com"
 
-# Item ID validation pattern (e.g., MLB1234567890)
 ITEM_ID_PATTERN = re.compile(r"^ML[A-Z]\d+$")
 
 
 def validate_item_id(item_id: str | None) -> None:
-    r"""Validate Mercado Livre item ID format (e.g., MLB1234567890).
-
-    Raises:
-        ValueError: If item_id is empty or not in format ML[A-Z]\d+
-    """
+    r"""Validate Mercado Livre item ID format (e.g., MLB1234567890)."""
     if not item_id:
         raise ValueError("item_id cannot be empty or None")
     if not ITEM_ID_PATTERN.match(item_id):
-        # Keep message lines short to satisfy linters
         raise ValueError(
-            "Invalid item_id format: "
-            f"'{item_id}'. Expected format: ML[site_code][digits] "
-            "(e.g., MLB1234567890)"
+            f"Invalid item_id format: '{item_id}'. "
+            "Expected format: ML[site_code][digits] (e.g., MLB1234567890)"
         )
 
 
 def validate_clip_item_id(item_id: str | None) -> None:
-    r"""Validate item ID format for clip upload (CBT parent items).
-
-    Raises:
-        ValueError: If item_id is empty or not in format CBT\d+
-    """
+    r"""Validate item ID format for clip upload (CBT parent items)."""
     if not item_id:
         raise ValueError("item_id cannot be empty or None")
     if not re.match(r"^CBT\d+$", item_id):
         raise ValueError(
-            "Invalid clip item_id format: "
-            f"'{item_id}'. Expected format: CBT[digits] "
-            "(e.g., CBT1234567890)"
+            f"Invalid clip item_id format: '{item_id}'. "
+            "Expected format: CBT[digits] (e.g., CBT1234567890)"
         )
+
+
+def _build_http_client() -> ResilientHTTPClient:
+    """Build HTTP client reading config from Settings when available."""
+    try:
+        from mercadolivre_upload.infrastructure.config import get_settings
+
+        settings = get_settings()
+        limiter = (
+            TokenBucketLimiter(
+                rate=settings.rate_limit_requests_per_second,
+                burst=settings.rate_limit_burst,
+            )
+            if settings.rate_limit_enabled
+            else None
+        )
+        default_policy = RetryPolicy(
+            max_retries=settings.http_max_retries,
+            base_delay=settings.http_backoff_factor,
+        )
+        return ResilientHTTPClient(
+            timeout=settings.http_timeout,
+            default_policy=default_policy,
+            limiter=limiter,
+        )
+    except Exception:
+        return ResilientHTTPClient()
 
 
 class MLApiClient:
     """Client for Mercado Livre API."""
 
-    def __init__(self, auth_manager: AuthManager | None = None):
-        """Initialize API client.
-
-        Args:
-            auth_manager: Optional auth manager for token handling.
-        """
+    def __init__(
+        self,
+        auth_manager: AuthManager | None = None,
+        http_client: ResilientHTTPClient | None = None,
+    ):
         self.auth = auth_manager
-        self.session = requests.Session()
+        self.http = http_client or _build_http_client()
         self.base_url = BASE_URL
 
-    def _get_headers(self) -> dict:
-        """Get request headers with auth if available."""
-        headers = {"Content-Type": "application/json"}
-
+    def _get_headers(self, content_type: str = "application/json") -> dict:
+        headers: dict[str, str] = {}
+        if content_type:
+            headers["Content-Type"] = content_type
         if self.auth:
             token = self.auth.get_access_token()
             if token:
                 headers["Authorization"] = f"Bearer {token}"
-
         return headers
 
+    def _auth_headers_only(self) -> dict:
+        """Headers without Content-Type (for multipart uploads)."""
+        return self._get_headers(content_type="")
+
     def get(self, endpoint: str, params: dict | None = None) -> dict:
-        """Make GET request to API.
-
-        Args:
-            endpoint: API endpoint (without base URL)
-            params: Optional query parameters
-
-        Returns:
-            JSON response
-
-        Raises:
-            requests.HTTPError: On API error
-        """
+        """GET request with automatic retry on transient errors."""
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
-        headers = self._get_headers()
+        logger.debug("GET %s", url)
+        resp = self.http.get(url, headers=self._get_headers(), params=params)
+        resp.raise_for_status()
+        return resp.json()
 
-        logger.debug(f"GET {url}")
-        response = self.session.get(url, headers=headers, params=params, timeout=30)
-        response.raise_for_status()
-
-        return response.json()
-
-    def post(self, endpoint: str, data: dict | None = None, json: dict | None = None) -> dict:
-        """Make POST request to API.
-
-        Args:
-            endpoint: API endpoint (without base URL)
-            data: Optional form data
-            json: Optional JSON data
-
-        Returns:
-            JSON response
-
-        Raises:
-            requests.HTTPError: On API error
-        """
+    def post(
+        self,
+        endpoint: str,
+        data: dict | None = None,
+        json: dict | None = None,
+        *,
+        policy: RetryPolicy | None = None,
+    ) -> dict:
+        """POST request. Uses NON_IDEMPOTENT policy by default for safety."""
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
-        headers = self._get_headers()
+        logger.debug("POST %s", url)
+        resp = self.http.post(
+            url,
+            headers=self._get_headers(),
+            data=data,
+            json=json,
+            policy=policy or NON_IDEMPOTENT,
+        )
 
-        logger.debug(f"POST {url}")
-        response = self.session.post(url, headers=headers, data=data, json=json, timeout=30)
-
-        # Special handling for validation endpoint - return error response
-        # so caller can distinguish warnings from actual errors
-        if endpoint.strip("/") == "items/validate" and response.status_code == 400:
+        # Validation endpoint returns 400 with useful error body
+        if endpoint.strip("/") == "items/validate" and resp.status_code == 400:
             try:
-                return response.json()
+                return resp.json()
             except Exception:
                 pass
 
-        response.raise_for_status()
-
-        return response.json()
+        resp.raise_for_status()
+        return resp.json()
 
     def get_sites(self) -> list[dict]:
         """Get available sites."""
@@ -214,45 +226,33 @@ class MLApiClient:
         return self.get("/users/me")
 
     def upload_image(self, image_path: str) -> dict:
-        """Upload an image.
-
-        Args:
-            image_path: Path to image file
-
-        Returns:
-            Upload result with picture ID and URLs
-        """
+        """Upload an image with retry on transient errors."""
         from pathlib import Path
 
         path = Path(image_path)
         with open(path, "rb") as f:
             files = {"file": (path.name, f, "image/jpeg")}
-            headers = {}
-            if self.auth:
-                token = self.auth.get_access_token()
-                if token:
-                    headers["Authorization"] = f"Bearer {token}"
-
             url = f"{self.base_url}/pictures/items/upload"
-            response = self.session.post(url, headers=headers, files=files, timeout=60)
-            response.raise_for_status()
+            resp = self.http.post(
+                url,
+                headers=self._auth_headers_only(),
+                files=files,
+                policy=UPLOAD_RETRY,
+                timeout=60,
+            )
+            resp.raise_for_status()
 
-        data = response.json()
+        data = resp.json()
 
         # Normalize response: extract top-level url from variations if needed
         if isinstance(data, dict):
-            # Check if url/secure_url exists at top level
             top_url = data.get("secure_url") or data.get("url")
-
-            # If not, extract from first variation
             if not top_url:
                 variations = data.get("variations", [])
                 if isinstance(variations, list) and variations:
                     first_var = variations[0]
                     if isinstance(first_var, dict):
                         top_url = first_var.get("secure_url") or first_var.get("url")
-
-            # Ensure there's always a url field for convenience
             if top_url and "url" not in data:
                 data["url"] = top_url
             if top_url and "secure_url" not in data:
@@ -342,74 +342,53 @@ class MLApiClient:
         file_path: str,
         sites: list[dict] | None = None,
     ) -> dict:
-        """Upload a video clip for an item.
-
-        Args:
-            item_id: CBT parent item ID (e.g., CBT1234567890) - NOT marketplace-specific IDs
-            file_path: Path to video file (mp4, mov, mpeg, avi)
-            sites: Optional list of sites for clip visibility
-
-        Returns:
-            Upload result with clip UUID
-
-        Raises:
-            requests.HTTPError: On API error with detailed message
-        """
+        """Upload a video clip for an item (CBT parent ID required)."""
         import mimetypes
         from pathlib import Path
 
         path = Path(file_path)
         validate_clip_item_id(item_id)
 
-        # Determine MIME type
         mime_type, _ = mimetypes.guess_type(str(path))
         if not mime_type:
-            mime_type = "video/mp4"  # Default fallback
+            mime_type = "video/mp4"
 
         with open(path, "rb") as f:
             files = {"file": (path.name, f, mime_type)}
-            data = {}
-            if sites is not None:
-                import json
+            data: dict = {}
+            if sites is not None and sites:
+                import json as json_mod
 
-                if sites:
-                    data["sites"] = json.dumps(sites)
-                    logger.debug(f"Clip upload targeting specific sites: {sites}")
-                else:
-                    # empty list => omit field to target all sites
-                    logger.debug("Clip upload targeting all sites (empty list normalized to None)")
-
-            headers = {}
-            if self.auth:
-                token = self.auth.get_access_token()
-                if token:
-                    headers["Authorization"] = f"Bearer {token}"
+                data["sites"] = json_mod.dumps(sites)
 
             url = f"{self.base_url}/marketplace/items/{item_id}/clips/upload"
-            
+
             try:
-                response = self.session.post(url, headers=headers, files=files, data=data, timeout=120)
-                response.raise_for_status()
+                resp = self.http.post(
+                    url,
+                    headers=self._auth_headers_only(),
+                    files=files,
+                    data=data,
+                    policy=UPLOAD_RETRY,
+                    timeout=120,
+                )
+                resp.raise_for_status()
             except Exception as e:
-                # Log error details for debugging
-                resp = getattr(e, "response", None)
-                status_code = getattr(resp, "status_code", "unknown")
-                error_body = {}
-                if resp is not None:
+                error_resp = getattr(e, "response", None)
+                status_code = getattr(error_resp, "status_code", "unknown")
+                error_body: dict = {}
+                if error_resp is not None:
                     try:
-                        error_body = resp.json()
+                        error_body = error_resp.json()
                     except Exception:
-                        try:
-                            error_body = {"text": resp.text}
-                        except Exception:
-                            pass
-                
-                api_message = error_body.get("message", "") if isinstance(error_body, dict) else ""
-                error_status = error_body.get("error_status", "") if isinstance(error_body, dict) else ""
+                        pass
                 logger.error(
-                    f"Clip upload failed for item {item_id}: "
-                    f"[{status_code}] {error_status}: {api_message}"
+                    "Clip upload failed for %s: [%s] %s: %s",
+                    item_id,
+                    status_code,
+                    error_body.get("error_status", ""),
+                    error_body.get("message", ""),
                 )
                 raise
 
-        return response.json()
+        return resp.json()

@@ -50,7 +50,7 @@ class MLPipeline:
         # Initialize caches (optional for pipeline, can be None)
         from mercadolivre_upload.infrastructure.cache.prediction_cache import PredictionCache
 
-        prediction_cache = PredictionCache() if prediction_cache is None else None
+        prediction_cache = PredictionCache()
 
         self.resolver = CategoryResolver(
             self.client,

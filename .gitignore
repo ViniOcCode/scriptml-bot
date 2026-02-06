@@ -38,8 +38,8 @@ tokens.json.*
 .env
 CLAUDE.md
 /plans
-cache/
-cache/**/
+/cache/
+/cache/**/
 AGENTS/
 .github/*
 .claude/*

@@ -39,7 +39,7 @@ class TestAttributeCache:
     def test_init_default(self):
         """Test default initialization."""
         cache = AttributeCache()
-        assert cache.cache_file == Path(".attribute_cache.json")
+        assert cache.cache_file == Path("cache/categories/.attribute_cache.json")
         assert cache.ttl == AttributeCache.DEFAULT_TTL
         assert cache._cache == {}
 
