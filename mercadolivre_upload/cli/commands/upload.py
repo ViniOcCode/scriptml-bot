@@ -72,6 +72,11 @@ def upload(
     category_adapter = CategoryAdapter(api_client)
     image_uploader = ImageUploader(api_client, images)
 
+    # Initialize clip uploader (discovers videos in same images directory)
+    from mercadolivre_upload.adapters.clip_uploader import ClipUploader
+
+    clip_uploader = ClipUploader(api_client, base_path=images)
+
     # Initialize domain services
     category_resolver = CategoryResolver(
         category_adapter, attribute_cache=cache, prediction_cache=prediction_cache
@@ -86,6 +91,7 @@ def upload(
         image_uploader=image_uploader,
         shipping_resolver=shipping_resolver,
         fiscal_service=fiscal_service,
+        clip_uploader=clip_uploader,
         config=config,
         dry_run=dry_run,
         cache_dir=str(cache_dir),
@@ -112,7 +118,27 @@ def upload(
     if results["failed"] > 0:
         console.print(f"[red]Failed: {results['failed']}[/red]")
 
+    # Report clip results
+    clips_uploaded = results.get("clips_uploaded", 0)
+    clips_failed = results.get("clips_failed", 0)
+    if clips_uploaded > 0:
+        console.print(f"[cyan]Clips uploaded: {clips_uploaded}[/cyan]")
+    if clips_failed > 0:
+        console.print(f"[yellow]Clips failed: {clips_failed}[/yellow]")
+
     if results["errors"] and detailed:
         console.print("\n[yellow]Errors:[/yellow]")
         for error in results["errors"][:10]:
             console.print(f"  • {error}")
+
+    if detailed and results.get("clips_details"):
+        console.print("\n[cyan]Clip details:[/cyan]")
+        for clip_info in results["clips_details"]:
+            sku = clip_info.get("sku", "?")
+            for r in clip_info.get("results", []):
+                status_color = "green" if r.get("clip_uuid") else "red"
+                status = r.get("status", "unknown")
+                console.print(
+                    f"  • [{status_color}]{sku}/{r.get('file', '?')}: "
+                    f"{status}[/{status_color}]"
+                )

@@ -4,8 +4,7 @@ These protocols define the interface between the application layer
 and the infrastructure/adapters layer.
 """
 
-from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 
 class ImageUploaderPort(Protocol):
@@ -39,17 +38,17 @@ class ShippingResolverPort(Protocol):
 class ClipUploaderPort(Protocol):
     """Port for video clip upload operations."""
 
-    def upload_clip_for_item(
-        self, item_id: str, video_path: Path, sites: list[dict] | None = None
-    ) -> str | None:
-        """Upload a video clip for a published item.
+    def upload_clips(
+        self, sku: str, item_id: str, sites: list[dict] | None = None
+    ) -> Any:
+        """Discover, validate, and upload all clips for a SKU.
 
         Args:
-            item_id: Mercado Livre item ID (e.g., MLB1234567890)
-            video_path: Path to the video file
-            sites: Optional list of sites for clip visibility
+            sku: Product SKU for video discovery
+            item_id: Published ML item ID
+            sites: Optional list of target sites
 
         Returns:
-            Clip UUID on success, None on failure
+            ClipUploadSummary with per-clip results
         """
         ...

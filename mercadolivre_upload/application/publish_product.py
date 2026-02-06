@@ -73,7 +73,7 @@ class PublishProductUseCase:
         self.failed = 0
         self.errors: list[str] = []
         self.fiscal_results: list[FiscalSubmissionResult] = []
-        self.clip_results: list[tuple[str, str | None]] = []  # (item_id, clip_uuid or None)
+        self.clip_results: list[dict] = []  # ClipUploadSummary dicts
 
         # Initialize feedback system
         self.feedback = ValidationFeedback() if enable_feedback else None
@@ -214,8 +214,8 @@ class PublishProductUseCase:
             self._submit_fiscal_batch(self._pending_fiscal)
 
         # Calculate clip stats
-        clip_success = sum(1 for _, uuid in self.clip_results if uuid) if self.clip_results else 0
-        clip_failed = len(self.clip_results) - clip_success if self.clip_results else 0
+        clip_success = sum(r.get("clips_uploaded", 0) for r in self.clip_results)
+        clip_failed = sum(r.get("clips_failed", 0) for r in self.clip_results)
 
         return {
             "success": self.failed == 0,
@@ -226,6 +226,7 @@ class PublishProductUseCase:
             "fiscal_failed": len([r for r in self.fiscal_results if not r.success]),
             "clips_uploaded": clip_success,
             "clips_failed": clip_failed,
+            "clips_details": self.clip_results,
         }
 
     def _build_product_from_dict(self, data: dict) -> Product:
@@ -545,21 +546,40 @@ class PublishProductUseCase:
                 logger.info(f"Queueing fiscal data for {product.sku} (item: {published_item_id})")
                 self._pending_fiscal.append((published_item_id, product.fiscal))
 
-            # Upload clip if available (soft failure - does not fail the product publish)
-            if self.clip_uploader and published_item_id and product.clip_file_path:
-                logger.info(f"Uploading clip for {product.sku} (item: {published_item_id})")
-                clip_uuid = self.clip_uploader.upload_clip_for_item(
-                    item_id=published_item_id,
-                    video_path=product.clip_file_path,
-                )
-                self.clip_results.append((published_item_id, clip_uuid))
-                if clip_uuid:
-                    product.clip_uuid = clip_uuid
-                    logger.info(f"Clip uploaded for {product.sku}: {clip_uuid}")
-                else:
-                    logger.warning(
-                        f"Clip upload failed for {product.sku} (item will still be published)"
+            # Upload clips if available (soft failure - does not fail the product publish)
+            if self.clip_uploader and published_item_id:
+                sku = product.sku or ""
+                if sku:
+                    logger.info(f"Uploading clips for {sku} (item: {published_item_id})")
+                    clip_summary = self.clip_uploader.upload_clips(
+                        sku=sku,
+                        item_id=published_item_id,
                     )
+                    self.clip_results.append({
+                        "sku": sku,
+                        "item_id": published_item_id,
+                        "clips_uploaded": clip_summary.clips_uploaded,
+                        "clips_failed": clip_summary.clips_failed,
+                        "clips_skipped": clip_summary.clips_skipped,
+                        "results": [
+                            {
+                                "file": r.file,
+                                "clip_uuid": r.clip_uuid,
+                                "status": r.status,
+                                "error": r.error,
+                            }
+                            for r in clip_summary.results
+                        ],
+                    })
+                    if clip_summary.clips_uploaded > 0:
+                        logger.info(
+                            f"Clips uploaded for {sku}: {clip_summary.clips_uploaded} success"
+                        )
+                    if clip_summary.clips_failed > 0:
+                        logger.warning(
+                            f"Clip upload failures for {sku}: {clip_summary.clips_failed} failed "
+                            f"(item will still be published)"
+                        )
 
             return True
         except Exception as e:
@@ -614,12 +634,13 @@ class PublishProductUseCase:
 
         # Add clip upload results
         if self.clip_results:
-            clip_success = sum(1 for _, uuid in self.clip_results if uuid)
-            clip_failed = len(self.clip_results) - clip_success
+            clip_success = sum(r.get("clips_uploaded", 0) for r in self.clip_results)
+            clip_failed = sum(r.get("clips_failed", 0) for r in self.clip_results)
             stats["clips"] = {
                 "attempted": len(self.clip_results),
                 "success": clip_success,
                 "failed": clip_failed,
+                "details": self.clip_results,
             }
 
         return stats
