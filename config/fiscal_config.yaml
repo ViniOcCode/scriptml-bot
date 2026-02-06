@@ -45,8 +45,8 @@ fiscal_fields:
       pattern: '^\d{8}$'
       message: "NCM deve ter exatamente 8 dígitos numéricos"
 
-  origin:
-    description: "Product origin code"
+  origin_detail:
+    description: "Origin detail code (ICMS origin, range 0-8). Maps to tax_information.origin_detail"
     required: true
     patterns:
       - "origem"
@@ -56,8 +56,11 @@ fiscal_fields:
     exact_matches:
       - "Origem"
       - "ORIGEM"
+    validation:
+      pattern: '^[0-8]$'
+      message: "origin_detail deve ser um dígito entre 0 e 8"
     value_mappings:
-      # Origin codes for tax purposes (0-8)
+      # Origin detail codes for tax purposes (0-8)
       "0": "0"
       "1": "1"
       "2": "2"
@@ -126,25 +129,40 @@ fiscal_fields:
       - "csosn"
       - "código csosn"
       - "codigo csosn"
+      - "csosn do icms"
+      - "csosn icms"
     exact_matches:
       - "CSOSN"
       - "csosn"
+      - "CSOSN do ICMS"
 
   origin_type:
-    description: "Origin type (reseller/manufacturer/importer)"
-    required: false
+    description: "Origin type per ML API: manufacturer, reseller, or imported"
+    required: true
     default_value: "reseller"
     patterns:
       - "tipo origem"
       - "tipo de origem"
       - "origin type"
+    valid_values:
+      - "manufacturer"
+      - "reseller"
+      - "imported"
     value_mappings:
+      # Portuguese spreadsheet values -> ML API values
+      "nacional": "reseller"
       "revenda": "reseller"
+      "revendedor": "reseller"
       "reseller": "reseller"
       "fabricante": "manufacturer"
       "manufacturer": "manufacturer"
-      "importador": "importer"
-      "importer": "importer"
+      "importado": "imported"
+      "importador": "imported"
+      "imported": "imported"
+      "importer": "imported"
+      "importacao": "imported"
+      "importação": "imported"
+      "estrangeira": "imported"
 
 
 # -----------------------------------------------------------------------------

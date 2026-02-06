@@ -7,6 +7,7 @@ Uses configuration from config/fiscal_config.yaml as the single source of truth 
 """
 
 import logging
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -16,21 +17,39 @@ import yaml
 logger = logging.getLogger(__name__)
 
 
-def _load_fiscal_defaults() -> dict:
-    """Load fiscal defaults from config file.
+def _load_fiscal_config() -> dict:
+    """Load full fiscal config from config file.
 
     Returns:
-        Dictionary with fiscal default values
+        Full fiscal configuration dictionary
     """
     try:
         config_path = Path("config/fiscal_config.yaml")
         with open(config_path, encoding="utf-8") as f:
-            config = yaml.safe_load(f)
-
-        return config.get("fiscal_defaults", {})
+            return yaml.safe_load(f) or {}
     except Exception as e:
-        logger.warning(f"Could not load fiscal defaults from config: {e}. Using empty defaults.")
+        logger.warning(f"Could not load fiscal config: {e}. Using empty config.")
         return {}
+
+
+def _load_fiscal_defaults() -> dict:
+    """Load fiscal defaults from config file."""
+    return _load_fiscal_config().get("fiscal_defaults", {})
+
+
+def _load_field_value_mappings(field_name: str) -> dict[str, str]:
+    """Load value_mappings for a specific fiscal field from config.
+
+    Args:
+        field_name: The field name in fiscal_fields config (e.g., 'origin_type', 'origin_detail')
+
+    Returns:
+        Dictionary mapping input values to API values
+    """
+    config = _load_fiscal_config()
+    fields = config.get("fiscal_fields", {})
+    field_config = fields.get(field_name, {})
+    return field_config.get("value_mappings", {})
 
 
 @dataclass
@@ -91,47 +110,71 @@ class FiscalData:
     attributes: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
-        """Normalize fiscal data using config defaults."""
+        """Normalize fiscal data using config defaults and value mappings."""
         # Load defaults from config (single source of truth)
         defaults = _load_fiscal_defaults()
 
         self.sku = str(self.sku).strip() if self.sku else ""
         self.title = str(self.title).strip() if self.title else ""
         # Use config defaults for type and measurement_unit
-        self.type = str(self.type).strip() if self.type else defaults.get("type", "single")
+        self.type = str(self.type).strip() if self.type else defaults.get("type", "")
         self.measurement_unit = (
             str(self.measurement_unit).strip()
             if self.measurement_unit
-            else defaults.get("measurement_unit", "UN")
+            else defaults.get("measurement_unit", "")
         )
-        self.ncm = str(self.ncm).strip() if self.ncm else ""
 
-        # Sanitize origin_type - map common values to codes
+        # Sanitize NCM: remove dots/dashes, keep only digits
+        ncm_raw = str(self.ncm).strip() if self.ncm else ""
+        self.ncm = re.sub(r"[.\-/\s]", "", ncm_raw)
+
+        # Sanitize origin_type using config-driven value mappings
+        # ML API expects: "manufacturer", "reseller", or "imported"
         origin_type_str = str(self.origin_type).strip() if self.origin_type else ""
-        origin_type_map = {
-            "nacional": "0",
-            "importado": "1",
-            "estrangeira": "2",
-            "nacional-importacao": "3",
-            "nacional-conteudo-importacao": "4",
-            "nacional-efetiv": "5",
-            "importacao-direta": "6",
-            "importacao-indireta": "7",
-            "nacional-mercadoria": "8",
-        }
-        self.origin_type = origin_type_map.get(origin_type_str.lower(), origin_type_str)
+        origin_type_mappings = _load_field_value_mappings("origin_type")
+        mapped_origin_type = origin_type_mappings.get(origin_type_str.lower(), "")
+        if mapped_origin_type:
+            self.origin_type = mapped_origin_type
+        elif not origin_type_str:
+            self.origin_type = defaults.get("origin_type", "")
+        else:
+            logger.warning(
+                f"Unmapped origin_type value: '{origin_type_str}'. "
+                f"Using config default: '{defaults.get('origin_type', '')}'"
+            )
+            self.origin_type = defaults.get("origin_type", "")
 
-        # Sanitize origin_detail - extract just the number if it's a long string
+        # Sanitize origin_detail: extract digit 0-8 from strings like "0 - NACIONAL..."
         origin_detail_str = str(self.origin_detail).strip() if self.origin_detail else ""
         if origin_detail_str:
-            # Extract first digit if format is like "0 - NACIONAL..."
-            import re
-
-            match = re.match(r"^(\d)", origin_detail_str)
-            if match:
-                self.origin_detail = match.group(1)
+            # Try config-driven value mappings first
+            origin_detail_mappings = _load_field_value_mappings("origin_detail")
+            mapped = origin_detail_mappings.get(origin_detail_str.lower(), "")
+            if mapped:
+                self.origin_detail = mapped
             else:
-                self.origin_detail = origin_detail_str
+                # Extract leading digit from format like "0 - NACIONAL..."
+                match = re.match(r"^(\d)", origin_detail_str)
+                if match:
+                    self.origin_detail = match.group(1)
+                else:
+                    logger.warning(
+                        f"Could not extract origin_detail digit from: '{origin_detail_str}'"
+                    )
+                    self.origin_detail = ""
+
+        # Sanitize CSOSN: extract numeric prefix from "102 - TRIBUTADA..."
+        if self.csosn:
+            csosn_str = str(self.csosn).strip()
+            csosn_match = re.match(r"^(\d+)", csosn_str)
+            if csosn_match:
+                self.csosn = csosn_match.group(1)
+            elif csosn_str.lower() in ("nan", "none", ""):
+                self.csosn = None
+
+        # Use config default for tax_payer_type if not set
+        if not self.tax_payer_type:
+            self.tax_payer_type = defaults.get("tax_payer_type", "")
 
         # Optional fields
         if self.cest:
@@ -141,8 +184,6 @@ class FiscalData:
                 self.cest = cest_str
             else:
                 self.cest = None
-        if self.csosn:
-            self.csosn = str(self.csosn).strip()
         if self.cfop:
             self.cfop = str(self.cfop).strip()
         if self.fci:
@@ -333,7 +374,8 @@ class FiscalData:
             FiscalData instance
         """
         # Map common spreadsheet column names to API fields
-        origin_type: str = kwargs.pop("origin_type", "reseller")
+        defaults = _load_fiscal_defaults()
+        origin_type: str = kwargs.pop("origin_type", defaults.get("origin_type", ""))
         origin_detail: str = origin  # Spreadsheet "origin" maps to origin_detail
 
         return cls(

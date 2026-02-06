@@ -288,21 +288,32 @@ class PublishProductUseCase:
         else:
             raise ValueError(f"Condição inválida: {condition_value}")
 
+        # Resolve fiscal field keys using find_key (config-driven patterns)
+        ncm_key = find_key(["ncm"])
+        origin_type_key = find_key(["tipo de origem", "tipo origem", "origin type"])
+        origin_detail_key = find_key(["origem"], exclude=["tipo"])
+        cest_key = find_key(["cest"])
+        cfop_key = find_key(["cfop"])
+        ean_key = find_key(["ean", "gtin"])
+        csosn_key = find_key(["csosn"])
+        net_weight_key = find_key(["peso liquido", "net weight"])
+        gross_weight_key = find_key(["peso bruto", "gross weight"])
+
         fiscal = FiscalData(
             sku=str(data.get(sku_key) or "").strip(),
             title=title,
             cost=float(price or 0.0),
-            ncm=str(data.get("ncm", "")).strip(),
-            origin_type=str(data.get("origem", "")).strip(),
-            origin_detail=str(data.get("tipo de origem", "")).strip(),
-            cest=str(data.get("cest (escolha uma opção ou digite)", "")).strip() or None,
-            cfop=str(data.get("cfop", "")).strip() or None,
-            ean=str(data.get("ean / gtin", "")).strip()
-            or str(data.get("gtin", "")).strip()
-            or None,
-            net_weight=data.get("peso líquido"),
-            gross_weight=data.get("peso bruto"),
-            tax_payer_type="company",
+            ncm=str(data.get(ncm_key, "") if ncm_key else "").strip(),
+            origin_type=str(data.get(origin_type_key, "") if origin_type_key else "").strip(),
+            origin_detail=str(
+                data.get(origin_detail_key, "") if origin_detail_key else ""
+            ).strip(),
+            cest=str(data.get(cest_key, "") if cest_key else "").strip() or None,
+            cfop=str(data.get(cfop_key, "") if cfop_key else "").strip() or None,
+            ean=str(data.get(ean_key, "") if ean_key else "").strip() or None,
+            csosn=str(data.get(csosn_key, "") if csosn_key else "").strip() or None,
+            net_weight=data.get(net_weight_key) if net_weight_key else None,
+            gross_weight=data.get(gross_weight_key) if gross_weight_key else None,
         )
 
         excluded_keys = {title_key, price_key, qty_key, condition_key, sku_key, description_key}
