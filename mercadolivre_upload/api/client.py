@@ -32,6 +32,22 @@ def validate_item_id(item_id: str | None) -> None:
         )
 
 
+def validate_clip_item_id(item_id: str | None) -> None:
+    r"""Validate item ID format for clip upload (CBT parent items).
+
+    Raises:
+        ValueError: If item_id is empty or not in format CBT\d+
+    """
+    if not item_id:
+        raise ValueError("item_id cannot be empty or None")
+    if not re.match(r"^CBT\d+$", item_id):
+        raise ValueError(
+            "Invalid clip item_id format: "
+            f"'{item_id}'. Expected format: CBT[digits] "
+            "(e.g., CBT1234567890)"
+        )
+
+
 class MLApiClient:
     """Client for Mercado Livre API."""
 
@@ -343,7 +359,7 @@ class MLApiClient:
         from pathlib import Path
 
         path = Path(file_path)
-        validate_item_id(item_id)
+        validate_clip_item_id(item_id)
 
         # Determine MIME type
         mime_type, _ = mimetypes.guess_type(str(path))
@@ -375,23 +391,29 @@ class MLApiClient:
             try:
                 response = self.session.post(url, headers=headers, files=files, data=data, timeout=120)
                 response.raise_for_status()
-            except requests.HTTPError as e:
-                status_code = e.response.status_code if e.response else "unknown"
-                try:
-                    error_body = e.response.json() if e.response else {}
-                    api_message = error_body.get("message", "")
-                    error_status = error_body.get("error_status", "")
-                    logger.error(
-                        f"Clip upload failed for item {item_id}: "
-                        f"[{status_code}] {error_status}: {api_message}"
-                    )
-                    logger.debug(f"Full error response: {error_body}")
-                except Exception:
-                    error_text = e.response.text if e.response else str(e)
-                    logger.error(
-                        f"Clip upload failed for item {item_id}: "
-                        f"[{status_code}] {error_text}"
-                    )
+            except Exception as e:
+                # Log detailed info about the failure to aid debugging
+                resp = getattr(e, "response", None)
+                status_code = getattr(resp, "status_code", "unknown")
+                error_body = {}
+                if resp is not None:
+                    try:
+                        error_body = resp.json()
+                    except Exception:
+                        # Non-JSON body (text/html or empty)
+                        try:
+                            error_body = {"text": resp.text}
+                        except Exception:
+                            error_body = {}
+                api_message = error_body.get("message", "") if isinstance(error_body, dict) else ""
+                error_status = error_body.get("error_status", "") if isinstance(error_body, dict) else ""
+                logger.error(
+                    f"Clip upload failed for item {item_id}: "
+                    f"[{status_code}] {error_status}: {api_message}"
+                )
+                logger.debug(f"Full exception: {repr(e)}")
+                logger.debug(f"Full error response: {error_body}")
+                # Re-raise to let caller handle retries/logging
                 raise
 
         return response.json()
