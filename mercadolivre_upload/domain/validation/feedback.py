@@ -53,24 +53,28 @@ class ValidationFeedback:
 
         if not causes:
             # Record success
-            self.feedback.append({
-                "sku": sku,
-                "timestamp": datetime.now().isoformat(),
-                "cause_code": None,
-                "cause_type": "success",
-                "attribute_id": None,
-                "message": "Validation passed",
-            })
-        else:
-            for cause in causes:
-                self.feedback.append({
+            self.feedback.append(
+                {
                     "sku": sku,
                     "timestamp": datetime.now().isoformat(),
-                    "cause_code": cause.get("code"),
-                    "cause_type": cause.get("type"),
-                    "attribute_id": self._extract_attribute_id(cause.get("message", "")),
-                    "message": cause.get("message"),
-                })
+                    "cause_code": None,
+                    "cause_type": "success",
+                    "attribute_id": None,
+                    "message": "Validation passed",
+                }
+            )
+        else:
+            for cause in causes:
+                self.feedback.append(
+                    {
+                        "sku": sku,
+                        "timestamp": datetime.now().isoformat(),
+                        "cause_code": cause.get("code"),
+                        "cause_type": cause.get("type"),
+                        "attribute_id": self._extract_attribute_id(cause.get("message", "")),
+                        "message": cause.get("message"),
+                    }
+                )
 
         self._save_feedback()
         logger.debug(f"Recorded feedback for {sku}")
@@ -109,9 +113,7 @@ class ValidationFeedback:
 
         return error_counts
 
-    def adjust_scores(
-        self, scored_attrs: list[ScoredAttribute]
-    ) -> list[ScoredAttribute]:
+    def adjust_scores(self, scored_attrs: list[ScoredAttribute]) -> list[ScoredAttribute]:
         """Adjust scores based on historical feedback.
 
         Args:

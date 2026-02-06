@@ -157,9 +157,7 @@ class OAuthHandler:
             "expires_at": expires_at,
         }
 
-    def add_auth_header(
-        self, headers: dict | None = None, token: str | None = None
-    ) -> dict:
+    def add_auth_header(self, headers: dict | None = None, token: str | None = None) -> dict:
         """Add Bearer token authorization header to request headers.
 
         Args:

@@ -25,6 +25,7 @@ from typing import Any, Literal
 # Verifica disponibilidade de bibliotecas opcionais
 try:
     import aiohttp
+
     AIOHTTP_AVAILABLE = True
 except ImportError:
     AIOHTTP_AVAILABLE = False
@@ -37,6 +38,7 @@ try:
     from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
     from rich.table import Table
     from rich.text import Text
+
     RICH_AVAILABLE = True
 except ImportError:
     RICH_AVAILABLE = False
@@ -59,9 +61,10 @@ AlertLevel = Literal["info", "warning", "error", "critical"]
 # StructuredLogger - Logger JSON para Análise
 # ============================================================================
 
+
 class StructuredLogger:
     """Logger estruturado com saída em JSON para análise de logs.
-    
+
     Features:
     - Formato JSON estruturado
     - Campos padronizados (timestamp, level, component, correlation_id)
@@ -79,7 +82,7 @@ class StructuredLogger:
         level: str = "INFO",
     ) -> None:
         """Inicializa o logger estruturado.
-        
+
         Args:
             name: Nome do logger.
             log_dir: Diretório para logs. Se None, usa padrão.
@@ -134,7 +137,7 @@ class StructuredLogger:
         exception: Exception | None = None,
     ) -> None:
         """Registra um log estruturado.
-        
+
         Args:
             level: Nível do log.
             message: Mensagem principal.
@@ -230,7 +233,7 @@ class StructuredLogger:
         extra: dict[str, Any] | None = None,
     ) -> None:
         """Log estruturado para operações de negócio.
-        
+
         Args:
             operation: Nome da operação (ex: "product_upload", "image_process").
             success: Se a operação foi bem-sucedida.
@@ -253,9 +256,11 @@ class StructuredLogger:
 # BusinessMetrics - Métricas de Negócio
 # ============================================================================
 
+
 @dataclass
 class HourlyStats:
     """Estatísticas por hora."""
+
     hour: str
     uploads: int = 0
     successes: int = 0
@@ -279,7 +284,7 @@ class HourlyStats:
 
 class BusinessMetricsCollector:
     """Coletor de métricas de negócio.
-    
+
     Métricas coletadas:
     - Uploads por hora
     - Taxa de sucesso
@@ -290,7 +295,7 @@ class BusinessMetricsCollector:
 
     def __init__(self, max_history_hours: int = 24) -> None:
         """Inicializa o coletor.
-        
+
         Args:
             max_history_hours: Horas de histórico a manter.
         """
@@ -309,7 +314,7 @@ class BusinessMetricsCollector:
         error_category: str | None = None,
     ) -> None:
         """Registra uma operação de upload.
-        
+
         Args:
             success: Se o upload foi bem-sucedido.
             duration_ms: Duração em milissegundos.
@@ -334,17 +339,19 @@ class BusinessMetricsCollector:
                 self._error_counts[error_category] = self._error_counts.get(error_category, 0) + 1
 
         # Registra operação recente
-        self._recent_operations.append({
-            "timestamp": datetime.now().isoformat(),
-            "success": success,
-            "duration_ms": duration_ms,
-            "product_id": product_id,
-            "error_category": error_category,
-        })
+        self._recent_operations.append(
+            {
+                "timestamp": datetime.now().isoformat(),
+                "success": success,
+                "duration_ms": duration_ms,
+                "product_id": product_id,
+                "error_category": error_category,
+            }
+        )
 
     def record_product_status(self, status: str, count: int = 1) -> None:
         """Registra produtos por status.
-        
+
         Args:
             status: Status do produto (ex: "pending", "published", "failed").
             count: Quantidade.
@@ -353,11 +360,10 @@ class BusinessMetricsCollector:
 
     def _cleanup_old_hours(self) -> None:
         """Remove horas antigas do histórico."""
-        cutoff = (datetime.now() - timedelta(hours=self.max_history_hours)).strftime("%Y-%m-%d %H:00")
-        self._hourly_stats = {
-            k: v for k, v in self._hourly_stats.items()
-            if k >= cutoff
-        }
+        cutoff = (datetime.now() - timedelta(hours=self.max_history_hours)).strftime(
+            "%Y-%m-%d %H:00"
+        )
+        self._hourly_stats = {k: v for k, v in self._hourly_stats.items() if k >= cutoff}
 
     # Métricas calculadas
 
@@ -445,9 +451,11 @@ class BusinessMetricsCollector:
 # AlertManager - Alertas via Webhook
 # ============================================================================
 
+
 @dataclass
 class Alert:
     """Representa um alerta."""
+
     level: AlertLevel
     title: str
     message: str
@@ -466,27 +474,31 @@ class Alert:
         }
 
         return {
-            "attachments": [{
-                "color": colors.get(self.level, "#808080"),
-                "title": f"[{self.level.upper()}] {self.title}",
-                "text": self.message,
-                "fields": [
-                    {"title": "Component", "value": self.component, "short": True},
-                    {"title": "Time", "value": self.timestamp.isoformat(), "short": True},
-                    *[{"title": k, "value": str(v), "short": True}
-                      for k, v in self.details.items()],
-                ],
-                "footer": "mercadolivre-upload",
-                "ts": int(self.timestamp.timestamp()),
-            }]
+            "attachments": [
+                {
+                    "color": colors.get(self.level, "#808080"),
+                    "title": f"[{self.level.upper()}] {self.title}",
+                    "text": self.message,
+                    "fields": [
+                        {"title": "Component", "value": self.component, "short": True},
+                        {"title": "Time", "value": self.timestamp.isoformat(), "short": True},
+                        *[
+                            {"title": k, "value": str(v), "short": True}
+                            for k, v in self.details.items()
+                        ],
+                    ],
+                    "footer": "mercadolivre-upload",
+                    "ts": int(self.timestamp.timestamp()),
+                }
+            ]
         }
 
     def to_discord(self) -> dict[str, Any]:
         """Converte para formato Discord webhook."""
         colors = {
-            "info": 0x36a64f,
-            "warning": 0xff9900,
-            "error": 0xff0000,
+            "info": 0x36A64F,
+            "warning": 0xFF9900,
+            "error": 0xFF0000,
             "critical": 0x990000,
         }
 
@@ -509,7 +521,7 @@ class Alert:
 
 class AlertManager:
     """Gerenciador de alertas via webhooks.
-    
+
     Suporta:
     - Slack webhooks
     - Discord webhooks
@@ -525,7 +537,7 @@ class AlertManager:
         enabled: bool = True,
     ) -> None:
         """Inicializa o gerenciador de alertas.
-        
+
         Args:
             slack_webhook: URL do webhook do Slack.
             discord_webhook: URL do webhook do Discord.
@@ -554,10 +566,10 @@ class AlertManager:
 
     async def send_alert(self, alert: Alert) -> bool:
         """Envia um alerta via webhooks configurados.
-        
+
         Args:
             alert: O alerta a ser enviado.
-            
+
         Returns:
             True se enviado com sucesso.
         """
@@ -588,18 +600,19 @@ class AlertManager:
             return True
 
         try:
-            async with aiohttp.ClientSession() as session, session.post(
-                self.slack_webhook,
-                json=alert.to_slack(),
-                timeout=aiohttp.ClientTimeout(total=10),
-            ) as response:
+            async with (
+                aiohttp.ClientSession() as session,
+                session.post(
+                    self.slack_webhook,
+                    json=alert.to_slack(),
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as response,
+            ):
                 if response.status == 200:
                     self._logger.info(f"Alerta enviado ao Slack: {alert.title}")
                     return True
                 else:
-                    self._logger.error(
-                        f"Falha ao enviar alerta Slack: {response.status}"
-                    )
+                    self._logger.error(f"Falha ao enviar alerta Slack: {response.status}")
                     return False
         except Exception as e:
             self._logger.error(f"Erro ao enviar alerta Slack: {e}")
@@ -611,18 +624,19 @@ class AlertManager:
             return True
 
         try:
-            async with aiohttp.ClientSession() as session, session.post(
-                self.discord_webhook,
-                json=alert.to_discord(),
-                timeout=aiohttp.ClientTimeout(total=10),
-            ) as response:
+            async with (
+                aiohttp.ClientSession() as session,
+                session.post(
+                    self.discord_webhook,
+                    json=alert.to_discord(),
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as response,
+            ):
                 if response.status in (200, 204):
                     self._logger.info(f"Alerta enviado ao Discord: {alert.title}")
                     return True
                 else:
-                    self._logger.error(
-                        f"Falha ao enviar alerta Discord: {response.status}"
-                    )
+                    self._logger.error(f"Falha ao enviar alerta Discord: {response.status}")
                     return False
         except Exception as e:
             self._logger.error(f"Erro ao enviar alerta Discord: {e}")
@@ -638,7 +652,7 @@ class AlertManager:
         details: dict[str, Any] | None = None,
     ) -> bool:
         """Cria e envia um alerta.
-        
+
         Args:
             level: Nível do alerta.
             title: Título do alerta.
@@ -646,7 +660,7 @@ class AlertManager:
             component: Componente que gerou.
             correlation_id: ID de correlação.
             details: Detalhes adicionais.
-            
+
         Returns:
             True se enviado com sucesso.
         """
@@ -705,9 +719,10 @@ class AlertManager:
 # Dashboard - Display em Tempo Real
 # ============================================================================
 
+
 class Dashboard:
     """Dashboard em tempo real no terminal usando Rich.
-    
+
     Features:
     - Display ao vivo com atualização periódica
     - Métricas de negócio
@@ -721,7 +736,7 @@ class Dashboard:
         refresh_rate: float = 1.0,
     ) -> None:
         """Inicializa o dashboard.
-        
+
         Args:
             metrics_collector: Coletor de métricas a exibir.
             refresh_rate: Taxa de atualização em segundos.
@@ -737,7 +752,14 @@ class Dashboard:
 
     def _create_layout(self) -> Layout:
         """Cria o layout do dashboard."""
-        layout = Layout()
+
+        class _DashboardLayout(Layout):
+            def __contains__(self, name: object) -> bool:
+                if not isinstance(name, str):
+                    return False
+                return self.get(name) is not None
+
+        layout = _DashboardLayout()
         layout.split_column(
             Layout(name="header", size=3),
             Layout(name="main"),
@@ -766,14 +788,8 @@ class Dashboard:
 
         # Métricas principais
         table.add_row("Total Uploads", str(self.metrics.total_uploads))
-        table.add_row(
-            "Taxa de Sucesso",
-            f"{self.metrics.overall_success_rate * 100:.1f}%"
-        )
-        table.add_row(
-            "Tempo Médio",
-            f"{self.metrics.avg_duration_ms:.0f} ms"
-        )
+        table.add_row("Taxa de Sucesso", f"{self.metrics.overall_success_rate * 100:.1f}%")
+        table.add_row("Tempo Médio", f"{self.metrics.avg_duration_ms:.0f} ms")
         table.add_row("Sucessos", str(self.metrics.total_successes))
         table.add_row("Falhas", str(self.metrics.total_failures))
 
@@ -793,7 +809,11 @@ class Dashboard:
         table.add_column("Tempo Médio", justify="right")
 
         for stats in self.metrics.uploads_per_hour[-8:]:  # Últimas 8 horas
-            success_color = "green" if stats.success_rate >= 0.9 else "yellow" if stats.success_rate >= 0.7 else "red"
+            success_color = (
+                "green"
+                if stats.success_rate >= 0.9
+                else "yellow" if stats.success_rate >= 0.7 else "red"
+            )
             table.add_row(
                 stats.hour[-5:],  # Mostra apenas HH:00
                 str(stats.uploads),
@@ -824,9 +844,7 @@ class Dashboard:
         table.add_column("Contagem", justify="right", style="red")
 
         for category, count in sorted(
-            self.metrics.error_breakdown.items(),
-            key=lambda x: x[1],
-            reverse=True
+            self.metrics.error_breakdown.items(), key=lambda x: x[1], reverse=True
         )[:5]:
             table.add_row(category, str(count))
 
@@ -910,9 +928,10 @@ class Dashboard:
 # Integração com Publish Product
 # ============================================================================
 
+
 class ObservabilityManager:
     """Gerenciador central de observabilidade.
-    
+
     Integra logger, métricas, alertas e dashboard.
     """
 
@@ -923,7 +942,7 @@ class ObservabilityManager:
         enable_dashboard: bool = False,
     ) -> None:
         """Inicializa o gerenciador de observabilidade.
-        
+
         Args:
             component_name: Nome do componente.
             enable_alerts: Se deve habilitar alertas.
@@ -949,7 +968,7 @@ class ObservabilityManager:
         correlation_id: str | None = None,
     ) -> None:
         """Registra um upload e dispara alerta se necessário.
-        
+
         Args:
             success: Se o upload foi bem-sucedido.
             duration_ms: Duração em ms.
@@ -1025,18 +1044,19 @@ alert_manager = AlertManager()
 # Funções de Conveniência
 # ============================================================================
 
+
 def create_observability_manager(
     component: str = "publish_product",
     enable_alerts: bool = True,
     enable_dashboard: bool = False,
 ) -> ObservabilityManager:
     """Cria um gerenciador de observabilidade configurado.
-    
+
     Args:
         component: Nome do componente.
         enable_alerts: Se deve habilitar alertas.
         enable_dashboard: Se deve habilitar dashboard.
-        
+
     Returns:
         ObservabilityManager configurado.
     """
@@ -1055,7 +1075,7 @@ async def log_product_upload(
     correlation_id: str | None = None,
 ) -> None:
     """Função de conveniência para logar upload de produto.
-    
+
     Args:
         success: Se o upload foi bem-sucedido.
         duration_ms: Duração em ms.

@@ -7,11 +7,15 @@ import logging
 import re
 from typing import Any
 
+from auth.authenticator import AuthManager
+from mercadolivre_upload.adapters.spreadsheet.parser import SpreadsheetParser
+from mercadolivre_upload.application.builders.product_builder import ProductBuilder
 from mercadolivre_upload.domain.cache_attribute_mapper import CachedAttributeMapper
 from mercadolivre_upload.domain.category.resolver import CategoryResolver
 from mercadolivre_upload.domain.fiscal.data import FiscalData
 from mercadolivre_upload.domain.fiscal.service import FiscalService, FiscalSubmissionResult
 from mercadolivre_upload.domain.product.model import Product
+from mercadolivre_upload.domain.text_normalizer import PortugueseTextNormalizer
 from mercadolivre_upload.domain.validation import ValidationFeedback
 
 from .attribute_builder import AttributeBuilderService
@@ -89,7 +93,7 @@ class PublishProductUseCase:
         # Pending fiscal data for batch submission
         self._pending_fiscal: list[tuple[str, FiscalData]] = []
 
-    def execute(self, products: list[Product], category_name: str) -> dict:
+    def execute(self, products: list[Product | dict], category_name: str) -> dict:
         """Execute publishing use case.
 
         Args:
@@ -97,22 +101,80 @@ class PublishProductUseCase:
             category_name: Category name for all products
 
         Returns:
-
             Execution results
         """
-        # Find category ID using predictor-first strategy
+        # Strategy 1: Find category by name (fast root match)
         category_id = self.category_resolver.find_category(category_name)
 
-        # Fallback: try domain discovery with product titles
+        # Strategy 2: Use domain discovery with product titles
         if not category_id and products:
-            logger.info("Category not found by name, trying domain discovery...")
+            logger.info(
+                "Category not found by name, trying domain discovery with product titles..."
+            )
+
+            # Extract titles from products
+            titles = []
             for product in products:
-                if product.title:
-                    category_id = self.category_resolver.predict_category_from_title(
-                        product.title
-                    )
+                title = None
+                if isinstance(product, dict):
+                    # Try multiple key variations (with/without accents)
+                    # First try exact matches
+                    for key in ["título", "titulo", "title", "nome"]:
+                        if key in product:
+                            title = product[key]
+                            break
+
+                    # If not found, try keys that start with these patterns
+                    if not title:
+                        for key in product.keys():
+                            key_lower = str(key).lower().strip()
+                            if any(
+                                key_lower.startswith(pattern)
+                                for pattern in ["título", "titulo", "title"]
+                            ):
+                                title = product[key]
+                                break
+                else:
+                    title = getattr(product, "title", None)
+
+                if title and isinstance(title, str) and len(title.strip()) > 0:
+                    titles.append(str(title).strip())
+
+            if titles:
+                logger.info(f"Extracted {len(titles)} titles for prediction")
+                category_id = self.category_resolver.find_category_with_predictor(
+                    category_name, titles
+                )
+
+        # Strategy 3: Fallback to simple title prediction (for backwards compatibility)
+        if not category_id and products:
+            logger.info("Trying simple domain discovery fallback...")
+            for product in products:
+                title = None
+                if isinstance(product, dict):
+                    for key in ["título", "titulo", "title", "nome"]:
+                        if key in product:
+                            title = product[key]
+                            break
+
+                    if not title:
+                        for key in product.keys():
+                            key_lower = str(key).lower().strip()
+                            if any(
+                                key_lower.startswith(pattern)
+                                for pattern in ["título", "titulo", "title"]
+                            ):
+                                title = product[key]
+                                break
+                else:
+                    title = getattr(product, "title", None)
+
+                if title and isinstance(title, str):
+                    title_str = str(title).strip()
+
+                    category_id = self.category_resolver.predict_category_from_title(title_str)
                     if category_id:
-                        logger.info(f"Found category from title '{product.title[:30]}...'")
+                        logger.info(f"Found category from title '{title_str[:30]}...'")
                         break
 
         if not category_id:
@@ -137,6 +199,14 @@ class PublishProductUseCase:
         self._initialize_cache_mapper(category_id)
 
         for product in products:
+            if isinstance(product, dict):
+                try:
+                    product = self._build_product_from_dict(product)
+                except Exception as exc:
+                    logger.error(f"Failed to build product from row: {exc}")
+                    self.errors.append(str(exc))
+                    self.failed += 1
+                    continue
             self._publish_one(product, category_id)
 
         # Batch submit fiscal information for all published products
@@ -158,9 +228,88 @@ class PublishProductUseCase:
             "clips_failed": clip_failed,
         }
 
+    def _build_product_from_dict(self, data: dict) -> Product:
+        def find_key(candidates: list[str], exclude: list[str] | None = None) -> str | None:
+            for key in data:
+                normalized = PortugueseTextNormalizer.normalize(str(key))
+                if exclude and any(ex in normalized for ex in exclude):
+                    continue
+                if any(candidate in normalized for candidate in candidates):
+                    return str(key)
+            return None
+
+        builder = ProductBuilder()
+
+        title_key = find_key(["titulo", "title", "nome"], exclude=["livro", "item", "peca"])
+        price_key = find_key(["preco", "price", "valor"])
+        qty_key = find_key(["estoque", "quantidade", "stock"], exclude=["caracter"])
+        condition_key = find_key(["condicao", "condition", "estado", "situacao"])
+        sku_key = find_key(["sku", "codigo", "code"])
+        description_key = find_key(["descricao", "description", "detalhes"])
+
+        if not title_key or not price_key or not qty_key or not condition_key or not sku_key:
+            missing = [
+                name
+                for name, key in [
+                    ("titulo", title_key),
+                    ("preco", price_key),
+                    ("quantidade", qty_key),
+                    ("condicao", condition_key),
+                    ("sku", sku_key),
+                ]
+                if key is None
+            ]
+            raise ValueError(f"Campos obrigatórios faltando: {', '.join(missing)}")
+
+        title = builder._normalize_text(str(data.get(title_key, "")))
+        description_raw = str(data.get(description_key, "") or "")
+        description = builder._normalize_description(description_raw) if description_raw else ""
+
+        price = builder._parse_price(data.get(price_key))
+        quantity = builder._parse_quantity(data.get(qty_key))
+
+        condition_value = str(data.get(condition_key, "")).lower().strip()
+        if any(token in condition_value for token in ["novo", "new", "0"]):
+            condition = "new"
+        elif any(token in condition_value for token in ["usado", "used", "1"]):
+            condition = "used"
+        else:
+            raise ValueError(f"Condição inválida: {condition_value}")
+
+        fiscal = FiscalData(
+            sku=str(data.get(sku_key) or "").strip(),
+            title=title,
+            cost=float(price or 0.0),
+            ncm=str(data.get("ncm", "")).strip(),
+            origin_type=str(data.get("origem", "")).strip(),
+            origin_detail=str(data.get("tipo de origem", "")).strip(),
+            cest=str(data.get("cest (escolha uma opção ou digite)", "")).strip() or None,
+            cfop=str(data.get("cfop", "")).strip() or None,
+            ean=str(data.get("ean / gtin", "")).strip()
+            or str(data.get("gtin", "")).strip()
+            or None,
+            net_weight=data.get("peso líquido"),
+            gross_weight=data.get("peso bruto"),
+            tax_payer_type="company",
+        )
+
+        excluded_keys = {title_key, price_key, qty_key, condition_key, sku_key, description_key}
+        attributes = {k: v for k, v in data.items() if k not in excluded_keys}
+
+        return Product(
+            sku=str(data.get(sku_key) or "").strip(),
+            title=title,
+            description=description,
+            price=float(price),
+            available_quantity=int(quantity),
+            condition=condition,
+            fiscal=fiscal,
+            attributes=attributes,
+        )
+
     def _initialize_cache_mapper(self, category_id: str) -> None:
         """Initialize cache mapper for the given category.
-        
+
         Args:
             category_id: ML category ID
         """
@@ -232,7 +381,7 @@ class PublishProductUseCase:
         logger.debug(f"Shipping config for {product.sku}: {shipping_config}")
 
         # Load defaults from config (config is the single source of truth)
-        core_defaults = self.config.get('core_item_fields', {}).get('defaults', {})
+        core_defaults = self.config.get("core_item_fields", {}).get("defaults", {})
 
         # Build sale_terms: use explicit mappings if available, otherwise use config defaults
         if sale_terms_from_mapping:
@@ -241,7 +390,7 @@ class PublishProductUseCase:
             logger.info(f"Using sale_terms from explicit column mappings: {sale_term_ids}")
         else:
             # Use config defaults only - no hardcoded fallbacks
-            sale_terms = core_defaults.get('sale_terms', [])
+            sale_terms = core_defaults.get("sale_terms", [])
             logger.info("Using default sale_terms from config")
 
         # Check if listing_type_id was explicitly mapped from spreadsheet
@@ -255,7 +404,7 @@ class PublishProductUseCase:
         if explicit_listing_type:
             listing_type_id = explicit_listing_type
         elif pictures:
-            listing_type_id = core_defaults.get('listing_type_id')
+            listing_type_id = core_defaults.get("listing_type_id")
         else:
             listing_type_id = "free"
 
@@ -264,9 +413,9 @@ class PublishProductUseCase:
             "title": product.title,
             "category_id": category_id,
             "price": product.price,
-            "currency_id": core_defaults.get('currency_id'),
+            "currency_id": core_defaults.get("currency_id"),
             "available_quantity": product.available_quantity,
-            "buying_mode": core_defaults.get('buying_mode'),
+            "buying_mode": core_defaults.get("buying_mode"),
             "condition": product.condition,
             "listing_type_id": listing_type_id,
             "description": {"plain_text": product.description},
@@ -282,7 +431,8 @@ class PublishProductUseCase:
             f"Final shipping config for {product.sku}: mode={shipping_config.get('mode')}, "
             f"free_shipping={shipping_config.get('free_shipping')}, "
             f"logistic_type={shipping_config.get('logistic_type')}, "
-            f"local_pick_up={shipping_config.get('local_pick_up')}")
+            f"local_pick_up={shipping_config.get('local_pick_up')}"
+        )
 
         if self.dry_run:
             logger.info(f"DRY RUN: Would publish {product.sku}")
@@ -294,7 +444,7 @@ class PublishProductUseCase:
 
         # DEBUG: Log full item payload (with sensitive data redacted if needed)
         debug_item = item.copy()
-        debug_item.pop('description', None)  # Remove long description for cleaner logs
+        debug_item.pop("description", None)  # Remove long description for cleaner logs
         logger.debug(f"Full item payload for {product.sku}: {debug_item}")
 
         # Validate
@@ -316,7 +466,10 @@ class PublishProductUseCase:
                 logger.debug(f"Validation cause for {product.sku}: {cause}")
 
                 # Check for shipping-specific issues
-                if "shipping" in str(cause_code).lower() or "shipping" in str(cause_message).lower():
+                if (
+                    "shipping" in str(cause_code).lower()
+                    or "shipping" in str(cause_message).lower()
+                ):
                     shipping_issues.append(f"{cause_code}: {cause_message}")
 
                 # Separate actual errors from warnings
@@ -343,15 +496,13 @@ class PublishProductUseCase:
                 self.failed += 1
                 # Record feedback
                 if self.feedback:
-                    self.feedback.record_validation_result(
-                        product.sku, ml_attributes, validation
-                    )
+                    self.feedback.record_validation_result(product.sku, ml_attributes, validation)
                 return False
         except Exception as e:
             # Try to extract error details from exception
             error_msg = str(e)
             error_detail = None
-            if hasattr(e, 'response') and e.response is not None:
+            if hasattr(e, "response") and e.response is not None:
                 try:
                     error_detail = e.response.json()
                     error_msg = f"{error_msg} - {error_detail}"
@@ -373,7 +524,7 @@ class PublishProductUseCase:
         published_item_id: str | None = None
         try:
             result = self.publisher.create_item(item)
-            published_item_id = result.get('id')
+            published_item_id = result.get("id")
             logger.info(f"Published {product.sku}: {published_item_id}")
             self.published += 1
 
@@ -395,11 +546,7 @@ class PublishProductUseCase:
                 self._pending_fiscal.append((published_item_id, product.fiscal))
 
             # Upload clip if available (soft failure - does not fail the product publish)
-            if (
-                self.clip_uploader
-                and published_item_id
-                and product.clip_file_path
-            ):
+            if self.clip_uploader and published_item_id and product.clip_file_path:
                 logger.info(f"Uploading clip for {product.sku} (item: {published_item_id})")
                 clip_uuid = self.clip_uploader.upload_clip_for_item(
                     item_id=published_item_id,
@@ -410,12 +557,14 @@ class PublishProductUseCase:
                     product.clip_uuid = clip_uuid
                     logger.info(f"Clip uploaded for {product.sku}: {clip_uuid}")
                 else:
-                    logger.warning(f"Clip upload failed for {product.sku} (item will still be published)")
+                    logger.warning(
+                        f"Clip upload failed for {product.sku} (item will still be published)"
+                    )
 
             return True
         except Exception as e:
             error_msg = str(e)
-            if hasattr(e, 'response') and e.response is not None:
+            if hasattr(e, "response") and e.response is not None:
                 try:
                     error_detail = e.response.json()
                     error_msg = f"{error_msg} - {error_detail}"
@@ -424,7 +573,9 @@ class PublishProductUseCase:
                     # Record publish failure feedback
                     if self.feedback:
                         self.feedback.record_validation_result(
-                            product.sku, ml_attributes, error_detail if isinstance(error_detail, dict) else {}
+                            product.sku,
+                            ml_attributes,
+                            error_detail if isinstance(error_detail, dict) else {},
                         )
                     for cause in causes:
                         cause_code = cause.get("code", "").lower()
@@ -485,7 +636,7 @@ class PublishProductUseCase:
 
     def _build_shipping_config(self) -> dict:
         """Build shipping configuration from config.
-        
+
         Uses shipping configuration from config file as the single source of truth.
         Builds complete shipping payload matching ML API format:
         {
@@ -498,13 +649,13 @@ class PublishProductUseCase:
             "logistic_type": "drop_off",
             "store_pick_up": false
         }
-        
+
         Returns:
             Shipping configuration dictionary
         """
-        shipping_config = self.config.get('shipping', {})
-        default_mode = shipping_config.get('default_mode', 'not_specified')
-        modes_config = shipping_config.get('modes', {})
+        shipping_config = self.config.get("shipping", {})
+        default_mode = shipping_config.get("default_mode", "not_specified")
+        modes_config = shipping_config.get("modes", {})
 
         # Determine shipping mode
         shipping_mode = default_mode
@@ -518,13 +669,13 @@ class PublishProductUseCase:
         # Build complete shipping config matching ML API format
         config_shipping: dict[str, any] = {
             "mode": shipping_mode,
-            "methods": mode_config.get('methods', []),
-            "tags": mode_config.get('tags', []),
-            "dimensions": mode_config.get('dimensions'),
-            "local_pick_up": mode_config.get('local_pick_up', False),
-            "free_shipping": mode_config.get('free_shipping', False),
-            "logistic_type": mode_config.get('logistic_type'),
-            "store_pick_up": mode_config.get('store_pick_up', False),
+            "methods": mode_config.get("methods", []),
+            "tags": mode_config.get("tags", []),
+            "dimensions": mode_config.get("dimensions"),
+            "local_pick_up": mode_config.get("local_pick_up", False),
+            "free_shipping": mode_config.get("free_shipping", False),
+            "logistic_type": mode_config.get("logistic_type"),
+            "store_pick_up": mode_config.get("store_pick_up", False),
         }
 
         # Remove None values to keep payload clean
@@ -545,11 +696,23 @@ class PublishProductUseCase:
             return
 
         # Get dimension patterns from config
-        dim_config = self.config.get('dimension_patterns', {})
-        keywords = dim_config.get('keywords', ["height", "altura", "width", "largura", "length", "comprimento", "depth", "profundidade"])
-        default_unit = dim_config.get('default_unit', 'cm')
-        numeric_pattern = dim_config.get('numeric_only', r'^\s*\d+(?:[\.,]\d+)?\s*$')
-        unit_pattern = dim_config.get('unit_marker', r'\b(cm|mm|m|in|pouce|polegadas)\b')
+        dim_config = self.config.get("dimension_patterns", {})
+        keywords = dim_config.get(
+            "keywords",
+            [
+                "height",
+                "altura",
+                "width",
+                "largura",
+                "length",
+                "comprimento",
+                "depth",
+                "profundidade",
+            ],
+        )
+        default_unit = dim_config.get("default_unit", "cm")
+        numeric_pattern = dim_config.get("numeric_only", r"^\s*\d+(?:[\.,]\d+)?\s*$")
+        unit_pattern = dim_config.get("unit_marker", r"\b(cm|mm|m|in|pouce|polegadas)\b")
 
         # Compile patterns
         numeric_only = re.compile(numeric_pattern)
@@ -598,22 +761,21 @@ class PublishProductUseCase:
 # Backwards-compatible dataclasses and service expected by tests
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Any, Optional
 
 
 @dataclass
 class PublishResult:
     success_count: int
     failure_count: int
-    published_ids: List[str]
-    errors: List[dict]
+    published_ids: list[str]
+    errors: list[dict]
 
 
 @dataclass
 class ValidationResult:
     is_valid: bool
-    errors: List[str]
-    warnings: List[str]
+    errors: list[str]
+    warnings: list[str]
 
 
 class PublishProductService:
@@ -623,7 +785,12 @@ class PublishProductService:
     and implements enough logic for unit tests to exercise behavior.
     """
 
-    def __init__(self, config_path: Optional[Path] = None, dry_run: bool = False, api_client: Optional[Any] = None):
+    def __init__(
+        self,
+        config_path: Path | None = None,
+        dry_run: bool = False,
+        api_client: Any | None = None,
+    ):
         self.config_path = config_path
         self.dry_run = dry_run
         self._api = api_client
@@ -636,6 +803,7 @@ class PublishProductService:
             from auth.authenticator import AuthManager
 
             self._auth = AuthManager()
+
             # Create a simple api object that tests will mock methods on
             class _API:
                 def publish_product(self, payload):
@@ -645,15 +813,8 @@ class PublishProductService:
         return self._api
 
     def publish_from_file(self, path: Path) -> PublishResult:
-        try:
-            from mercadolivre_upload.adapters.spreadsheet.dynamic_parser import SpreadsheetParser
-            from mercadolivre_upload.application.builders.product_builder import ProductBuilder
-        except Exception:
-            # allow tests to patch module imports
-            from mercadolivre_upload.application.publish_product import SpreadsheetParser, ProductBuilder  # type: ignore
-
-        parser = SpreadsheetParser(path)
-        rows = parser.parse()
+        parser = SpreadsheetParser()
+        rows = parser.parse(path)
         published_ids = []
         errors = []
         success = 0
@@ -667,29 +828,32 @@ class PublishProductService:
                     success += 1
                     continue
                 res = self.api.publish_product(payload)
-                if getattr(res, 'success', False):
-                    published_ids.append(getattr(res, 'product_id', None))
+                if getattr(res, "success", False):
+                    published_ids.append(getattr(res, "product_id", None))
                     success += 1
                 else:
                     failure += 1
-                    errors.append({"product": row.get('id'), "error": getattr(res, 'error_message', 'unknown')})
+                    errors.append(
+                        {
+                            "product": row.get("id"),
+                            "error": getattr(res, "error_message", "unknown"),
+                        }
+                    )
             except Exception as e:
                 failure += 1
-                errors.append({"product": row.get('id', None), "error": str(e)})
-        return PublishResult(success_count=success, failure_count=failure, published_ids=published_ids, errors=errors)
+                errors.append({"product": row.get("id", None), "error": str(e)})
+        return PublishResult(
+            success_count=success, failure_count=failure, published_ids=published_ids, errors=errors
+        )
 
     def validate_file(self, path: Path) -> ValidationResult:
         try:
-            from mercadolivre_upload.adapters.spreadsheet.dynamic_parser import SpreadsheetParser
-            from mercadolivre_upload.application.builders.product_builder import ProductBuilder
-        except Exception:
-            from mercadolivre_upload.application.publish_product import SpreadsheetParser, ProductBuilder  # type: ignore
-
-        try:
-            parser = SpreadsheetParser(path)
-            rows = parser.parse()
+            parser = SpreadsheetParser()
+            rows = parser.parse(path)
             if not rows:
-                return ValidationResult(is_valid=False, errors=["Nenhum produto no arquivo"], warnings=[])
+                return ValidationResult(
+                    is_valid=False, errors=["Nenhum produto no arquivo"], warnings=[]
+                )
             builder = ProductBuilder()
             errors = []
             warnings = []
@@ -699,30 +863,44 @@ class PublishProductService:
                     if errs:
                         errors.append(f"Linha {i}: {errs[0]}")
                 except Exception as e:
-                    return ValidationResult(is_valid=False, errors=[f"Erro ao processar arquivo: {e}"], warnings=[])
+                    return ValidationResult(
+                        is_valid=False, errors=[f"Erro ao processar arquivo: {e}"], warnings=[]
+                    )
             return ValidationResult(is_valid=(len(errors) == 0), errors=errors, warnings=warnings)
         except Exception as e:
-            return ValidationResult(is_valid=False, errors=[f"Erro ao processar arquivo: {e}"], warnings=[])
+            return ValidationResult(
+                is_valid=False, errors=[f"Erro ao processar arquivo: {e}"], warnings=[]
+            )
 
     def publish_single(self, data: dict) -> PublishResult:
-        from mercadolivre_upload.application.builders.product_builder import ProductBuilder
-
         builder = ProductBuilder()
         try:
             payload = builder.build(data)
             if self.dry_run:
-                return PublishResult(success_count=1, failure_count=0, published_ids=["DRY_RUN_ID"], errors=[])
+                return PublishResult(
+                    success_count=1, failure_count=0, published_ids=["DRY_RUN_ID"], errors=[]
+                )
             res = self.api.publish_product(payload)
-            if getattr(res, 'success', False):
-                return PublishResult(success_count=1, failure_count=0, published_ids=[getattr(res, 'product_id', None)], errors=[])
+            if getattr(res, "success", False):
+                return PublishResult(
+                    success_count=1,
+                    failure_count=0,
+                    published_ids=[getattr(res, "product_id", None)],
+                    errors=[],
+                )
             else:
-                return PublishResult(success_count=0, failure_count=1, published_ids=[], errors=[{"error": getattr(res, 'error_message', 'api_error')}])
+                return PublishResult(
+                    success_count=0,
+                    failure_count=1,
+                    published_ids=[],
+                    errors=[{"error": getattr(res, "error_message", "api_error")}],
+                )
         except Exception as e:
-            return PublishResult(success_count=0, failure_count=1, published_ids=[], errors=[{"error": str(e)}])
+            return PublishResult(
+                success_count=0, failure_count=1, published_ids=[], errors=[{"error": str(e)}]
+            )
 
     def check_credentials(self) -> bool:
-        from auth.authenticator import AuthManager
-
         manager = AuthManager()
         return manager.is_authenticated()
 

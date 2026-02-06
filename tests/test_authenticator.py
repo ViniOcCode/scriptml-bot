@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
+
 from auth.authenticator import (
     AuthCredentials,
     AuthError,
@@ -282,9 +283,7 @@ class TestAuthManager:
             "user_id": 123,
         }
 
-        with patch.object(
-            auth_manager, "_make_token_request", return_value=mock_response
-        ):
+        with patch.object(auth_manager, "_make_token_request", return_value=mock_response):
             token = auth_manager.get_valid_token()
             assert token == "new_token"
 

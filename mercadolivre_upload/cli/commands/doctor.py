@@ -30,14 +30,10 @@ def check():
         token = auth.get_access_token(auto_refresh=False)
         auth_ok = token is not None
         table.add_row(
-            "Authentication",
-            "[green]✓ OK[/green]" if auth_ok else "[red]✗ Not authenticated[/red]"
+            "Authentication", "[green]✓ OK[/green]" if auth_ok else "[red]✗ Not authenticated[/red]"
         )
     except Exception:
-        table.add_row(
-            "Authentication",
-            "[red]✗ Error: Not authenticated[/red]"
-        )
+        table.add_row("Authentication", "[red]✗ Error: Not authenticated[/red]")
 
     # Check config
     table.add_row("Config", "[yellow]⚠ Not checked[/yellow]")

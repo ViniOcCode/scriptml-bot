@@ -1,6 +1,7 @@
 """
 Tests for image_uploader.py - 100% coverage.
 """
+
 import base64
 import hashlib
 import logging
@@ -31,7 +32,7 @@ class TestImageUploader:
         """Create a temporary image file for testing."""
         img_path = tmp_path / "test_image.jpg"
         # Create a valid JPEG-like file (header only)
-        img_path.write_bytes(b'\xff\xd8\xff\xe0test_jpg_content')
+        img_path.write_bytes(b"\xff\xd8\xff\xe0test_jpg_content")
         return str(img_path)
 
     @pytest.fixture
@@ -39,7 +40,7 @@ class TestImageUploader:
         """Create a large image file for testing."""
         img_path = tmp_path / "large_image.jpg"
         # Create file larger than 10MB
-        img_path.write_bytes(b'x' * (11 * 1024 * 1024))
+        img_path.write_bytes(b"x" * (11 * 1024 * 1024))
         return str(img_path)
 
     # ==================== Initialization ====================
@@ -89,17 +90,17 @@ class TestImageUploader:
         assert uploader.validate_image(str(invalid_file)) is False
         assert "Invalid image extension" in caplog.text
 
-    @pytest.mark.parametrize("ext", ['.jpg', '.jpeg', '.png', '.gif', '.webp'])
+    @pytest.mark.parametrize("ext", [".jpg", ".jpeg", ".png", ".gif", ".webp"])
     def test_validate_image_valid_extensions(self, uploader, tmp_path, ext):
         """Test validation with all valid extensions."""
         img_path = tmp_path / f"test{ext}"
-        img_path.write_bytes(b'content')
+        img_path.write_bytes(b"content")
         assert uploader.validate_image(str(img_path)) is True
 
     def test_validate_image_case_insensitive_extension(self, uploader, tmp_path):
         """Test that extension validation is case insensitive."""
         img_path = tmp_path / "test.JPG"
-        img_path.write_bytes(b'content')
+        img_path.write_bytes(b"content")
         assert uploader.validate_image(str(img_path)) is True
 
     def test_validate_image_too_large(self, uploader, large_image, caplog):
@@ -116,7 +117,7 @@ class TestImageUploader:
 
         # Verify it's a valid MD5 hash (32 hex chars)
         assert len(hash_result) == 32
-        assert all(c in '0123456789abcdef' for c in hash_result)
+        assert all(c in "0123456789abcdef" for c in hash_result)
 
         # Verify consistency
         hash2 = uploader.calculate_hash(temp_image)
@@ -125,7 +126,7 @@ class TestImageUploader:
     def test_calculate_hash_content(self, uploader, tmp_path):
         """Test hash matches expected value."""
         img_path = tmp_path / "test.jpg"
-        content = b'test content'
+        content = b"test content"
         img_path.write_bytes(content)
 
         expected_hash = hashlib.md5(content).hexdigest()
@@ -139,7 +140,7 @@ class TestImageUploader:
 
         # Verify it's valid base64
         decoded = base64.b64decode(encoded)
-        assert decoded == b'\xff\xd8\xff\xe0test_jpg_content'
+        assert decoded == b"\xff\xd8\xff\xe0test_jpg_content"
 
     # ==================== upload ====================
 
@@ -147,16 +148,16 @@ class TestImageUploader:
         """Test upload without API client (mock mode)."""
         result = uploader.upload(temp_image)
 
-        assert result['success'] is True
-        assert result['url'].startswith("https://ml.com/images/")
-        assert result['filename'] == "test_image.jpg"
-        assert 'id' in result
-        assert 'hash' in result
+        assert result["success"] is True
+        assert result["url"].startswith("https://ml.com/images/")
+        assert result["filename"] == "test_image.jpg"
+        assert "id" in result
+        assert "hash" in result
 
     def test_upload_with_product_id(self, uploader, temp_image):
         """Test upload with product_id."""
         result = uploader.upload(temp_image, product_id="PROD123")
-        assert result['success'] is True
+        assert result["success"] is True
 
     def test_upload_invalid_image(self, uploader):
         """Test upload with invalid image raises ValueError."""
@@ -173,15 +174,15 @@ class TestImageUploader:
     def test_upload_with_api_success(self, uploader_with_api, temp_image):
         """Test upload with successful API call."""
         uploader_with_api.api_client.upload_image.return_value = {
-            'url': 'https://api.mercadolivre.com/img/123',
-            'id': '123'
+            "url": "https://api.mercadolivre.com/img/123",
+            "id": "123",
         }
 
         result = uploader_with_api.upload(temp_image)
 
-        assert result['success'] is True
-        assert result['url'] == 'https://api.mercadolivre.com/img/123'
-        assert result['id'] == '123'
+        assert result["success"] is True
+        assert result["url"] == "https://api.mercadolivre.com/img/123"
+        assert result["id"] == "123"
         uploader_with_api.api_client.upload_image.assert_called_once()
 
     def test_upload_with_api_failure(self, uploader_with_api, temp_image, caplog):
@@ -191,8 +192,8 @@ class TestImageUploader:
 
         result = uploader_with_api.upload(temp_image)
 
-        assert result['success'] is False
-        assert "API Error" in result['error']
+        assert result["success"] is False
+        assert "API Error" in result["error"]
         assert "API upload failed" in caplog.text
 
     def test_upload_adds_to_history(self, uploader, temp_image):
@@ -207,29 +208,29 @@ class TestImageUploader:
         """Test batch upload with valid images."""
         img1 = tmp_path / "img1.jpg"
         img2 = tmp_path / "img2.jpg"
-        img1.write_bytes(b'content1')
-        img2.write_bytes(b'content2')
+        img1.write_bytes(b"content1")
+        img2.write_bytes(b"content2")
 
         results = uploader.upload_batch([str(img1), str(img2)])
 
         assert len(results) == 2
-        assert all(r['success'] for r in results)
+        assert all(r["success"] for r in results)
 
     def test_upload_batch_with_invalid(self, uploader, tmp_path, temp_image):
         """Test batch upload with some invalid images."""
         results = uploader.upload_batch([temp_image, "/nonexistent.jpg"])
 
         assert len(results) == 2
-        assert results[0]['success'] is True
-        assert results[1]['success'] is False
+        assert results[0]["success"] is True
+        assert results[1]["success"] is False
 
     def test_upload_batch_with_product_id(self, uploader, tmp_path):
         """Test batch upload propagates product_id."""
         img = tmp_path / "img.jpg"
-        img.write_bytes(b'content')
+        img.write_bytes(b"content")
 
         results = uploader.upload_batch([str(img)], product_id="PROD123")
-        assert results[0]['success'] is True
+        assert results[0]["success"] is True
 
     # ==================== get_uploaded_images ====================
 
@@ -281,7 +282,7 @@ class TestImageUploader:
         test_file = tmp_path / "readonly.jpg"
         test_file.write_text("content")
 
-        with patch.object(Path, 'unlink', side_effect=OSError("Permission denied")):
+        with patch.object(Path, "unlink", side_effect=OSError("Permission denied")):
             result = uploader.delete_local_copy(str(test_file))
 
         assert result is False

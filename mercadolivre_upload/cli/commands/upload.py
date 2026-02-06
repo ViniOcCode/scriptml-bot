@@ -27,11 +27,13 @@ def load_config():
     config_path = Path("config/generic_mappings.yaml")
     if config_path.exists():
         try:
-            with open(config_path, encoding='utf-8') as f:
+            with open(config_path, encoding="utf-8") as f:
                 return yaml.safe_load(f)
         except Exception as e:
             logger.warning(f"Failed to load config: {e}")
     return {}
+
+
 console = Console()
 err_console = Console(stderr=True)
 
@@ -53,17 +55,27 @@ def upload(
     # Load configuration
     config = load_config()
 
+    # Ensure cache_dir is a Path object
+    cache_dir = Path(cache_dir) if not isinstance(cache_dir, Path) else cache_dir
+
     # Initialize infrastructure
     auth_manager = AuthManager()
     api_client = MLApiClient(auth_manager)
     cache = AttributeCache(cache_dir=str(cache_dir))
+
+    # Initialize prediction cache
+    from mercadolivre_upload.infrastructure.cache.prediction_cache import PredictionCache
+
+    prediction_cache = PredictionCache(cache_dir=str(cache_dir / "predictions"))
 
     # Initialize adapters
     category_adapter = CategoryAdapter(api_client)
     image_uploader = ImageUploader(api_client, images)
 
     # Initialize domain services
-    category_resolver = CategoryResolver(category_adapter, attribute_cache=cache)
+    category_resolver = CategoryResolver(
+        category_adapter, attribute_cache=cache, prediction_cache=prediction_cache
+    )
     shipping_resolver = ShippingResolver(api_client)
     fiscal_service = FiscalService(api_client)
 
@@ -97,10 +109,10 @@ def upload(
 
     # Report results
     console.print(f"\n[green]Published: {results['published']}[/green]")
-    if results['failed'] > 0:
+    if results["failed"] > 0:
         console.print(f"[red]Failed: {results['failed']}[/red]")
 
-    if results['errors'] and detailed:
+    if results["errors"] and detailed:
         console.print("\n[yellow]Errors:[/yellow]")
-        for error in results['errors'][:10]:
+        for error in results["errors"][:10]:
             console.print(f"  • {error}")

@@ -1,4 +1,5 @@
 """Tests for cli.py module."""
+
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -79,9 +80,7 @@ class TestUploadCommand:
             result = runner.invoke(app, ["upload", "test.xlsx", "--dry-run"])
 
         assert result.exit_code == 0
-        mock_service_class.assert_called_once_with(
-            config_path=None, dry_run=True
-        )
+        mock_service_class.assert_called_once_with(config_path=None, dry_run=True)
 
     @patch("mercadolivre_upload.cli.PublishProductService")
     def test_upload_with_config(self, mock_service_class):
@@ -97,14 +96,12 @@ class TestUploadCommand:
         with runner.isolated_filesystem():
             Path("test.xlsx").write_text("dummy")
             Path("config.yaml").write_text("key: value")
-            result = runner.invoke(
-                app, ["upload", "test.xlsx", "--config", "config.yaml"]
-            )
+            result = runner.invoke(app, ["upload", "test.xlsx", "--config", "config.yaml"])
 
         assert result.exit_code == 0
         mock_service_class.assert_called_once()
         call_kwargs = mock_service_class.call_args.kwargs
-        assert str(call_kwargs.get('config_path')) == "config.yaml"
+        assert str(call_kwargs.get("config_path")) == "config.yaml"
 
     def test_upload_file_not_found(self):
         """Test upload with non-existent file."""
@@ -271,9 +268,7 @@ class TestValidateCommand:
 
         with runner.isolated_filesystem():
             Path("test.xlsx").write_text("dummy")
-            result = runner.invoke(
-                app, ["validate", "test.xlsx", "--output", "errors.txt"]
-            )
+            result = runner.invoke(app, ["validate", "test.xlsx", "--output", "errors.txt"])
 
             assert Path("errors.txt").exists()
             assert "Erro 1" in Path("errors.txt").read_text()

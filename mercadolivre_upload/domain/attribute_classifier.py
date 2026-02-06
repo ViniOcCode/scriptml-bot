@@ -11,57 +11,57 @@ logger = logging.getLogger(__name__)
 
 
 # Classification categories
-CLASS_EDITORIAL = "editorial"   # Descriptive attributes (title-like)
-CLASS_TECHNICAL = "technical"   # Product specifications
+CLASS_EDITORIAL = "editorial"  # Descriptive attributes (title-like)
+CLASS_TECHNICAL = "technical"  # Product specifications
 CLASS_COMMERCIAL = "commercial"  # Warranty, pricing, terms
-CLASS_LOGISTICS = "logistics"   # Shipping, packaging
+CLASS_LOGISTICS = "logistics"  # Shipping, packaging
 
 
 def _load_classification_config() -> dict:
     """Load attribute classification patterns from config file.
-    
+
     Returns:
         Dictionary with logistics_patterns and commercial_patterns
     """
     try:
         config_path = Path("config/generic_mappings.yaml")
-        with open(config_path, encoding='utf-8') as f:
+        with open(config_path, encoding="utf-8") as f:
             config = yaml.safe_load(f)
 
-        classification_config = config.get('attribute_classification', {})
+        classification_config = config.get("attribute_classification", {})
 
         return {
-            'logistics_patterns': set(classification_config.get('logistics_patterns', [])),
-            'commercial_patterns': set(classification_config.get('commercial_patterns', [])),
+            "logistics_patterns": set(classification_config.get("logistics_patterns", [])),
+            "commercial_patterns": set(classification_config.get("commercial_patterns", [])),
         }
     except Exception as e:
         logger.warning(f"Could not load classification config: {e}. Using empty patterns.")
         return {
-            'logistics_patterns': set(),
-            'commercial_patterns': set(),
+            "logistics_patterns": set(),
+            "commercial_patterns": set(),
         }
 
 
 class AttributeClassifier:
     """Classifies attributes by their behavior, not by category.
-    
+
     Uses configuration from config/generic_mappings.yaml as the single source of truth.
     """
 
     def __init__(self, config: dict | None = None):
         """Initialize the classifier.
-        
+
         Args:
             config: Optional custom config to override file-based config
         """
         # Load from config (single source of truth), allow override
         if config:
-            self.logistics_patterns = set(config.get('logistics_patterns', []))
-            self.commercial_patterns = set(config.get('commercial_patterns', []))
+            self.logistics_patterns = set(config.get("logistics_patterns", []))
+            self.commercial_patterns = set(config.get("commercial_patterns", []))
         else:
             classification_config = _load_classification_config()
-            self.logistics_patterns = classification_config['logistics_patterns']
-            self.commercial_patterns = classification_config['commercial_patterns']
+            self.logistics_patterns = classification_config["logistics_patterns"]
+            self.commercial_patterns = classification_config["commercial_patterns"]
 
     def classify(self, attr: AttributeMeta) -> str:
         """Classify an attribute by its behavior.

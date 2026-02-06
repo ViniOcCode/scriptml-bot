@@ -12,7 +12,8 @@ logger = logging.getLogger(__name__)
 BASE_URL = "https://api.mercadolibre.com"
 
 # Item ID validation pattern (e.g., MLB1234567890)
-ITEM_ID_PATTERN = re.compile(r'^ML[A-Z]\d+$')
+ITEM_ID_PATTERN = re.compile(r"^ML[A-Z]\d+$")
+
 
 def validate_item_id(item_id: str | None) -> None:
     r"""Validate Mercado Livre item ID format (e.g., MLB1234567890).
@@ -29,7 +30,6 @@ def validate_item_id(item_id: str | None) -> None:
             f"'{item_id}'. Expected format: ML[site_code][digits] "
             "(e.g., MLB1234567890)"
         )
-
 
 
 class MLApiClient:
@@ -78,9 +78,7 @@ class MLApiClient:
 
         return response.json()
 
-    def post(
-        self, endpoint: str, data: dict | None = None, json: dict | None = None
-    ) -> dict:
+    def post(self, endpoint: str, data: dict | None = None, json: dict | None = None) -> dict:
         """Make POST request to API.
 
         Args:
@@ -98,13 +96,11 @@ class MLApiClient:
         headers = self._get_headers()
 
         logger.debug(f"POST {url}")
-        response = self.session.post(
-            url, headers=headers, data=data, json=json, timeout=30
-        )
+        response = self.session.post(url, headers=headers, data=data, json=json, timeout=30)
 
         # Special handling for validation endpoint - return error response
         # so caller can distinguish warnings from actual errors
-        if endpoint.strip('/') == 'items/validate' and response.status_code == 400:
+        if endpoint.strip("/") == "items/validate" and response.status_code == 400:
             try:
                 return response.json()
             except Exception:
@@ -201,7 +197,6 @@ class MLApiClient:
         """
         return self.get("/users/me")
 
-
     def upload_image(self, image_path: str) -> dict:
         """Upload an image.
 
@@ -226,7 +221,28 @@ class MLApiClient:
             response = self.session.post(url, headers=headers, files=files, timeout=60)
             response.raise_for_status()
 
-        return response.json()
+        data = response.json()
+
+        # Normalize response: extract top-level url from variations if needed
+        if isinstance(data, dict):
+            # Check if url/secure_url exists at top level
+            top_url = data.get("secure_url") or data.get("url")
+
+            # If not, extract from first variation
+            if not top_url:
+                variations = data.get("variations", [])
+                if isinstance(variations, list) and variations:
+                    first_var = variations[0]
+                    if isinstance(first_var, dict):
+                        top_url = first_var.get("secure_url") or first_var.get("url")
+
+            # Ensure there's always a url field for convenience
+            if top_url and "url" not in data:
+                data["url"] = top_url
+            if top_url and "secure_url" not in data:
+                data["secure_url"] = top_url
+
+        return data
 
     def submit_fiscal_info(self, item_id: str, fiscal_data: dict) -> dict:
         """Submit fiscal information for an item.
@@ -236,7 +252,6 @@ class MLApiClient:
             fiscal_data: Fiscal data payload following ML API format
 
         Returns:
-
             API response
 
         Raises:
@@ -340,6 +355,7 @@ class MLApiClient:
             data = {}
             if sites is not None:
                 import json
+
                 if sites:
                     data["sites"] = json.dumps(sites)
                     logger.debug(f"Clip upload targeting specific sites: {sites}")
@@ -355,9 +371,7 @@ class MLApiClient:
 
             url = f"{self.base_url}/marketplace/items/{item_id}/clips/upload"
             logger.debug(f"Uploading clip to {url}")
-            response = self.session.post(
-                url, headers=headers, files=files, data=data, timeout=120
-            )
+            response = self.session.post(url, headers=headers, files=files, data=data, timeout=120)
             response.raise_for_status()
 
         return response.json()

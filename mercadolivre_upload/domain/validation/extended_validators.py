@@ -1,4 +1,5 @@
 """Extended validators for Mercado Livre products."""
+
 import re
 from abc import ABC, abstractmethod
 from typing import Any
@@ -13,10 +14,10 @@ class ExtendedValidator(ABC):
     @abstractmethod
     def validate(self, data: dict[str, Any]) -> list[ValidationResult]:
         """Validate data.
-        
+
         Args:
             data: Data to be validated.
-            
+
         Returns:
             List of validation results.
         """
@@ -42,47 +43,59 @@ class PriceValidator(ExtendedValidator):
         try:
             price_float = float(price)
         except (ValueError, TypeError):
-            results.append(ValidationResult(
-                field="price",
-                message="Preço deve ser um número válido",
-                severity=ValidationSeverity.ERROR
-            ))
+            results.append(
+                ValidationResult(
+                    field="price",
+                    message="Preço deve ser um número válido",
+                    severity=ValidationSeverity.ERROR,
+                )
+            )
             return results
 
         if price_float < 0:
-            results.append(ValidationResult(
-                field="price",
-                message=f"Preço não pode ser negativo: R$ {price_float:.2f}",
-                severity=ValidationSeverity.ERROR
-            ))
+            results.append(
+                ValidationResult(
+                    field="price",
+                    message=f"Preço não pode ser negativo: R$ {price_float:.2f}",
+                    severity=ValidationSeverity.ERROR,
+                )
+            )
 
         if price_float == 0:
-            results.append(ValidationResult(
-                field="price",
-                message="Preço não pode ser zero",
-                severity=ValidationSeverity.ERROR
-            ))
+            results.append(
+                ValidationResult(
+                    field="price",
+                    message="Preço não pode ser zero",
+                    severity=ValidationSeverity.ERROR,
+                )
+            )
 
         if 0 < price_float < self.MIN_ACCEPTABLE_PRICE:
-            results.append(ValidationResult(
-                field="price",
-                message=f"Preço suspeitamente baixo: R$ {price_float:.2f}",
-                severity=ValidationSeverity.WARNING
-            ))
+            results.append(
+                ValidationResult(
+                    field="price",
+                    message=f"Preço suspeitamente baixo: R$ {price_float:.2f}",
+                    severity=ValidationSeverity.WARNING,
+                )
+            )
 
         if price_float > self.ABSOLUTE_MAX_PRICE:
-            results.append(ValidationResult(
-                field="price",
-                message=f"Preço muito alto: R$ {price_float:,.2f}",
-                severity=ValidationSeverity.ERROR
-            ))
+            results.append(
+                ValidationResult(
+                    field="price",
+                    message=f"Preço muito alto: R$ {price_float:,.2f}",
+                    severity=ValidationSeverity.ERROR,
+                )
+            )
 
         if price_float in self.SUSPICIOUS_PRICES:
-            results.append(ValidationResult(
-                field="price",
-                message=f"Preço 'chamativo' suspeito: R$ {price_float:.2f}",
-                severity=ValidationSeverity.WARNING
-            ))
+            results.append(
+                ValidationResult(
+                    field="price",
+                    message=f"Preço 'chamativo' suspeito: R$ {price_float:.2f}",
+                    severity=ValidationSeverity.WARNING,
+                )
+            )
 
         return results
 
@@ -96,12 +109,27 @@ class TitleValidator(ExtendedValidator):
     IDEAL_MAX_LENGTH = 55
 
     FORBIDDEN_WORDS = [
-        "urgente", "promocao", "promo", "liquidacao",
-        "queima de estoque", "imperdivel", "ultimas unidades",
-        "nao perca", "compre ja", "oferta especial",
-        "replica", "copia", "pirata", "generico",
-        "mercado livre", "frete gratis", "parcelado",
-        "whatsapp", "telefone", "ligue", "contato",
+        "urgente",
+        "promocao",
+        "promo",
+        "liquidacao",
+        "queima de estoque",
+        "imperdivel",
+        "ultimas unidades",
+        "nao perca",
+        "compre ja",
+        "oferta especial",
+        "replica",
+        "copia",
+        "pirata",
+        "generico",
+        "mercado livre",
+        "frete gratis",
+        "parcelado",
+        "whatsapp",
+        "telefone",
+        "ligue",
+        "contato",
     ]
 
     def validate(self, data: dict[str, Any]) -> list[ValidationResult]:
@@ -110,43 +138,53 @@ class TitleValidator(ExtendedValidator):
         title = data.get("title", "")
 
         if not isinstance(title, str):
-            results.append(ValidationResult(
-                field="title",
-                message="Título deve ser uma string",
-                severity=ValidationSeverity.ERROR
-            ))
+            results.append(
+                ValidationResult(
+                    field="title",
+                    message="Título deve ser uma string",
+                    severity=ValidationSeverity.ERROR,
+                )
+            )
             return results
 
         title_lower = title.lower().strip()
 
         if len(title) < self.MIN_TITLE_LENGTH:
-            results.append(ValidationResult(
-                field="title",
-                message=f"Título muito curto: {len(title)} caracteres (mínimo: {self.MIN_TITLE_LENGTH})",
-                severity=ValidationSeverity.ERROR
-            ))
+            results.append(
+                ValidationResult(
+                    field="title",
+                    message=f"Título muito curto: {len(title)} caracteres (mínimo: {self.MIN_TITLE_LENGTH})",
+                    severity=ValidationSeverity.ERROR,
+                )
+            )
 
         if len(title) > self.MAX_TITLE_LENGTH:
-            results.append(ValidationResult(
-                field="title",
-                message=f"Título excede o limite: {len(title)} caracteres (máximo: {self.MAX_TITLE_LENGTH})",
-                severity=ValidationSeverity.ERROR
-            ))
+            results.append(
+                ValidationResult(
+                    field="title",
+                    message=f"Título excede o limite: {len(title)} caracteres (máximo: {self.MAX_TITLE_LENGTH})",
+                    severity=ValidationSeverity.ERROR,
+                )
+            )
 
         for word in self.FORBIDDEN_WORDS:
             if word in title_lower:
-                results.append(ValidationResult(
-                    field="title",
-                    message=f"Título contém palavra proibida: '{word}'",
-                    severity=ValidationSeverity.ERROR
-                ))
+                results.append(
+                    ValidationResult(
+                        field="title",
+                        message=f"Título contém palavra proibida: '{word}'",
+                        severity=ValidationSeverity.ERROR,
+                    )
+                )
 
         if title != title.strip():
-            results.append(ValidationResult(
-                field="title",
-                message="Título contém espaços no início ou fim",
-                severity=ValidationSeverity.WARNING
-            ))
+            results.append(
+                ValidationResult(
+                    field="title",
+                    message="Título contém espaços no início ou fim",
+                    severity=ValidationSeverity.WARNING,
+                )
+            )
 
         return results
 
@@ -163,19 +201,23 @@ class ImageValidator(ExtendedValidator):
         pictures = data.get("pictures", [])
 
         if not pictures:
-            results.append(ValidationResult(
-                field="pictures",
-                message="Produto deve ter pelo menos uma imagem",
-                severity=ValidationSeverity.WARNING
-            ))
+            results.append(
+                ValidationResult(
+                    field="pictures",
+                    message="Produto deve ter pelo menos uma imagem",
+                    severity=ValidationSeverity.WARNING,
+                )
+            )
             return results
 
         if len(pictures) > 12:
-            results.append(ValidationResult(
-                field="pictures",
-                message=f"Produto não pode ter mais que 12 imagens (encontrado: {len(pictures)})",
-                severity=ValidationSeverity.ERROR
-            ))
+            results.append(
+                ValidationResult(
+                    field="pictures",
+                    message=f"Produto não pode ter mais que 12 imagens (encontrado: {len(pictures)})",
+                    severity=ValidationSeverity.ERROR,
+                )
+            )
 
         for idx, picture in enumerate(pictures):
             url = None
@@ -185,11 +227,13 @@ class ImageValidator(ExtendedValidator):
                 url = picture.get("source") or picture.get("url")
 
             if not url:
-                results.append(ValidationResult(
-                    field=f"pictures[{idx}]",
-                    message="Imagem sem URL válida",
-                    severity=ValidationSeverity.ERROR
-                ))
+                results.append(
+                    ValidationResult(
+                        field=f"pictures[{idx}]",
+                        message="Imagem sem URL válida",
+                        severity=ValidationSeverity.ERROR,
+                    )
+                )
                 continue
 
             results.extend(self._validate_image_url(url, f"pictures[{idx}]"))
@@ -203,35 +247,43 @@ class ImageValidator(ExtendedValidator):
         try:
             parsed = urlparse(url)
         except Exception:
-            results.append(ValidationResult(
-                field=field_name,
-                message=f"URL de imagem inválida: {url[:50]}...",
-                severity=ValidationSeverity.ERROR
-            ))
+            results.append(
+                ValidationResult(
+                    field=field_name,
+                    message=f"URL de imagem inválida: {url[:50]}...",
+                    severity=ValidationSeverity.ERROR,
+                )
+            )
             return results
 
         if not parsed.scheme:
-            results.append(ValidationResult(
-                field=field_name,
-                message="URL de imagem sem protocolo",
-                severity=ValidationSeverity.ERROR
-            ))
+            results.append(
+                ValidationResult(
+                    field=field_name,
+                    message="URL de imagem sem protocolo",
+                    severity=ValidationSeverity.ERROR,
+                )
+            )
         elif parsed.scheme not in self.ALLOWED_SCHEMES:
-            results.append(ValidationResult(
-                field=field_name,
-                message=f"Protocolo não permitido: '{parsed.scheme}'",
-                severity=ValidationSeverity.ERROR
-            ))
+            results.append(
+                ValidationResult(
+                    field=field_name,
+                    message=f"Protocolo não permitido: '{parsed.scheme}'",
+                    severity=ValidationSeverity.ERROR,
+                )
+            )
 
         path = parsed.path.lower()
         has_allowed_ext = any(path.endswith(ext) for ext in self.ALLOWED_EXTENSIONS)
 
         if not has_allowed_ext:
-            results.append(ValidationResult(
-                field=field_name,
-                message=f"Extensão não permitida. Use: {', '.join(self.ALLOWED_EXTENSIONS)}",
-                severity=ValidationSeverity.ERROR
-            ))
+            results.append(
+                ValidationResult(
+                    field=field_name,
+                    message=f"Extensão não permitida. Use: {', '.join(self.ALLOWED_EXTENSIONS)}",
+                    severity=ValidationSeverity.ERROR,
+                )
+            )
 
         return results
 
@@ -239,7 +291,7 @@ class ImageValidator(ExtendedValidator):
 class CategoryValidator(ExtendedValidator):
     """Category validator."""
 
-    CATEGORY_ID_PATTERN = re.compile(r'^ML[BCDU]\d+$')
+    CATEGORY_ID_PATTERN = re.compile(r"^ML[BCDU]\d+$")
 
     def validate(self, data: dict[str, Any]) -> list[ValidationResult]:
         """Validate product category."""
@@ -247,29 +299,35 @@ class CategoryValidator(ExtendedValidator):
         category_id = data.get("category_id")
 
         if not category_id:
-            results.append(ValidationResult(
-                field="category_id",
-                message="Categoria é obrigatória",
-                severity=ValidationSeverity.ERROR
-            ))
+            results.append(
+                ValidationResult(
+                    field="category_id",
+                    message="Categoria é obrigatória",
+                    severity=ValidationSeverity.ERROR,
+                )
+            )
             return results
 
         if not isinstance(category_id, str):
-            results.append(ValidationResult(
-                field="category_id",
-                message="ID de categoria deve ser uma string",
-                severity=ValidationSeverity.ERROR
-            ))
+            results.append(
+                ValidationResult(
+                    field="category_id",
+                    message="ID de categoria deve ser uma string",
+                    severity=ValidationSeverity.ERROR,
+                )
+            )
             return results
 
         category_id = category_id.strip()
 
         if not self.CATEGORY_ID_PATTERN.match(category_id):
-            results.append(ValidationResult(
-                field="category_id",
-                message=f"Formato inválido: '{category_id}' (esperado: MLB12345)",
-                severity=ValidationSeverity.ERROR
-            ))
+            results.append(
+                ValidationResult(
+                    field="category_id",
+                    message=f"Formato inválido: '{category_id}' (esperado: MLB12345)",
+                    severity=ValidationSeverity.ERROR,
+                )
+            )
 
         return results
 
@@ -285,43 +343,53 @@ class StockValidator(ExtendedValidator):
         quantity = data.get("available_quantity")
 
         if quantity is None:
-            results.append(ValidationResult(
-                field="available_quantity",
-                message="Quantidade disponível é obrigatória",
-                severity=ValidationSeverity.ERROR
-            ))
+            results.append(
+                ValidationResult(
+                    field="available_quantity",
+                    message="Quantidade disponível é obrigatória",
+                    severity=ValidationSeverity.ERROR,
+                )
+            )
             return results
 
         try:
             qty_int = int(quantity)
         except (ValueError, TypeError):
-            results.append(ValidationResult(
-                field="available_quantity",
-                message="Quantidade deve ser um número inteiro válido",
-                severity=ValidationSeverity.ERROR
-            ))
+            results.append(
+                ValidationResult(
+                    field="available_quantity",
+                    message="Quantidade deve ser um número inteiro válido",
+                    severity=ValidationSeverity.ERROR,
+                )
+            )
             return results
 
         if qty_int < 0:
-            results.append(ValidationResult(
-                field="available_quantity",
-                message=f"Quantidade não pode ser negativa: {qty_int}",
-                severity=ValidationSeverity.ERROR
-            ))
+            results.append(
+                ValidationResult(
+                    field="available_quantity",
+                    message=f"Quantidade não pode ser negativa: {qty_int}",
+                    severity=ValidationSeverity.ERROR,
+                )
+            )
 
         if qty_int == 0:
-            results.append(ValidationResult(
-                field="available_quantity",
-                message="Produto sem estoque disponível",
-                severity=ValidationSeverity.WARNING
-            ))
+            results.append(
+                ValidationResult(
+                    field="available_quantity",
+                    message="Produto sem estoque disponível",
+                    severity=ValidationSeverity.WARNING,
+                )
+            )
 
         if qty_int > self.MAX_QUANTITY:
-            results.append(ValidationResult(
-                field="available_quantity",
-                message=f"Quantidade excede o limite: {qty_int} (máximo: {self.MAX_QUANTITY})",
-                severity=ValidationSeverity.ERROR
-            ))
+            results.append(
+                ValidationResult(
+                    field="available_quantity",
+                    message=f"Quantidade excede o limite: {qty_int} (máximo: {self.MAX_QUANTITY})",
+                    severity=ValidationSeverity.ERROR,
+                )
+            )
 
         return results
 

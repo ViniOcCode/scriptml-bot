@@ -12,16 +12,16 @@ import unicodedata
 
 def normalize_column_name(name: str) -> str:
     """Normaliza nome de coluna para matching.
-    
+
     Converte para lowercase, remove acentos e caracteres especiais.
     Substitui espaços por underscores.
-    
+
     Args:
         name: Nome da coluna original
-        
+
     Returns:
         Nome normalizado
-        
+
     Example:
         >>> normalize_column_name("Título do Anúncio")
         'titulo_do_anuncio'
@@ -33,27 +33,24 @@ def normalize_column_name(name: str) -> str:
     text = name.lower().strip()
 
     # Remove acentos
-    text = ''.join(
-        c for c in unicodedata.normalize('NFKD', text)
-        if not unicodedata.combining(c)
-    )
+    text = "".join(c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c))
 
     # Substitui não-alfanuméricos por underscore
-    text = re.sub(r'[^a-z0-9]+', '_', text)
+    text = re.sub(r"[^a-z0-9]+", "_", text)
 
     # Remove underscores duplicados
-    text = re.sub(r'_+', '_', text)
+    text = re.sub(r"_+", "_", text)
 
-    return text.strip('_')
+    return text.strip("_")
 
 
 def normalize_text(text: str, keep_accents: bool = False) -> str:
     """Normaliza texto para comparação.
-    
+
     Args:
         text: Texto a normalizar
         keep_accents: Se True, mantém acentos
-        
+
     Returns:
         Texto normalizado (lowercase, strip)
     """
@@ -63,9 +60,8 @@ def normalize_text(text: str, keep_accents: bool = False) -> str:
     text = text.lower().strip()
 
     if not keep_accents:
-        text = ''.join(
-            c for c in unicodedata.normalize('NFKD', text)
-            if not unicodedata.combining(c)
+        text = "".join(
+            c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c)
         )
 
     return text
@@ -73,13 +69,13 @@ def normalize_text(text: str, keep_accents: bool = False) -> str:
 
 def normalize_for_fuzzy_matching(text: str) -> str:
     """Normaliza texto para fuzzy matching.
-    
+
     Remove acentos, pontuação e caracteres especiais.
     Ideal para comparar títulos de produtos.
-    
+
     Args:
         text: Texto a normalizar
-        
+
     Returns:
         Texto normalizado para comparação
     """
@@ -90,15 +86,12 @@ def normalize_for_fuzzy_matching(text: str) -> str:
     text = text.lower()
 
     # Remove acentos
-    text = ''.join(
-        c for c in unicodedata.normalize('NFKD', text)
-        if not unicodedata.combining(c)
-    )
+    text = "".join(c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c))
 
     # Remove pontuação
-    text = re.sub(r'[^\w\s]', '', text)
+    text = re.sub(r"[^\w\s]", "", text)
 
     # Remove múltiplos espaços
-    text = re.sub(r'\s+', ' ', text)
+    text = re.sub(r"\s+", " ", text)
 
     return text.strip()

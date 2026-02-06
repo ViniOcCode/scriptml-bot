@@ -12,14 +12,14 @@ Example:
     >>> from mercadolivre_upload.infrastructure.migration import (
     ...     SchemaVersion, Migration, MigrationManager, FieldType
     ... )
-    >>> 
+    >>>
     >>> # Define schema v1.0
     >>> v1 = SchemaVersion("1.0", fields={
     ...     "sku": FieldType.STRING,
     ...     "title": FieldType.STRING,
     ...     "price": FieldType.DECIMAL,
     ... })
-    >>> 
+    >>>
     >>> # Define schema v2.0 (adiciona gtin)
     >>> v2 = SchemaVersion("2.0", fields={
     ...     "sku": FieldType.STRING,
@@ -27,13 +27,13 @@ Example:
     ...     "price": FieldType.DECIMAL,
     ...     "gtin": FieldType.STRING,
     ... })
-    >>> 
+    >>>
     >>> # Cria migração
     >>> class V1ToV2(Migration):
     ...     def migrate(self, data):
     ...         data["gtin"] = ""
     ...         return data
-    >>> 
+    >>>
     >>> # Aplica migração
     >>> manager = MigrationManager([v1, v2], [V1ToV2()])
     >>> migrated = manager.migrate_data({"sku": "ABC", "title": "Produto"}, "1.0", "2.0")
@@ -52,12 +52,14 @@ from typing import Any, Generic, TypeVar
 
 try:
     import pandas as pd
+
     HAS_PANDAS = True
 except ImportError:
     HAS_PANDAS = False
 
 try:
     import openpyxl
+
     HAS_OPENPYXL = True
 except ImportError:
     HAS_OPENPYXL = False
@@ -68,6 +70,7 @@ logger = logging.getLogger(__name__)
 
 class FieldType(Enum):
     """Tipos de campos suportados no schema."""
+
     STRING = auto()
     INTEGER = auto()
     DECIMAL = auto()
@@ -84,24 +87,16 @@ class FieldType(Enum):
 
         validators = {
             FieldType.STRING: lambda x: isinstance(x, (str, int, float)),
-            FieldType.INTEGER: lambda x: isinstance(x, int) or (
-                isinstance(x, str) and x.isdigit()
-            ),
-            FieldType.DECIMAL: lambda x: isinstance(x, (int, float)) or (
-                isinstance(x, str) and bool(re.match(r"^-?\d+(\.\d+)?$", str(x)))
-            ),
-            FieldType.BOOLEAN: lambda x: isinstance(x, bool) or str(x).lower() in (
-                "true", "false", "1", "0", "yes", "no", "sim", "não"
-            ),
-            FieldType.DATE: lambda x: isinstance(x, datetime) or (
-                isinstance(x, str) and len(x.split("-")) == 3
-            ),
-            FieldType.DATETIME: lambda x: isinstance(x, datetime) or (
-                isinstance(x, str) and "T" in x or " " in x
-            ),
-            FieldType.LIST: lambda x: isinstance(x, list) or (
-                isinstance(x, str) and "," in x
-            ),
+            FieldType.INTEGER: lambda x: isinstance(x, int) or (isinstance(x, str) and x.isdigit()),
+            FieldType.DECIMAL: lambda x: isinstance(x, (int, float))
+            or (isinstance(x, str) and bool(re.match(r"^-?\d+(\.\d+)?$", str(x)))),
+            FieldType.BOOLEAN: lambda x: isinstance(x, bool)
+            or str(x).lower() in ("true", "false", "1", "0", "yes", "no", "sim", "não"),
+            FieldType.DATE: lambda x: isinstance(x, datetime)
+            or (isinstance(x, str) and len(x.split("-")) == 3),
+            FieldType.DATETIME: lambda x: isinstance(x, datetime)
+            or (isinstance(x, str) and "T" in x or " " in x),
+            FieldType.LIST: lambda x: isinstance(x, list) or (isinstance(x, str) and "," in x),
             FieldType.JSON: lambda x: True,  # JSON aceita qualquer estrutura
         }
 
@@ -151,6 +146,7 @@ class FieldType(Enum):
                 return [v.strip() for v in str(value).split(",")]
             elif self == FieldType.JSON:
                 import json
+
                 if isinstance(value, dict):
                     return value
                 try:
@@ -181,6 +177,7 @@ class FieldType(Enum):
 @dataclass
 class Field:
     """Definição de um campo no schema."""
+
     name: str
     field_type: FieldType
     required: bool = False
@@ -253,7 +250,7 @@ class Version:
 @dataclass
 class SchemaVersion:
     """Define uma versão de schema com seus campos e metadados.
-    
+
     Attributes:
         version: String de versão (ex: "1.0", "2.0")
         fields: Dicionário de campos (nome -> Field)
@@ -261,6 +258,7 @@ class SchemaVersion:
         created_at: Data de criação da versão
         deprecated_fields: Lista de campos obsoletos (removidos nesta versão)
     """
+
     version: str
     fields: dict[str, Field]
     description: str = ""
@@ -299,7 +297,7 @@ class SchemaVersion:
 
     def validate_data(self, data: dict[str, Any]) -> list[str]:
         """Valida dados contra este schema.
-        
+
         Returns:
             Lista de erros de validação (vazia se válido)
         """
@@ -331,20 +329,21 @@ T = TypeVar("T")
 
 class Migration(ABC, Generic[T]):
     """Classe abstrata para migrações entre versões.
-    
+
     Subclasses devem implementar o método `migrate` para transformar
     dados da versão source para a versão target.
-    
+
     Example:
         >>> class V1ToV2(Migration[dict]):
         ...     source_version = "1.0"
         ...     target_version = "2.0"
-        ...     
+        ...
         ...     def migrate(self, data: dict) -> dict:
         ...         # Adiciona campo gtin
         ...         data["gtin"] = data.get("gtin", "")
         ...         return data
     """
+
     source_version: str
     target_version: str
     description: str = ""
@@ -352,10 +351,10 @@ class Migration(ABC, Generic[T]):
     @abstractmethod
     def migrate(self, data: T) -> T:
         """Migra dados da versão source para target.
-        
+
         Args:
             data: Dados na versão source
-            
+
         Returns:
             Dados migrados para versão target
         """
@@ -363,10 +362,9 @@ class Migration(ABC, Generic[T]):
 
     def can_migrate(self, from_version: str, to_version: str) -> bool:
         """Verifica se esta migração pode ser aplicada."""
-        return (
-            Version(from_version) == Version(self.source_version) and
-            Version(to_version) == Version(self.target_version)
-        )
+        return Version(from_version) == Version(self.source_version) and Version(
+            to_version
+        ) == Version(self.target_version)
 
     def applies_to_path(self, from_version: Version, to_version: Version) -> bool:
         """Verifica se esta migração faz parte do caminho entre duas versões."""
@@ -378,6 +376,7 @@ class Migration(ABC, Generic[T]):
 @dataclass
 class MigrationResult:
     """Resultado de uma operação de migração."""
+
     success: bool
     data: Any
     source_version: str
@@ -395,19 +394,19 @@ class MigrationResult:
 
 class MigrationManager:
     """Gerencia schemas e aplica migrações entre versões.
-    
+
     Responsável por:
     - Registrar versões de schema
     - Registrar migrações
     - Detectar versão de dados automaticamente
     - Aplicar migrações em sequência
-    
+
     Example:
         >>> manager = MigrationManager()
         >>> manager.register_schema(v1_schema)
         >>> manager.register_schema(v2_schema)
         >>> manager.register_migration(V1ToV2())
-        >>> 
+        >>>
         >>> # Detecta e migra automaticamente
         >>> result = manager.auto_migrate(data)
         >>> if result.success:
@@ -441,8 +440,7 @@ class MigrationManager:
         """Registra uma migração."""
         self.migrations.append(migration)
         logger.debug(
-            f"Migração registrada: {migration.source_version} -> "
-            f"{migration.target_version}"
+            f"Migração registrada: {migration.source_version} -> " f"{migration.target_version}"
         )
 
     def get_schema(self, version: str) -> SchemaVersion | None:
@@ -460,12 +458,12 @@ class MigrationManager:
 
     def detect_version(self, data: dict[str, Any]) -> str | None:
         """Detecta a versão dos dados com base nos campos presentes.
-        
+
         Algoritmo:
         1. Verifica se há metadado explícito de versão
         2. Compara campos com schemas registrados
         3. Retorna a versão mais específica que corresponde
-        
+
         Returns:
             Versão detectada ou None se não corresponder a nenhum schema
         """
@@ -527,9 +525,9 @@ class MigrationManager:
         to_version: str,
     ) -> list[Migration]:
         """Encontra sequência de migrações para ir de A para B.
-        
+
         Uses BFS (Breadth-First Search) para encontrar o caminho mais curto.
-        
+
         Returns:
             Lista ordenada de migrações a aplicar
         """
@@ -567,8 +565,7 @@ class MigrationManager:
                     queue.append((migration_tgt, path + [migration]))
 
         raise ValueError(
-            f"Não foi encontrado caminho de migração de {from_version} "
-            f"para {to_version}"
+            f"Não foi encontrado caminho de migração de {from_version} " f"para {to_version}"
         )
 
     def migrate_data(
@@ -578,12 +575,12 @@ class MigrationManager:
         to_version: str,
     ) -> MigrationResult:
         """Migra dados de uma versão para outra.
-        
+
         Args:
             data: Dados a serem migrados
             from_version: Versão atual dos dados
             to_version: Versão desejada
-            
+
         Returns:
             Resultado da migração com dados migrados e metadados
         """
@@ -641,11 +638,11 @@ class MigrationManager:
         target_version: str | None = None,
     ) -> MigrationResult:
         """Detecta versão e migra automaticamente para a versão alvo.
-        
+
         Args:
             data: Dados a serem migrados
             target_version: Versão alvo (usa latest se não especificado)
-            
+
         Returns:
             Resultado da migração
         """
@@ -683,13 +680,13 @@ class MigrationManager:
         sheet_name: str | None = None,
     ) -> MigrationResult:
         """Migra uma planilha Excel para uma nova versão do schema.
-        
+
         Args:
             file_path: Caminho da planilha
             target_version: Versão alvo (latest se não especificado)
             output_path: Caminho de saída (sobrescreve original se não especificado)
             sheet_name: Nome da aba (primeira aba se não especificado)
-            
+
         Returns:
             Resultado da migração
         """
@@ -796,10 +793,12 @@ class MigrationManager:
                 migrated_df.to_excel(writer, sheet_name=sheet_name or "Sheet1", index=False)
 
                 # Adiciona metadados em aba separada
-                metadata_df = pd.DataFrame({
-                    "propriedade": ["schema_version", "migrated_from", "migrated_at"],
-                    "valor": [tgt, detected, datetime.now().isoformat()],
-                })
+                metadata_df = pd.DataFrame(
+                    {
+                        "propriedade": ["schema_version", "migrated_from", "migrated_at"],
+                        "valor": [tgt, detected, datetime.now().isoformat()],
+                    }
+                )
                 metadata_df.to_excel(writer, sheet_name="_schema_metadata", index=False)
 
             return MigrationResult(
@@ -831,33 +830,101 @@ class MigrationManager:
 
 V1_0_FIELDS = {
     "sku": Field("sku", FieldType.STRING, required=True, description="SKU do produto"),
-    "title": Field("title", FieldType.STRING, required=True, description="Título do produto", aliases=["titulo", "nome"]),
-    "description": Field("description", FieldType.STRING, description="Descrição", aliases=["descricao", "desc"]),
-    "price": Field("price", FieldType.DECIMAL, required=True, description="Preço", aliases=["preco"]),
-    "currency": Field("currency", FieldType.STRING, default="BRL", description="Moeda", aliases=["moeda"]),
-    "available_quantity": Field("available_quantity", FieldType.INTEGER, default=1, description="Quantidade disponível", aliases=["quantidade", "qty", "estoque"]),
-    "category_id": Field("category_id", FieldType.STRING, description="ID da categoria ML", aliases=["categoria", "category"]),
-    "condition": Field("condition", FieldType.STRING, default="new", description="Condição (new/used)", aliases=["condicao"]),
-    "listing_type": Field("listing_type", FieldType.STRING, default="gold_special", description="Tipo de listagem", aliases=["tipo_listagem"]),
-    "pictures": Field("pictures", FieldType.LIST, description="URLs das imagens", aliases=["imagens", "images", "fotos"]),
-    "shipping_mode": Field("shipping_mode", FieldType.STRING, default="me2", description="Modo de envio", aliases=["envio", "shipping"]),
+    "title": Field(
+        "title",
+        FieldType.STRING,
+        required=True,
+        description="Título do produto",
+        aliases=["titulo", "nome"],
+    ),
+    "description": Field(
+        "description", FieldType.STRING, description="Descrição", aliases=["descricao", "desc"]
+    ),
+    "price": Field(
+        "price", FieldType.DECIMAL, required=True, description="Preço", aliases=["preco"]
+    ),
+    "currency": Field(
+        "currency", FieldType.STRING, default="BRL", description="Moeda", aliases=["moeda"]
+    ),
+    "available_quantity": Field(
+        "available_quantity",
+        FieldType.INTEGER,
+        default=1,
+        description="Quantidade disponível",
+        aliases=["quantidade", "qty", "estoque"],
+    ),
+    "category_id": Field(
+        "category_id",
+        FieldType.STRING,
+        description="ID da categoria ML",
+        aliases=["categoria", "category"],
+    ),
+    "condition": Field(
+        "condition",
+        FieldType.STRING,
+        default="new",
+        description="Condição (new/used)",
+        aliases=["condicao"],
+    ),
+    "listing_type": Field(
+        "listing_type",
+        FieldType.STRING,
+        default="gold_special",
+        description="Tipo de listagem",
+        aliases=["tipo_listagem"],
+    ),
+    "pictures": Field(
+        "pictures",
+        FieldType.LIST,
+        description="URLs das imagens",
+        aliases=["imagens", "images", "fotos"],
+    ),
+    "shipping_mode": Field(
+        "shipping_mode",
+        FieldType.STRING,
+        default="me2",
+        description="Modo de envio",
+        aliases=["envio", "shipping"],
+    ),
     "warranty": Field("warranty", FieldType.STRING, description="Garantia", aliases=["garantia"]),
 }
 
 V2_0_FIELDS = {
     **V1_0_FIELDS,
-    "gtin": Field("gtin", FieldType.STRING, description="Código GTIN/EAN", aliases=["ean", "barcode", "codigo_barras"]),
+    "gtin": Field(
+        "gtin",
+        FieldType.STRING,
+        description="Código GTIN/EAN",
+        aliases=["ean", "barcode", "codigo_barras"],
+    ),
     "brand": Field("brand", FieldType.STRING, description="Marca", aliases=["marca"]),
     "model": Field("model", FieldType.STRING, description="Modelo", aliases=["modelo"]),
-    "attributes": Field("attributes", FieldType.JSON, description="Atributos adicionais", aliases=["atributos"]),
+    "attributes": Field(
+        "attributes", FieldType.JSON, description="Atributos adicionais", aliases=["atributos"]
+    ),
 }
 
 V3_0_FIELDS = {
     **V2_0_FIELDS,
-    "video_id": Field("video_id", FieldType.STRING, description="ID do vídeo no YouTube", aliases=["video", "youtube_id"]),
-    "sale_terms": Field("sale_terms", FieldType.JSON, description="Termos de venda", aliases=["termos_venda"]),
-    "variations": Field("variations", FieldType.JSON, description="Variações do produto", aliases=["variacoes"]),
-    "channels": Field("channels", FieldType.LIST, description="Canais de venda", default=["marketplace"], aliases=["canais"]),
+    "video_id": Field(
+        "video_id",
+        FieldType.STRING,
+        description="ID do vídeo no YouTube",
+        aliases=["video", "youtube_id"],
+    ),
+    "sale_terms": Field(
+        "sale_terms", FieldType.JSON, description="Termos de venda", aliases=["termos_venda"]
+    ),
+    "variations": Field(
+        "variations", FieldType.JSON, description="Variações do produto", aliases=["variacoes"]
+    ),
+    "channels": Field(
+        "channels",
+        FieldType.LIST,
+        description="Canais de venda",
+        default=["marketplace"],
+        aliases=["canais"],
+    ),
 }
 
 # Schemas padrão
@@ -882,6 +949,7 @@ DEFAULT_SCHEMA_V3 = SchemaVersion(
 
 class V1ToV2Migration(Migration[dict]):
     """Migra schema v1.0 para v2.0."""
+
     source_version = "1.0"
     target_version = "2.0"
     description = "Adiciona campos GTIN, brand, model e attributes"
@@ -897,6 +965,7 @@ class V1ToV2Migration(Migration[dict]):
         if isinstance(data["attributes"], str) and data["attributes"]:
             try:
                 import json
+
                 data["attributes"] = json.loads(data["attributes"])
             except json.JSONDecodeError:
                 # Se não for JSON válido, trata como string simples
@@ -907,6 +976,7 @@ class V1ToV2Migration(Migration[dict]):
 
 class V2ToV3Migration(Migration[dict]):
     """Migra schema v2.0 para v3.0."""
+
     source_version = "2.0"
     target_version = "3.0"
     description = "Adiciona vídeo, sale_terms, variations e channels"

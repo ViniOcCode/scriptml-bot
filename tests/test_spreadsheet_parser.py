@@ -1,4 +1,5 @@
 """Tests for spreadsheet parser module."""
+
 import sys
 import tempfile
 from pathlib import Path
@@ -342,11 +343,13 @@ class TestNormalizeColumns:
         """Test column normalization with mapping."""
         parser = SpreadsheetParser()
 
-        df = pd.DataFrame({
-            "TITLE": ["Product 1"],
-            "PRICE": [99.99],
-            "CATEGORY_ID": ["MLB123"],
-        })
+        df = pd.DataFrame(
+            {
+                "TITLE": ["Product 1"],
+                "PRICE": [99.99],
+                "CATEGORY_ID": ["MLB123"],
+            }
+        )
 
         normalized = parser._normalize_columns(df)
 
@@ -358,9 +361,11 @@ class TestNormalizeColumns:
         """Test column normalization for unmapped columns."""
         parser = SpreadsheetParser()
 
-        df = pd.DataFrame({
-            "custom_column": ["value"],
-        })
+        df = pd.DataFrame(
+            {
+                "custom_column": ["value"],
+            }
+        )
 
         normalized = parser._normalize_columns(df)
 

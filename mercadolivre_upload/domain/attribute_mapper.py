@@ -38,10 +38,10 @@ class AttributeMapper:
         """
         text = text.lower().strip()
         # Remove accents (é -> e, ã -> a, etc.)
-        text = unicodedata.normalize('NFKD', text)
-        text = ''.join(c for c in text if not unicodedata.combining(c))
+        text = unicodedata.normalize("NFKD", text)
+        text = "".join(c for c in text if not unicodedata.combining(c))
         # Remove special chars except alphanumeric and spaces
-        text = ''.join(c for c in text if c.isalnum() or c.isspace())
+        text = "".join(c for c in text if c.isalnum() or c.isspace())
         return text
 
     @staticmethod
@@ -58,9 +58,7 @@ class AttributeMapper:
         return SequenceMatcher(None, a, b).ratio()
 
     def find_best_match(
-        self,
-        excel_column: str,
-        ml_attributes: list[dict]
+        self, excel_column: str, ml_attributes: list[dict]
     ) -> tuple[dict | None, float]:
         """Find best matching ML attribute for an Excel column.
 
@@ -97,9 +95,7 @@ class AttributeMapper:
         return best_match, best_score
 
     def map_columns_to_attributes(
-        self,
-        excel_columns: list[str],
-        ml_attributes: list[dict]
+        self, excel_columns: list[str], ml_attributes: list[dict]
     ) -> dict[str, dict]:
         """Map Excel column names to ML attribute definitions.
 
@@ -117,10 +113,7 @@ class AttributeMapper:
             attr_def, score = self.find_best_match(col, ml_attributes)
 
             if attr_def and score >= self.threshold:
-                logger.info(
-                    f"Mapped '{col}' -> '{attr_def['name']}' "
-                    f"(score: {score:.2f})"
-                )
+                logger.info(f"Mapped '{col}' -> '{attr_def['name']}' " f"(score: {score:.2f})")
                 mapping[col] = attr_def
             else:
                 logger.debug(
@@ -134,7 +127,7 @@ class AttributeMapper:
         self,
         product_attributes: dict[str, str],
         ml_attributes: list[dict],
-        explicit_mappings: dict[str, dict] | None = None
+        explicit_mappings: dict[str, dict] | None = None,
     ) -> tuple[list[dict], list[dict]]:
         """Map product attributes to ML format using fuzzy matching.
 
@@ -157,6 +150,7 @@ class AttributeMapper:
         # Normalize explicit mapping keys to match parser's column cleaning
         # Parser uses: re.sub(r"[^a-zA-Z0-9_\s]", "", col_str).strip()
         import re
+
         normalized_explicit_mappings = {}
         if explicit_mappings:
             for col, mapping_config in explicit_mappings.items():
@@ -190,23 +184,29 @@ class AttributeMapper:
                         # Build values array
                         if "value_struct" in mapping_config:
                             sale_term["value_struct"] = mapping_config["value_struct"]
-                            sale_term["values"] = [{
-                                "id": mapping_config.get("value_id"),
-                                "name": sale_term["value_name"],
-                                "struct": mapping_config["value_struct"]
-                            }]
+                            sale_term["values"] = [
+                                {
+                                    "id": mapping_config.get("value_id"),
+                                    "name": sale_term["value_name"],
+                                    "struct": mapping_config["value_struct"],
+                                }
+                            ]
                             sale_term["value_type"] = "number_unit"
                         else:
                             sale_term["value_id"] = mapping_config.get("value_id")
-                            sale_term["values"] = [{
-                                "id": mapping_config.get("value_id"),
-                                "name": sale_term["value_name"],
-                                "struct": None
-                            }]
+                            sale_term["values"] = [
+                                {
+                                    "id": mapping_config.get("value_id"),
+                                    "name": sale_term["value_name"],
+                                    "struct": None,
+                                }
+                            ]
                             sale_term["value_type"] = mapping_config.get("value_type", "list")
 
                         sale_terms_list.append(sale_term)
-                        logger.info(f"Explicitly mapped '{col}' -> sale_terms[{mapping_config['id']}]")
+                        logger.info(
+                            f"Explicitly mapped '{col}' -> sale_terms[{mapping_config['id']}]"
+                        )
                     elif target == "listing_type_id":
                         # Map listing type (Tipo de anúncio) - use cell value, not hardcoded ID
                         # Map common Portuguese values to ML API values
@@ -219,9 +219,11 @@ class AttributeMapper:
                         }
                         mapped_value = listing_type_map.get(str(value).lower().strip(), value)
                         # Store for later use in item payload
-                        ml_attributes_list.append({
-                            "_listing_type_id": mapped_value,  # Special marker for publisher
-                        })
+                        ml_attributes_list.append(
+                            {
+                                "_listing_type_id": mapped_value,  # Special marker for publisher
+                            }
+                        )
                         logger.info(f"Explicitly mapped '{col}' -> listing_type_id={mapped_value}")
 
                     else:
@@ -240,11 +242,13 @@ class AttributeMapper:
                             if not str(value).lower().endswith(unit_suffix.strip().lower()):
                                 value = f"{value}{unit_suffix}"
 
-                        ml_attributes_list.append({
-                            "id": mapping_config["id"],
-                            "name": mapping_config.get("name", mapping_config["id"]),
-                            "value_name": value or mapping_config.get("value_name", ""),
-                        })
+                        ml_attributes_list.append(
+                            {
+                                "id": mapping_config["id"],
+                                "name": mapping_config.get("name", mapping_config["id"]),
+                                "value_name": value or mapping_config.get("value_name", ""),
+                            }
+                        )
                         logger.info(f"Explicitly mapped '{col}' -> {mapping_config['id']}")
 
                     explicitly_mapped.add(col)
@@ -252,19 +256,18 @@ class AttributeMapper:
         # 2. Then apply fuzzy matching for remaining columns
         remaining_columns = [c for c in excel_columns if c not in explicitly_mapped]
 
-        column_to_attr = self.map_columns_to_attributes(
-            remaining_columns,
-            ml_attributes
-        )
+        column_to_attr = self.map_columns_to_attributes(remaining_columns, ml_attributes)
 
         # Build ML attributes list from fuzzy matches
         for col, attr_def in column_to_attr.items():
             value = product_attributes.get(col)
             if value:
-                ml_attributes_list.append({
-                    "id": attr_def["id"],
-                    "name": attr_def["name"],
-                    "value_name": value,
-                })
+                ml_attributes_list.append(
+                    {
+                        "id": attr_def["id"],
+                        "name": attr_def["name"],
+                        "value_name": value,
+                    }
+                )
 
         return ml_attributes_list, sale_terms_list

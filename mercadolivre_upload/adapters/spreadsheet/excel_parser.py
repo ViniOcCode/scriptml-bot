@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 def _load_config_mappings() -> dict:
     """Load column mappings from config file.
-    
+
     Returns:
         Dictionary of column mappings from config/standard_fields and config/fiscal_fields
     """
@@ -23,14 +23,14 @@ def _load_config_mappings() -> dict:
 
         # Load standard fields from generic_mappings.yaml
         config_path = Path("config/generic_mappings.yaml")
-        with open(config_path, encoding='utf-8') as f:
+        with open(config_path, encoding="utf-8") as f:
             config = yaml.safe_load(f)
 
-        standard_fields = config.get('standard_fields', {})
+        standard_fields = config.get("standard_fields", {})
 
         for field_name, field_config in standard_fields.items():
-            patterns = field_config.get('patterns', [])
-            exact_matches = field_config.get('exact_matches', [])
+            patterns = field_config.get("patterns", [])
+            exact_matches = field_config.get("exact_matches", [])
             # Combine patterns and exact matches for column matching
             combined = patterns + exact_matches
             all_patterns = list(dict.fromkeys(combined))  # Preserve order, remove duplicates
@@ -39,14 +39,14 @@ def _load_config_mappings() -> dict:
 
         # Load fiscal fields from fiscal_config.yaml
         fiscal_config_path = Path("config/fiscal_config.yaml")
-        with open(fiscal_config_path, encoding='utf-8') as f:
+        with open(fiscal_config_path, encoding="utf-8") as f:
             fiscal_config = yaml.safe_load(f)
 
-        fiscal_fields = fiscal_config.get('fiscal_fields', {})
+        fiscal_fields = fiscal_config.get("fiscal_fields", {})
 
         for field_name, field_config in fiscal_fields.items():
-            patterns = field_config.get('patterns', [])
-            exact_matches = field_config.get('exact_matches', [])
+            patterns = field_config.get("patterns", [])
+            exact_matches = field_config.get("exact_matches", [])
             # Combine patterns and exact matches for column matching
             combined = patterns + exact_matches
             all_patterns = list(dict.fromkeys(combined))  # Preserve order, remove duplicates
@@ -416,7 +416,9 @@ class ExcelParser:
         logger.info(f"Successfully parsed {len(products)} products")
         return products
 
-    def parse_safely(self, file_path: str | Path, sheet_name: str | None = None) -> tuple[list[Product], list[str]]:
+    def parse_safely(
+        self, file_path: str | Path, sheet_name: str | None = None
+    ) -> tuple[list[Product], list[str]]:
         """Parse an Excel file and return products with errors.
 
         Similar to parse(), but returns all errors instead of raising.

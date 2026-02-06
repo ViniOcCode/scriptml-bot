@@ -12,52 +12,52 @@ logger = logging.getLogger(__name__)
 
 def _load_header_config() -> dict:
     """Load header detection config from config file.
-    
+
     Returns:
         Dictionary with column_patterns, header_indicators, and validation limits
     """
     try:
         config_path = Path("config/generic_mappings.yaml")
-        with open(config_path, encoding='utf-8') as f:
+        with open(config_path, encoding="utf-8") as f:
             config = yaml.safe_load(f)
 
-        header_config = config.get('header_detection', {})
+        header_config = config.get("header_detection", {})
 
         # Convert column_patterns from config format (dict of lists) to regex patterns
         column_patterns = {}
-        for col_name, patterns in header_config.get('column_patterns', {}).items():
+        for col_name, patterns in header_config.get("column_patterns", {}).items():
             column_patterns[col_name] = patterns if isinstance(patterns, list) else [patterns]
 
         # Convert header_indicators from config format (list of dicts) to tuples
         header_indicators = []
-        for indicator in header_config.get('header_indicators', []):
-            header_indicators.append((indicator['pattern'], indicator['weight']))
+        for indicator in header_config.get("header_indicators", []):
+            header_indicators.append((indicator["pattern"], indicator["weight"]))
 
         return {
-            'column_patterns': column_patterns,
-            'header_indicators': header_indicators,
-            'max_cell_length': header_config.get('max_cell_length', 100),
-            'max_row_length': header_config.get('max_row_length', 800),
+            "column_patterns": column_patterns,
+            "header_indicators": header_indicators,
+            "max_cell_length": header_config.get("max_cell_length", 100),
+            "max_row_length": header_config.get("max_row_length", 800),
         }
     except Exception as e:
         logger.warning(f"Could not load header detection config: {e}. Using defaults.")
         return {
-            'column_patterns': {},
-            'header_indicators': [],
-            'max_cell_length': 100,
-            'max_row_length': 800,
+            "column_patterns": {},
+            "header_indicators": [],
+            "max_cell_length": 100,
+            "max_row_length": 800,
         }
 
 
 class HeaderDetector:
     """Detects header rows and maps columns dynamically.
-    
+
     Uses configuration from config/generic_mappings.yaml as the single source of truth.
     """
 
     def __init__(self, config: dict | None = None):
         """Initialize the header detector.
-        
+
         Args:
             config: Optional custom config. If not provided, loads from config file.
         """
@@ -67,10 +67,10 @@ class HeaderDetector:
         # Load config from file (single source of truth)
         header_config = config or _load_header_config()
 
-        self.COLUMN_PATTERNS = header_config.get('column_patterns', {})
-        self.HEADER_INDICATORS = header_config.get('header_indicators', [])
-        self.MAX_CELL_LENGTH = header_config.get('max_cell_length', 100)
-        self.MAX_ROW_LENGTH = header_config.get('max_row_length', 800)
+        self.COLUMN_PATTERNS = header_config.get("column_patterns", {})
+        self.HEADER_INDICATORS = header_config.get("header_indicators", [])
+        self.MAX_CELL_LENGTH = header_config.get("max_cell_length", 100)
+        self.MAX_ROW_LENGTH = header_config.get("max_row_length", 800)
 
     def detect_header_row(self, df: pd.DataFrame, max_rows: int = 10) -> int:
         """Detect which row contains the actual headers.
@@ -90,7 +90,7 @@ class HeaderDetector:
                 continue
 
             # Skip rows with mostly numeric values (likely data, not headers)
-            numeric_count = sum(1 for v in row_values if re.match(r'^\d+(\.\d+)?$', str(v).strip()))
+            numeric_count = sum(1 for v in row_values if re.match(r"^\d+(\.\d+)?$", str(v).strip()))
             if numeric_count > len(row_values) / 2:
                 continue
 

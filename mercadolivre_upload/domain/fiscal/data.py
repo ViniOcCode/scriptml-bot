@@ -18,16 +18,16 @@ logger = logging.getLogger(__name__)
 
 def _load_fiscal_defaults() -> dict:
     """Load fiscal defaults from config file.
-    
+
     Returns:
         Dictionary with fiscal default values
     """
     try:
         config_path = Path("config/fiscal_config.yaml")
-        with open(config_path, encoding='utf-8') as f:
+        with open(config_path, encoding="utf-8") as f:
             config = yaml.safe_load(f)
 
-        return config.get('fiscal_defaults', {})
+        return config.get("fiscal_defaults", {})
     except Exception as e:
         logger.warning(f"Could not load fiscal defaults from config: {e}. Using empty defaults.")
         return {}
@@ -98,8 +98,12 @@ class FiscalData:
         self.sku = str(self.sku).strip() if self.sku else ""
         self.title = str(self.title).strip() if self.title else ""
         # Use config defaults for type and measurement_unit
-        self.type = str(self.type).strip() if self.type else defaults.get('type', 'single')
-        self.measurement_unit = str(self.measurement_unit).strip() if self.measurement_unit else defaults.get('measurement_unit', 'UN')
+        self.type = str(self.type).strip() if self.type else defaults.get("type", "single")
+        self.measurement_unit = (
+            str(self.measurement_unit).strip()
+            if self.measurement_unit
+            else defaults.get("measurement_unit", "UN")
+        )
         self.ncm = str(self.ncm).strip() if self.ncm else ""
 
         # Sanitize origin_type - map common values to codes
@@ -122,7 +126,8 @@ class FiscalData:
         if origin_detail_str:
             # Extract first digit if format is like "0 - NACIONAL..."
             import re
-            match = re.match(r'^(\d)', origin_detail_str)
+
+            match = re.match(r"^(\d)", origin_detail_str)
             if match:
                 self.origin_detail = match.group(1)
             else:
@@ -132,7 +137,7 @@ class FiscalData:
         if self.cest:
             cest_str = str(self.cest).strip()
             # Skip if CEST is empty, nan, or None
-            if cest_str and cest_str.lower() not in ('nan', 'none', ''):
+            if cest_str and cest_str.lower() not in ("nan", "none", ""):
                 self.cest = cest_str
             else:
                 self.cest = None
@@ -174,7 +179,7 @@ class FiscalData:
             "measurement_unit": self.measurement_unit,
             "cost": float(self.cost) if self.cost else 0.0,
             "tax_payer_type": self.tax_payer_type,
-            "tax_information": {}
+            "tax_information": {},
         }
 
         tax_info: dict[str, Any] = payload["tax_information"]
@@ -245,11 +250,7 @@ class FiscalData:
     @property
     def has_complete_tax_info(self) -> bool:
         """Check if all tax information fields are present."""
-        return bool(
-            self.ncm
-            and self.origin_type
-            and self.origin_detail
-        )
+        return bool(self.ncm and self.origin_type and self.origin_detail)
 
     def get_missing_fields(self) -> list[str]:
         """Get list of missing required fields."""
@@ -311,7 +312,7 @@ class FiscalData:
         origin: str,
         cfop: str = "",
         cest: str = "",
-        **kwargs: Any
+        **kwargs: Any,
     ) -> "FiscalData":
         """Create FiscalData from spreadsheet row values.
 
@@ -344,5 +345,5 @@ class FiscalData:
             origin_detail=origin_detail,
             cfop=cfop or None,
             cest=cest or None,
-            **kwargs
+            **kwargs,
         )

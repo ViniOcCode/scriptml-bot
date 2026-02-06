@@ -1,4 +1,5 @@
 """Tests for main.py module."""
+
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -112,6 +113,7 @@ class TestMainExecution:
 
         # Import and reload the module to trigger __main__ block
         import mercadolivre_upload.main as main_module
+
         importlib.reload(main_module)
 
         # Note: We can't actually test the __main__ block directly
@@ -159,7 +161,7 @@ class TestMainEntrypoint:
             [sys.executable, str(main_file)],
             capture_output=True,
             text=True,
-            cwd=str(test_dir.parent)
+            cwd=str(test_dir.parent),
         )
 
         # The module should execute (may show help or error)

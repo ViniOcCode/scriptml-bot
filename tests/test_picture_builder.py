@@ -1,4 +1,5 @@
 """Tests for picture_builder.py module."""
+
 import sys
 from pathlib import Path
 
@@ -35,11 +36,7 @@ class TestAddUrl:
         """Test method chaining."""
         builder = PictureBuilder()
 
-        result = (
-            builder
-            .add_url("https://example.com/1.jpg")
-            .add_url("https://example.com/2.jpg")
-        )
+        result = builder.add_url("https://example.com/1.jpg").add_url("https://example.com/2.jpg")
 
         assert result is builder
         assert len(builder._pictures) == 2
@@ -75,10 +72,8 @@ class TestAddUrls:
         """Test chaining with other methods."""
         builder = PictureBuilder()
 
-        result = (
-            builder
-            .add_url("https://example.com/first.jpg")
-            .add_urls(["https://example.com/2.jpg", "https://example.com/3.jpg"])
+        result = builder.add_url("https://example.com/first.jpg").add_urls(
+            ["https://example.com/2.jpg", "https://example.com/3.jpg"]
         )
 
         assert result is builder
@@ -255,12 +250,13 @@ class TestIntegration:
         builder = PictureBuilder()
 
         pictures = (
-            builder
-            .add_url("https://example.com/main.jpg")
-            .add_urls([
-                "https://example.com/2.jpg",
-                "https://example.com/3.jpg",
-            ])
+            builder.add_url("https://example.com/main.jpg")
+            .add_urls(
+                [
+                    "https://example.com/2.jpg",
+                    "https://example.com/3.jpg",
+                ]
+            )
             .add_file("/local/image.jpg")
             .build()
         )

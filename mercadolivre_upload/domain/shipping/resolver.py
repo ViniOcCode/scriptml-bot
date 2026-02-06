@@ -15,26 +15,26 @@ logger = logging.getLogger(__name__)
 
 def _load_shipping_config() -> dict:
     """Load shipping configuration from config file.
-    
+
     Returns:
         Dictionary with mode_priority and default_mode
     """
     try:
         config_path = Path("config/generic_mappings.yaml")
-        with open(config_path, encoding='utf-8') as f:
+        with open(config_path, encoding="utf-8") as f:
             config = yaml.safe_load(f)
 
-        shipping_config = config.get('shipping', {})
+        shipping_config = config.get("shipping", {})
 
         return {
-            'mode_priority': shipping_config.get('mode_priority', ['me1', 'me2']),
-            'default_mode': shipping_config.get('default_mode', 'not_specified'),
+            "mode_priority": shipping_config.get("mode_priority", ["me1", "me2"]),
+            "default_mode": shipping_config.get("default_mode", "not_specified"),
         }
     except Exception as e:
         logger.warning(f"Could not load shipping config: {e}. Using defaults.")
         return {
-            'mode_priority': ['me1', 'me2'],
-            'default_mode': 'not_specified',
+            "mode_priority": ["me1", "me2"],
+            "default_mode": "not_specified",
         }
 
 
@@ -48,7 +48,7 @@ class ShippingModeProviderPort(Protocol):
 
 class ShippingResolver:
     """Resolver for determining best shipping mode.
-    
+
     Uses configuration from config/generic_mappings.yaml as the single source of truth.
     Prioritizes me1 over me2 based on mode_priority configuration.
     """
@@ -65,12 +65,12 @@ class ShippingResolver:
 
         # Load shipping config from config file (single source of truth), allow override
         if config:
-            self.mode_priority = config.get('mode_priority', ['me1', 'me2'])
-            self.default_mode = config.get('default_mode', 'not_specified')
+            self.mode_priority = config.get("mode_priority", ["me1", "me2"])
+            self.default_mode = config.get("default_mode", "not_specified")
         else:
             shipping_config = _load_shipping_config()
-            self.mode_priority = shipping_config['mode_priority']
-            self.default_mode = shipping_config['default_mode']
+            self.mode_priority = shipping_config["mode_priority"]
+            self.default_mode = shipping_config["default_mode"]
 
     def get_best_shipping_mode(self) -> str:
         """Get best available shipping mode for user.

@@ -1,4 +1,5 @@
 """Tests for publish_product.py module."""
+
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -140,7 +141,9 @@ class TestPublishFromFile:
     @patch("mercadolivre_upload.application.publish_product.SpreadsheetParser")
     @patch("mercadolivre_upload.application.publish_product.ProductBuilder")
     @patch("mercadolivre_upload.application.publish_product.AuthManager")
-    def test_publish_from_file_success(self, mock_auth_class, mock_builder_class, mock_parser_class):
+    def test_publish_from_file_success(
+        self, mock_auth_class, mock_builder_class, mock_parser_class
+    ):
         """Test successful publish from file."""
         mock_auth = MagicMock()
         mock_auth_class.return_value = mock_auth
@@ -157,9 +160,7 @@ class TestPublishFromFile:
         mock_builder.build.return_value = {"title": "Test"}
 
         mock_api = MagicMock()
-        mock_api.publish_product.return_value = MagicMock(
-            success=True, product_id="MLB123"
-        )
+        mock_api.publish_product.return_value = MagicMock(success=True, product_id="MLB123")
 
         service = PublishProductService(api_client=mock_api)
         result = service.publish_from_file(Path("test.xlsx"))
@@ -172,7 +173,9 @@ class TestPublishFromFile:
     @patch("mercadolivre_upload.application.publish_product.SpreadsheetParser")
     @patch("mercadolivre_upload.application.publish_product.ProductBuilder")
     @patch("mercadolivre_upload.application.publish_product.AuthManager")
-    def test_publish_from_file_dry_run(self, mock_auth_class, mock_builder_class, mock_parser_class):
+    def test_publish_from_file_dry_run(
+        self, mock_auth_class, mock_builder_class, mock_parser_class
+    ):
         """Test publish from file in dry run mode."""
         mock_auth = MagicMock()
         mock_auth_class.return_value = mock_auth
@@ -196,7 +199,9 @@ class TestPublishFromFile:
     @patch("mercadolivre_upload.application.publish_product.SpreadsheetParser")
     @patch("mercadolivre_upload.application.publish_product.ProductBuilder")
     @patch("mercadolivre_upload.application.publish_product.AuthManager")
-    def test_publish_from_file_api_failure(self, mock_auth_class, mock_builder_class, mock_parser_class):
+    def test_publish_from_file_api_failure(
+        self, mock_auth_class, mock_builder_class, mock_parser_class
+    ):
         """Test publish with API failures."""
         mock_auth = MagicMock()
         mock_auth_class.return_value = mock_auth
@@ -228,7 +233,9 @@ class TestPublishFromFile:
     @patch("mercadolivre_upload.application.publish_product.SpreadsheetParser")
     @patch("mercadolivre_upload.application.publish_product.ProductBuilder")
     @patch("mercadolivre_upload.application.publish_product.AuthManager")
-    def test_publish_from_file_exception(self, mock_auth_class, mock_builder_class, mock_parser_class):
+    def test_publish_from_file_exception(
+        self, mock_auth_class, mock_builder_class, mock_parser_class
+    ):
         """Test publish with exception during processing."""
         mock_auth = MagicMock()
         mock_auth_class.return_value = mock_auth
@@ -298,7 +305,9 @@ class TestValidateFile:
     @patch("mercadolivre_upload.application.publish_product.SpreadsheetParser")
     @patch("mercadolivre_upload.application.publish_product.ProductBuilder")
     @patch("mercadolivre_upload.application.publish_product.AuthManager")
-    def test_validate_file_with_errors(self, mock_auth_class, mock_builder_class, mock_parser_class):
+    def test_validate_file_with_errors(
+        self, mock_auth_class, mock_builder_class, mock_parser_class
+    ):
         """Test validation with errors."""
         mock_auth = MagicMock()
         mock_auth_class.return_value = mock_auth
@@ -375,9 +384,7 @@ class TestPublishSingle:
         mock_builder.build.return_value = {"title": "Test"}
 
         mock_api = MagicMock()
-        mock_api.publish_product.return_value = MagicMock(
-            success=True, product_id="MLB123"
-        )
+        mock_api.publish_product.return_value = MagicMock(success=True, product_id="MLB123")
 
         service = PublishProductService(api_client=mock_api)
         result = service.publish_single({"title": "Test"})
@@ -420,9 +427,7 @@ class TestPublishSingle:
         mock_builder.build.return_value = {"title": "Test"}
 
         mock_api = MagicMock()
-        mock_api.publish_product.return_value = MagicMock(
-            success=False, error_message="API Error"
-        )
+        mock_api.publish_product.return_value = MagicMock(success=False, error_message="API Error")
 
         service = PublishProductService(api_client=mock_api)
         result = service.publish_single({"title": "Test"})

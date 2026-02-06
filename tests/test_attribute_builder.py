@@ -1,4 +1,5 @@
 """Tests for attribute_builder.py module."""
+
 import sys
 from pathlib import Path
 
@@ -53,8 +54,7 @@ class TestAddAttribute:
         builder = AttributeBuilder()
 
         result = (
-            builder
-            .add_attribute("COLOR", "red")
+            builder.add_attribute("COLOR", "red")
             .add_attribute("SIZE", "M")
             .add_attribute("WEIGHT", 10)
         )
@@ -198,8 +198,7 @@ class TestIntegration:
         builder = AttributeBuilder()
 
         attributes = (
-            builder
-            .add_brand("Nike")
+            builder.add_brand("Nike")
             .add_model("Air Max")
             .add_gtin("1234567890123")
             .add_from_dict({"material": "leather", "weight": "1kg"})

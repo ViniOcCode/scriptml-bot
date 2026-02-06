@@ -46,7 +46,17 @@ class MLPipeline:
 
         # Layer 3: API components
         self.client = MLApiClient(auth_manager)
-        self.resolver = CategoryResolver(self.client)
+
+        # Initialize caches (optional for pipeline, can be None)
+        from mercadolivre_upload.infrastructure.cache.prediction_cache import PredictionCache
+
+        prediction_cache = PredictionCache() if prediction_cache is None else None
+
+        self.resolver = CategoryResolver(
+            self.client,
+            attribute_cache=None,
+            prediction_cache=prediction_cache,
+        )
         self.publisher = Publisher(
             api_client=self.client,
             category_resolver=self.resolver,

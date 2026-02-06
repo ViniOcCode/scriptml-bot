@@ -7,7 +7,7 @@ Infrastructure layer provides the implementation (adapter).
 import logging
 import unicodedata
 from difflib import SequenceMatcher
-from typing import Protocol
+from typing import Any, Protocol
 
 from ..attribute_metadata import AttributeMeta
 
@@ -29,8 +29,8 @@ def normalize_text(text: str) -> str:
     """
     text = text.lower().strip()
     # Remove accents (é -> e, ã -> a, etc.)
-    text = unicodedata.normalize('NFKD', text)
-    text = ''.join(c for c in text if not unicodedata.combining(c))
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(c for c in text if not unicodedata.combining(c))
     return text
 
 
@@ -115,15 +115,21 @@ class CategoryResolver:
         self,
         api_port: CategoryApiPort,
         attribute_cache: AttributeCachePort | None = None,
+        prediction_cache: Any | None = None,
+        max_predictions: int = 5,
     ):
         """Initialize with API port.
 
         Args:
             api_port: Implementation of category API operations
             attribute_cache: Optional cache for category attributes
+            prediction_cache: Optional cache for domain discovery predictions
+            max_predictions: Maximum number of titles to predict (default: 5)
         """
         self._api = api_port
         self._attribute_cache = attribute_cache
+        self._prediction_cache = prediction_cache
+        self._max_predictions = max_predictions
         self._categories: dict[str, str] = {}  # name -> id cache
         self._category_cache: dict[str, dict] = {}  # id -> data cache
         self._children_cache: dict[str, list] = {}  # id -> children cache
@@ -152,9 +158,14 @@ class CategoryResolver:
         return self._children_cache[category_id]
 
     def _search_in_hierarchy(
-        self, name: str, parent_id: str, parent_name: str = "",
-        visited: set | None = None, depth: int = 0, max_depth: int = 5,
-        min_similarity: float = 0.8
+        self,
+        name: str,
+        parent_id: str,
+        parent_name: str = "",
+        visited: set | None = None,
+        depth: int = 0,
+        max_depth: int = 5,
+        min_similarity: float = 0.8,
     ) -> str | None:
         """Search for category name in hierarchy starting from parent.
 
@@ -215,8 +226,7 @@ class CategoryResolver:
 
             # Recursively search in child's children
             result = self._search_in_hierarchy(
-                name, child_id, child_name, visited, depth + 1, max_depth,
-                min_similarity
+                name, child_id, child_name, visited, depth + 1, max_depth, min_similarity
             )
             if result:
                 return result
@@ -256,9 +266,7 @@ class CategoryResolver:
         # Pick the child with most items as the best guess
         # Sort by total_items_in_this_category (descending)
         sorted_children = sorted(
-            children,
-            key=lambda x: x.get("total_items_in_this_category", 0),
-            reverse=True
+            children, key=lambda x: x.get("total_items_in_this_category", 0), reverse=True
         )
         best_child = sorted_children[0]
         logger.info(
@@ -270,10 +278,10 @@ class CategoryResolver:
         return self.resolve_to_leaf(best_child["id"])
 
     def find_category(self, name: str, site_id: str = "MLB") -> str | None:
-        """Find category ID by name using predictor-first strategy.
+        """Find category ID by name using fast root matching.
 
-        Tries fuzzy matching on root categories first (fast),
-        then falls back to hierarchical search if needed.
+        Searches only root categories with fuzzy matching.
+        Does NOT traverse hierarchy to avoid excessive API calls.
 
         Args:
             name: Category name (e.g., "Livros Físicos")
@@ -320,9 +328,7 @@ class CategoryResolver:
         logger.info(f"Category '{name}' not in root categories")
         return None
 
-    def predict_category_from_title(
-        self, title: str, site_id: str = "MLB"
-    ) -> str | None:
+    def predict_category_from_title(self, title: str, site_id: str = "MLB") -> str | None:
         """Predict category based on product title using ML domain discovery.
 
         Args:
@@ -341,32 +347,156 @@ class CategoryResolver:
             logger.warning(f"Title too short for domain discovery: '{title}'")
             return None
 
+        # Check prediction cache
+        if self._prediction_cache:
+            cached = self._prediction_cache.get(title, site_id)
+            if cached:
+                predictions = cached
+            else:
+                predictions = self._call_domain_discovery(title, site_id)
+                if predictions:
+                    self._prediction_cache.set(title, predictions, site_id)
+        else:
+            predictions = self._call_domain_discovery(title, site_id)
+
+        if predictions and len(predictions) > 0:
+            # Get the first (highest confidence) prediction
+            best_match = predictions[0]
+            category_id = best_match.get("category_id")
+            category_name = best_match.get("category_name", "unknown")
+            logger.info(f"Domain discovery found: '{category_name}' ({category_id}) for title")
+            return category_id
+
+        logger.warning(f"Domain discovery returned empty for: '{title}'")
+        return None
+
+    def _call_domain_discovery(self, title: str, site_id: str) -> list[dict]:
+        """Call domain discovery API.
+
+        Args:
+            title: Product title
+            site_id: Site ID
+
+        Returns:
+            List of predictions
+        """
         try:
             logger.info(f"Calling domain discovery for: '{title[:60]}...'")
             predictions = self._api.predict_category(title, site_id)
             logger.debug(f"Domain discovery response: {predictions}")
-
-            if predictions and len(predictions) > 0:
-                # Get the first (highest confidence) prediction
-                best_match = predictions[0]
-                category_id = best_match.get("category_id")
-                category_name = best_match.get("category_name", "unknown")
-                logger.info(
-                    f"Domain discovery found: '{category_name}' ({category_id}) "
-                    f"for title"
-                )
-                return category_id
-            else:
-                logger.warning(f"Domain discovery returned empty for: '{title}'")
+            return predictions if isinstance(predictions, list) else []
         except Exception as e:
             logger.warning(f"Domain discovery failed: {e}")
+            return []
 
+    def find_category_with_predictor(
+        self,
+        category_name: str,
+        product_titles: list[str],
+        site_id: str = "MLB",
+    ) -> str | None:
+        """Find category using domain discovery predictions.
+
+        Predicts categories for product titles and checks if any prediction
+        matches the requested category name in its path.
+
+        Args:
+            category_name: Requested category name
+            product_titles: List of product titles to predict
+            site_id: Site ID
+
+        Returns:
+            Category ID if found, None otherwise
+        """
+        if not product_titles:
+            return None
+
+        category_normalized = normalize_text(category_name)
+        logger.info(
+            f"Finding category '{category_name}' using predictor "
+            f"with {len(product_titles)} titles..."
+        )
+
+        # Limit number of predictions to avoid rate limits
+        titles_to_check = product_titles[: self._max_predictions]
+
+        for title in titles_to_check:
+            if not title or len(title) < 3:
+                continue
+
+            # Get predictions (cached or fresh)
+            if self._prediction_cache:
+                cached = self._prediction_cache.get(title, site_id)
+                if cached:
+                    predictions = cached
+                else:
+                    predictions = self._call_domain_discovery(title, site_id)
+                    if predictions:
+                        self._prediction_cache.set(title, predictions, site_id)
+            else:
+                predictions = self._call_domain_discovery(title, site_id)
+
+            if not predictions:
+                continue
+
+            # Check top prediction
+            for prediction in predictions[:3]:  # Check top 3 predictions
+                predicted_id = prediction.get("category_id")
+                if not predicted_id:
+                    continue
+
+                # Get category details to check path
+                category_data = self._get_category_cached(predicted_id)
+                if not category_data:
+                    continue
+
+                # Check if requested category is in path
+                path_from_root = category_data.get("path_from_root", [])
+                for node in path_from_root:
+                    node_name = node.get("name", "")
+                    if normalize_text(node_name) == category_normalized:
+                        logger.info(
+                            f"Found matching category in prediction path: "
+                            f"'{node_name}' ({node.get('id')})"
+                        )
+                        return node.get("id")
+
+                # Also check predicted category name itself
+                predicted_name = prediction.get("category_name", "")
+                if normalize_text(predicted_name) == category_normalized:
+                    logger.info(
+                        f"Predicted category matches requested: "
+                        f"'{predicted_name}' ({predicted_id})"
+                    )
+                    return predicted_id
+
+        logger.info(f"No prediction matched category '{category_name}'")
         return None
 
+    def _get_category_cached(self, category_id: str) -> dict:
+        """Get category data with caching.
+
+        Args:
+            category_id: Category ID
+
+        Returns:
+            Category data
+        """
+        if category_id in self._category_cache:
+            return self._category_cache[category_id]
+
+        try:
+            data = self._api.get_category(category_id)
+            if isinstance(data, dict):
+                self._category_cache[category_id] = data
+                return data
+        except Exception as e:
+            logger.warning(f"Failed to get category {category_id}: {e}")
+
+        return {}
+
     def find_category_by_name_or_title(
-        self, name: str | None = None,
-        title: str | None = None,
-        site_id: str = "MLB"
+        self, name: str | None = None, title: str | None = None, site_id: str = "MLB"
     ) -> str | None:
         """Find category by name, falling back to title-based prediction.
 
@@ -430,9 +560,7 @@ class CategoryResolver:
 
         return mapping
 
-    def get_conditional_attributes(
-        self, category_id: str, current_attributes: dict
-    ) -> list[dict]:
+    def get_conditional_attributes(self, category_id: str, current_attributes: dict) -> list[dict]:
         """Get conditional attributes based on current attribute values.
 
         Args:
@@ -443,9 +571,7 @@ class CategoryResolver:
             List of conditional attributes
         """
         try:
-            result = self._api.get_category_conditional_attributes(
-                category_id, current_attributes
-            )
+            result = self._api.get_category_conditional_attributes(category_id, current_attributes)
             # Handle case where API returns error message or non-list
             if isinstance(result, dict) and "error" in result:
                 return []
@@ -474,9 +600,7 @@ class CategoryResolver:
         conditional = self.get_conditional_attributes(category_id, product_attributes)
         return base_attrs, conditional
 
-    def get_required_attributes(
-        self, category_id: str, product_attributes: dict
-    ) -> list[dict]:
+    def get_required_attributes(self, category_id: str, product_attributes: dict) -> list[dict]:
         """Get all required attributes including conditionally required.
 
         Args:

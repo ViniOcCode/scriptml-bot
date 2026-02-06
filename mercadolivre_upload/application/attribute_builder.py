@@ -90,23 +90,22 @@ class AttributeBuilderService:
                 if not excel_value:
                     continue
                 attr = self._cache_mapper.find_attribute_by_name(excel_header)
-                if attr and attr.get('id'):
+                if attr and attr.get("id"):
                     cache_mapped_keys.add(excel_header)
 
         # Filter out cache-mapped attributes for fuzzy processing
         remaining_attributes = {
-            k: v for k, v in product.attributes.items()
-            if k not in cache_mapped_keys
+            k: v for k, v in product.attributes.items() if k not in cache_mapped_keys
         }
 
         if remaining_attributes:
             logger.info(f"Falling back to fuzzy mapper for {len(remaining_attributes)} attributes")
             attribute_mapper = AttributeMapper(similarity_threshold=0.7)
-            explicit_mappings = self.config.get('explicit_mappings', {})
+            explicit_mappings = self.config.get("explicit_mappings", {})
             fuzzy_attributes, fuzzy_sale_terms = attribute_mapper.map_product_attributes(
                 remaining_attributes,
                 [meta.__dict__ for meta in attr_metadata],
-                explicit_mappings=explicit_mappings
+                explicit_mappings=explicit_mappings,
             )
 
             # Merge attributes: cache results take precedence
@@ -140,7 +139,9 @@ class AttributeBuilderService:
         for attr in struct_result.sanitized_attrs:
             scored = scorer.score_attribute(attr["id"], attr["value_name"])
             scored_attrs.append(scored)
-            logger.debug(f"Attribute {scored.id}: score={scored.score}, class={scored.classification}")
+            logger.debug(
+                f"Attribute {scored.id}: score={scored.score}, class={scored.classification}"
+            )
 
         # 5. Apply feedback adjustments if available
         if self.feedback:
@@ -195,11 +196,13 @@ class AttributeBuilderService:
                 continue
 
             attr = self._cache_mapper.find_attribute_by_name(header)
-            if attr and attr.get('id'):
-                mapped.append({
-                    "id": attr['id'],
-                    "value_name": str(value),
-                })
+            if attr and attr.get("id"):
+                mapped.append(
+                    {
+                        "id": attr["id"],
+                        "value_name": str(value),
+                    }
+                )
                 logger.debug(f"Cache mapped: {header} -> {attr['id']}")
 
         return mapped

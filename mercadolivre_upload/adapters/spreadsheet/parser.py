@@ -1,276 +1,170 @@
 """Spreadsheet parser adapter.
 
-Adapts external Excel input to domain Product entities.
+Provides a flexible parser that normalizes Excel/CSV data to Portuguese field names.
 """
 
+from __future__ import annotations
+
 import logging
-import re
 from pathlib import Path
-from typing import Any
 
 import pandas as pd
 
-from mercadolivre_upload.adapters.spreadsheet.header_detector import HeaderDetector
-from mercadolivre_upload.domain.fiscal.data import FiscalData
-from mercadolivre_upload.domain.product.model import Product
+from mercadolivre_upload.domain.text_normalizer import PortugueseTextNormalizer
 
 logger = logging.getLogger(__name__)
 
 
 class SpreadsheetParser:
-    """Parse Excel files into domain Product entities."""
+    """Parse spreadsheet files into normalized dictionaries."""
 
-    # Required columns for product creation
-    # Other columns (isbn, description, etc.) are optional and handled as attributes if present
-    REQUIRED_COLUMNS = ["sku", "title", "price", "condition"]
+    SUPPORTED_EXTENSIONS = {".xlsx", ".xls"}
 
-    def __init__(self):
-        self.detector = HeaderDetector()
-        self.column_mapping: dict[str, str] = {}
+    DEFAULT_COLUMN_MAPPING = {
+        "title": "titulo",
+        "titulo": "titulo",
+        "título": "titulo",
+        "price": "preco",
+        "preco": "preco",
+        "preço": "preco",
+        "category": "categoria",
+        "categoria": "categoria",
+        "category_id": "categoria",
+        "currency": "moeda",
+        "moeda": "moeda",
+        "currency_id": "moeda",
+        "quantity": "quantidade",
+        "quantidade": "quantidade",
+        "available_quantity": "quantidade",
+        "condition": "condicao",
+        "condicao": "condicao",
+        "condição": "condicao",
+        "description": "descricao",
+        "descricao": "descricao",
+        "descrição": "descricao",
+        "sku": "sku",
+        "codigo": "sku",
+        "código": "sku",
+        "code": "sku",
+        "ean": "gtin",
+        "gtin": "gtin",
+        "brand": "marca",
+        "marca": "marca",
+        "images": "imagens",
+        "imagens": "imagens",
+    }
 
-    def parse(self, file_path: str | Path) -> list[Product]:
-        """Parse Excel file into Product entities.
+    def __init__(self, column_mapping: dict | None = None):
+        self._column_mapping = (
+            dict(column_mapping) if column_mapping else self.DEFAULT_COLUMN_MAPPING.copy()
+        )
+        self._data: list[dict] = []
 
-        Args:
-            file_path: Path to Excel file
-
-        Returns:
-            List of Product entities
-        """
+    def parse(
+        self,
+        file_path: str | Path,
+        sheet_name: str | int | None = None,
+        header_row: int | None = None,
+    ) -> list[dict]:
         file_path = Path(file_path)
-
         if not file_path.exists():
-            raise FileNotFoundError(f"File not found: {file_path}")
+            raise FileNotFoundError("Arquivo não encontrado")
+        if file_path.is_dir():
+            raise ValueError("Caminho não é um arquivo")
+        if file_path.suffix.lower() not in self.SUPPORTED_EXTENSIONS:
+            raise ValueError(f"Formato de arquivo não suportado: {file_path.suffix.lower()}")
 
-        logger.info(f"Parsing spreadsheet: {file_path}")
-
-        # Read raw Excel (no headers)
-        raw_df = pd.read_excel(file_path, header=None)
-        if raw_df.empty:
-            return []
-
-        # Detect headers and build mapping
-        data_df, self.column_mapping = self.detector.process(raw_df)
-
-        # Validate required columns
-        missing = [c for c in self.REQUIRED_COLUMNS if c not in self.column_mapping]
-        if missing:
-            raise ValueError(f"Missing required columns: {missing}")
-
-        # Parse rows into Products
-        products = []
-        for idx, row in data_df.iterrows():
-            if row.isna().all():
-                continue
-
-            try:
-                product = self._parse_row(row)
-                if product:
-                    products.append(product)
-            except Exception as e:
-                logger.warning(f"Row {idx + 1}: {e}")
-
-        logger.info(f"Parsed {len(products)} products")
-        return products
-
-    def _get_value(self, row: pd.Series, canonical_name: str, default: Any = None) -> Any:
-        """Get value from row using canonical column name."""
-        if canonical_name not in self.column_mapping:
-            return default
-
-        actual_col = self.column_mapping[canonical_name]
-        value = row.get(actual_col, default)
-        return None if pd.isna(value) else value
-
-    def _parse_price(self, value: Any) -> float:
-        """Parse price value."""
-        if isinstance(value, (int, float)):
-            return float(value)
-
-        value_str = str(value).strip()
-        value_str = re.sub(r"[Rr]\$\s*", "", value_str)
-
-        # Handle Brazilian format
-        if "," in value_str and "." in value_str:
-            last_comma = value_str.rfind(",")
-            last_dot = value_str.rfind(".")
-            if last_comma > last_dot:
-                value_str = value_str.replace(".", "").replace(",", ".")
-            else:
-                value_str = value_str.replace(",", "")
-        elif "," in value_str:
-            value_str = value_str.replace(",", ".")
-
-        return float(value_str)
-
-    def _parse_quantity(self, value: Any) -> int:
-        """Parse quantity value."""
-        if isinstance(value, (int, float)):
-            return int(value)
-
-        value_str = str(value).strip()
-        match = re.search(r"\d+", value_str)
-        if match:
-            return int(match.group())
-
-        raise ValueError(f"Cannot parse quantity: {value}")
-
-    def _parse_int(self, value: Any) -> int | None:
-        """Parse integer value, returning None if empty."""
-        if value is None or (isinstance(value, float) and pd.isna(value)):
-            return None
-        if isinstance(value, int):
-            return value
-        if isinstance(value, float):
-            return int(value)
-
-        value_str = str(value).strip()
-        if not value_str:
-            return None
-
-        # Remove any non-numeric characters except minus
-        value_str = re.sub(r"[^\d-]", "", value_str)
-        if value_str:
-            return int(value_str)
-        return None
-
-    def _parse_float(self, value: Any) -> float | None:
-        """Parse float value, returning None if empty."""
-        if value is None or (isinstance(value, float) and pd.isna(value)):
-            return None
-        if isinstance(value, (int, float)):
-            return float(value)
-
-        value_str = str(value).strip()
-        if not value_str:
-            return None
-
-        # Handle Brazilian format
-        if "," in value_str and "." in value_str:
-            last_comma = value_str.rfind(",")
-            last_dot = value_str.rfind(".")
-            if last_comma > last_dot:
-                value_str = value_str.replace(".", "").replace(",", ".")
-            else:
-                value_str = value_str.replace(",", "")
-        elif "," in value_str:
-            value_str = value_str.replace(",", ".")
+        logger.info(f"Lendo planilha: {file_path}")
 
         try:
-            return float(value_str)
-        except ValueError:
-            return None
-
-    def _parse_condition(self, value: Any) -> str:
-        """Parse condition value."""
-        value_str = str(value).lower().strip()
-
-        if any(x in value_str for x in ["new", "novo", "0"]):
-            return "new"
-        if any(x in value_str for x in ["used", "usado", "1"]):
-            return "used"
-
-        raise ValueError(f"Invalid condition: {value}")
-
-    def _extract_attributes(self, row: pd.Series) -> dict[str, str]:
-        """Extract additional attributes from non-mapped columns.
-
-        All columns not in the standard mapping (title, price, sku, etc.)
-        are treated as attributes for the Mercado Livre API.
-        """
-        attributes = {}
-        # Get all mapped column names
-        mapped_cols = set(self.column_mapping.values())
-
-        # Also exclude 'fotos' from attributes since it's handled separately
-        if "fotos" in self.column_mapping:
-            mapped_cols.add(self.column_mapping["fotos"])
-
-        for col in row.index:
-            if col not in mapped_cols:
-                value = row.get(col)
-                if pd.notna(value) and str(value).strip():
-                    # Clean the column name
-                    col_str = str(col).strip()
-                    # Skip instructional headers and long text
-                    if len(col_str) > 100:
-                        continue
-                    # Clean to use as attribute name
-                    clean_col = re.sub(r"[^a-zA-Z0-9_\s]", "", col_str).strip()
-                    if clean_col:
-                        attributes[clean_col] = str(value).strip()
-
-        return attributes
-
-    def _parse_row(self, row: pd.Series) -> Product | None:
-        """Parse a DataFrame row into a Product."""
-        sku = str(self._get_value(row, "sku", "")).strip()
-        title = str(self._get_value(row, "title", "")).strip()
-
-        if not sku or not title:
-            return None
-
-        price = self._parse_price(self._get_value(row, "price"))
-        # Default quantity to 1 if not specified
-        quantity = 1
-        if "available_quantity" in self.column_mapping:
-            quantity = self._parse_quantity(self._get_value(row, "available_quantity"))
-        condition = self._parse_condition(self._get_value(row, "condition"))
-        # Default description to title if not present
-        description = str(self._get_value(row, "description", title))
-
-        # Parse fiscal data with all available fields
-        cost_value = self._get_value(row, "cost")
-        cost = self._parse_price(cost_value) if cost_value else 0.0
-
-        fiscal = FiscalData(
-            sku=sku,
-            title=title,
-            cost=cost,
-            ncm=str(self._get_value(row, "ncm", "")),
-            cfop=str(self._get_value(row, "cfop", "")) or None,
-            origin_detail=str(self._get_value(row, "origin_detail", self._get_value(row, "origin", ""))),
-            cest=str(self._get_value(row, "cest", "")) or None,
-            origin_type=str(self._get_value(row, "origin_type", "reseller")),
-            csosn=str(self._get_value(row, "csosn", "")) or None,
-            tax_rule_id=self._parse_int(self._get_value(row, "tax_rule_id")),
-            fci=str(self._get_value(row, "fci", "")) or None,
-            ex_tipi=str(self._get_value(row, "ex_tipi", "")) or None,
-            ean=str(self._get_value(row, "ean", "")) or self._get_value(row, "gtin", "") or None,
-            med_anvisa_code=str(self._get_value(row, "med_anvisa_code", "")) or None,
-            med_exemption_reason=str(self._get_value(row, "med_exemption_reason", "")) or None,
-            net_weight=self._parse_float(self._get_value(row, "net_weight")),
-            gross_weight=self._parse_float(self._get_value(row, "gross_weight")),
-        )
-
-        # Extract attributes from other columns
-        attributes = self._extract_attributes(row)
-
-        # Handle ISBN/GTIN if present
-        isbn = self._get_value(row, "isbn", "") or self._get_value(row, "gtin", "")
-        if isbn:
-            isbn_clean = str(isbn).strip()
-            # Accept any numeric GTIN/EAN (8, 12, 13, or 14 digits)
-            isbn_digits = re.sub(r'\D', '', isbn_clean)
-            if len(isbn_digits) in [8, 12, 13, 14]:
-                attributes["isbn"] = isbn_clean
-                attributes["gtin"] = isbn_clean
+            if file_path.suffix.lower() == ".xls":
+                df = pd.read_excel(file_path, sheet_name=sheet_name, engine="xlrd")
             else:
-                logger.warning(f"Skipping invalid GTIN/ISBN for {sku}: {isbn_clean} "
-                              f"(expected 8, 12, 13, or 14 digits, got {len(isbn_digits)})")
+                df = pd.read_excel(file_path, sheet_name=sheet_name)
+        except Exception as exc:
+            raise ValueError("Erro ao ler arquivo Excel") from exc
 
-        # Handle Fotos column - store in attributes for image uploader
-        fotos = self._get_value(row, "fotos", "")
-        if fotos:
-            attributes["_fotos"] = str(fotos).strip()
+        if isinstance(df, dict):
+            if df:
+                df = next(iter(df.values()))
+            else:
+                df = pd.DataFrame()
 
-        return Product(
-            sku=sku,
-            title=title,
-            description=description,
-            price=price,
-            available_quantity=quantity,
-            condition=condition,
-            fiscal=fiscal,
-            attributes=attributes,
-        )
+        if df.empty:
+            logger.warning("Planilha vazia")
+            return []
+
+        if header_row is not None:
+            if file_path.suffix.lower() == ".xls":
+                df = pd.read_excel(
+                    file_path, sheet_name=sheet_name, header=header_row, engine="xlrd"
+                )
+            else:
+                df = pd.read_excel(file_path, sheet_name=sheet_name, header=header_row)
+            if isinstance(df, dict):
+                if df:
+                    df = next(iter(df.values()))
+                else:
+                    df = pd.DataFrame()
+
+        if header_row is not None:
+            df.columns = [str(col).strip() for col in df.columns]
+        df = self._normalize_columns(df)
+
+        records = df.to_dict(orient="records")
+        cleaned = [self._clean_record(record) for record in records]
+        self._data = [record for record in cleaned if record]
+        logger.info(f"Parsed {len(self._data)} registros")
+        return list(self._data)
+
+    def _normalize_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+        mapping = {}
+        for column in df.columns:
+            column_str = str(column).strip()
+            normalized = PortugueseTextNormalizer.normalize(column_str)
+            target = self._column_mapping.get(normalized) or self._column_mapping.get(
+                column_str.lower()
+            )
+            mapping[column] = target or column_str.lower()
+        return df.rename(columns=mapping)
+
+    def _clean_record(self, record: dict) -> dict:
+        cleaned: dict = {}
+        for key, value in record.items():
+            if value is None:
+                continue
+            if isinstance(value, float) and pd.isna(value):
+                continue
+            if isinstance(value, str):
+                stripped = value.strip()
+                if not stripped:
+                    continue
+                cleaned[key] = stripped
+            else:
+                cleaned[key] = value
+        return cleaned
+
+    def get_column_mapping(self) -> dict:
+        return dict(self._column_mapping)
+
+    def set_column_mapping(self, mapping: dict) -> None:
+        self._column_mapping = dict(mapping)
+
+    def get_supported_columns(self) -> list[str]:
+        return list(set(self._column_mapping.values()))
+
+    def validate_file(self, file_path: str | Path) -> tuple[bool, list[str]]:
+        path = Path(file_path)
+        errors: list[str] = []
+        if not path.exists():
+            return False, ["Arquivo não encontrado"]
+        if path.is_dir():
+            return False, ["Caminho não é um arquivo"]
+        if path.suffix.lower() not in self.SUPPORTED_EXTENSIONS:
+            return False, ["Formato de arquivo não suportado"]
+        try:
+            self.parse(path)
+            return True, []
+        except Exception as exc:
+            errors.append(str(exc))
+            return False, errors

@@ -46,6 +46,7 @@ from mercadolivre_upload.infrastructure.observability import (
 # Fixtures
 # =============================================================================
 
+
 @pytest.fixture
 def temp_log_dir():
     """Cria diretório temporário para logs."""
@@ -83,19 +84,20 @@ def alert_manager_mock():
 @pytest.fixture
 def mock_aiohttp():
     """Mock para aiohttp."""
-    with patch(
-        "mercadolivre_upload.infrastructure.observability.AIOHTTP_AVAILABLE",
-        True,
-    ), patch("aiohttp.ClientSession") as mock_session:
+    with (
+        patch(
+            "mercadolivre_upload.infrastructure.observability.AIOHTTP_AVAILABLE",
+            True,
+        ),
+        patch("aiohttp.ClientSession") as mock_session,
+    ):
         mock_response = AsyncMock()
         mock_response.status = 200
         mock_context = AsyncMock()
         mock_context.__aenter__ = AsyncMock(return_value=mock_response)
         mock_context.__aexit__ = AsyncMock(return_value=None)
         mock_session.return_value.__aenter__ = AsyncMock(
-            return_value=MagicMock(
-                post=MagicMock(return_value=mock_context)
-            )
+            return_value=MagicMock(post=MagicMock(return_value=mock_context))
         )
         mock_session.return_value.__aexit__ = AsyncMock(return_value=None)
         yield mock_session
@@ -104,6 +106,7 @@ def mock_aiohttp():
 # =============================================================================
 # StructuredLogger Tests
 # =============================================================================
+
 
 class TestStructuredLogger:
     """Testes para StructuredLogger."""
@@ -186,6 +189,7 @@ class TestStructuredLogger:
 # BusinessMetricsCollector Tests
 # =============================================================================
 
+
 class TestBusinessMetricsCollector:
     """Testes para BusinessMetricsCollector."""
 
@@ -246,15 +250,9 @@ class TestBusinessMetricsCollector:
 
     def test_error_breakdown(self, metrics_collector):
         """Testa contagem de erros por categoria."""
-        metrics_collector.record_upload(
-            success=False, duration_ms=50.0, error_category="api_error"
-        )
-        metrics_collector.record_upload(
-            success=False, duration_ms=50.0, error_category="api_error"
-        )
-        metrics_collector.record_upload(
-            success=False, duration_ms=50.0, error_category="timeout"
-        )
+        metrics_collector.record_upload(success=False, duration_ms=50.0, error_category="api_error")
+        metrics_collector.record_upload(success=False, duration_ms=50.0, error_category="api_error")
+        metrics_collector.record_upload(success=False, duration_ms=50.0, error_category="timeout")
 
         errors = metrics_collector.error_breakdown
         assert errors["api_error"] == 2
@@ -318,6 +316,7 @@ class TestBusinessMetricsCollector:
 # HourlyStats Tests
 # =============================================================================
 
+
 class TestHourlyStats:
     """Testes para HourlyStats."""
 
@@ -344,6 +343,7 @@ class TestHourlyStats:
 # =============================================================================
 # Alert Tests
 # =============================================================================
+
 
 class TestAlert:
     """Testes para Alert."""
@@ -396,6 +396,7 @@ class TestAlert:
 # =============================================================================
 # AlertManager Tests
 # =============================================================================
+
 
 class TestAlertManager:
     """Testes para AlertManager."""
@@ -455,15 +456,19 @@ class TestAlertManager:
 # Dashboard Tests
 # =============================================================================
 
+
 class TestDashboard:
     """Testes para Dashboard."""
 
     def test_initialization_without_rich(self):
         """Testa erro quando rich não está disponível."""
-        with patch(
-            "mercadolivre_upload.infrastructure.observability.RICH_AVAILABLE",
-            False,
-        ), pytest.raises(ImportError):
+        with (
+            patch(
+                "mercadolivre_upload.infrastructure.observability.RICH_AVAILABLE",
+                False,
+            ),
+            pytest.raises(ImportError),
+        ):
             Dashboard()
 
     @pytest.mark.skipif(
@@ -526,6 +531,7 @@ class TestDashboard:
 # =============================================================================
 # ObservabilityManager Tests
 # =============================================================================
+
 
 class TestObservabilityManager:
     """Testes para ObservabilityManager."""
@@ -625,6 +631,7 @@ class TestObservabilityManager:
 # Integration Tests
 # =============================================================================
 
+
 class TestObservabilityIntegration:
     """Testes de integração."""
 
@@ -673,6 +680,7 @@ class TestObservabilityIntegration:
 # Global Instances Tests
 # =============================================================================
 
+
 class TestGlobalInstances:
     """Testes para instâncias globais."""
 
@@ -695,6 +703,7 @@ class TestGlobalInstances:
 # =============================================================================
 # Error Handling Tests
 # =============================================================================
+
 
 class TestErrorHandling:
     """Testes para tratamento de erros."""

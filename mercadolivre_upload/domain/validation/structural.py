@@ -81,8 +81,10 @@ class StructuralValidator:
             # Exceeds max_length
             truncated_value = value
             if value and meta.max_length and len(value) > meta.max_length:
-                truncated_value = value[:meta.max_length]
-                msg = f"Attribute '{attr_id}': truncated from {len(value)} to {meta.max_length} chars"
+                truncated_value = value[: meta.max_length]
+                msg = (
+                    f"Attribute '{attr_id}': truncated from {len(value)} to {meta.max_length} chars"
+                )
                 warnings.append(msg)
                 logger.warning(msg)
 

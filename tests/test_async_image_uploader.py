@@ -1,6 +1,7 @@
 """
 Tests for async_image_uploader.py - 100% coverage.
 """
+
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
@@ -11,6 +12,7 @@ from mercadolivre_upload.adapters.async_image_uploader import AsyncImageUploader
 
 class AsyncContextManager:
     """Helper class to create async context managers for mocking."""
+
     def __init__(self, return_value):
         self.return_value = return_value
 
@@ -28,7 +30,7 @@ class TestAsyncImageUploader:
     def temp_image(self, tmp_path):
         """Create a temporary image file."""
         img_path = tmp_path / "test_image.jpg"
-        img_path.write_bytes(b'\xff\xd8\xff\xe0test_content')
+        img_path.write_bytes(b"\xff\xd8\xff\xe0test_content")
         return str(img_path)
 
     @pytest.fixture
@@ -37,7 +39,7 @@ class TestAsyncImageUploader:
         paths = []
         for i in range(3):
             img_path = tmp_path / f"test_image_{i}.jpg"
-            img_path.write_bytes(f'content{i}'.encode())
+            img_path.write_bytes(f"content{i}".encode())
             paths.append(str(img_path))
         return paths
 
@@ -55,9 +57,7 @@ class TestAsyncImageUploader:
     def test_init_custom_params(self):
         """Test initialization with custom parameters."""
         uploader = AsyncImageUploader(
-            api_base_url="https://custom.api.com",
-            max_concurrent=10,
-            timeout=60
+            api_base_url="https://custom.api.com", max_concurrent=10, timeout=60
         )
         assert uploader.api_base_url == "https://custom.api.com"
         assert uploader.max_concurrent == 10
@@ -149,7 +149,7 @@ class TestAsyncImageUploader:
         caplog.set_level("ERROR")
         uploader = AsyncImageUploader()
         large = tmp_path / "large.jpg"
-        large.write_bytes(b'x' * (11 * 1024 * 1024))
+        large.write_bytes(b"x" * (11 * 1024 * 1024))
         result = await uploader.validate_image_async(str(large))
         assert result is False
         assert "Image too large" in caplog.text
@@ -162,7 +162,7 @@ class TestAsyncImageUploader:
         """Test async image reading."""
         uploader = AsyncImageUploader()
         content = await uploader.read_image_async(temp_image)
-        assert content == b'\xff\xd8\xff\xe0test_content'
+        assert content == b"\xff\xd8\xff\xe0test_content"
         await uploader.close()
 
     # ==================== upload_single ====================
@@ -171,11 +171,11 @@ class TestAsyncImageUploader:
     async def test_upload_single_invalid_image(self, temp_image):
         """Test upload with invalid validation result."""
         uploader = AsyncImageUploader()
-        with patch.object(uploader, 'validate_image_async', return_value=False):
+        with patch.object(uploader, "validate_image_async", return_value=False):
             result = await uploader.upload_single(temp_image)
 
-        assert result['success'] is False
-        assert "Invalid image" in result['error']
+        assert result["success"] is False
+        assert "Invalid image" in result["error"]
         await uploader.close()
 
     @pytest.mark.asyncio
@@ -183,11 +183,11 @@ class TestAsyncImageUploader:
         """Test upload when file read fails."""
         caplog.set_level("ERROR")
         uploader = AsyncImageUploader()
-        with patch.object(uploader, 'read_image_async', side_effect=OSError("Read failed")):
+        with patch.object(uploader, "read_image_async", side_effect=OSError("Read failed")):
             result = await uploader.upload_single(temp_image)
 
-        assert result['success'] is False
-        assert "Read failed" in result['error']
+        assert result["success"] is False
+        assert "Read failed" in result["error"]
         await uploader.close()
 
     @pytest.mark.asyncio
@@ -197,16 +197,18 @@ class TestAsyncImageUploader:
 
         mock_response = AsyncMock()
         mock_response.status = 200
-        mock_response.json = AsyncMock(return_value={'url': 'https://example.com/img.jpg', 'id': '123'})
+        mock_response.json = AsyncMock(
+            return_value={"url": "https://example.com/img.jpg", "id": "123"}
+        )
 
         mock_session = MagicMock()
         mock_session.post = MagicMock(return_value=AsyncContextManager(mock_response))
 
-        with patch.object(uploader, '_get_session', return_value=mock_session):
+        with patch.object(uploader, "_get_session", return_value=mock_session):
             result = await uploader.upload_single(temp_image)
 
-        assert result['success'] is True
-        assert result['url'] == 'https://example.com/img.jpg'
+        assert result["success"] is True
+        assert result["url"] == "https://example.com/img.jpg"
         await uploader.close()
 
     @pytest.mark.asyncio
@@ -220,11 +222,11 @@ class TestAsyncImageUploader:
         mock_session = MagicMock()
         mock_session.post = MagicMock(return_value=AsyncContextManager(mock_response))
 
-        with patch.object(uploader, '_get_session', return_value=mock_session):
+        with patch.object(uploader, "_get_session", return_value=mock_session):
             result = await uploader.upload_single(temp_image)
 
-        assert result['success'] is False
-        assert result['error'] == 'Unauthorized'
+        assert result["success"] is False
+        assert result["error"] == "Unauthorized"
         await uploader.close()
 
     @pytest.mark.asyncio
@@ -238,11 +240,11 @@ class TestAsyncImageUploader:
         mock_session = MagicMock()
         mock_session.post = MagicMock(return_value=AsyncContextManager(mock_response))
 
-        with patch.object(uploader, '_get_session', return_value=mock_session):
+        with patch.object(uploader, "_get_session", return_value=mock_session):
             result = await uploader.upload_single(temp_image)
 
-        assert result['success'] is False
-        assert result['error'] == 'File too large'
+        assert result["success"] is False
+        assert result["error"] == "File too large"
         await uploader.close()
 
     @pytest.mark.asyncio
@@ -256,11 +258,11 @@ class TestAsyncImageUploader:
         mock_session = MagicMock()
         mock_session.post = MagicMock(return_value=AsyncContextManager(mock_response))
 
-        with patch.object(uploader, '_get_session', return_value=mock_session):
+        with patch.object(uploader, "_get_session", return_value=mock_session):
             result = await uploader.upload_single(temp_image)
 
-        assert result['success'] is False
-        assert "HTTP 500" in result['error']
+        assert result["success"] is False
+        assert "HTTP 500" in result["error"]
         await uploader.close()
 
     @pytest.mark.asyncio
@@ -272,11 +274,11 @@ class TestAsyncImageUploader:
         mock_session = MagicMock()
         mock_session.post = MagicMock(side_effect=TimeoutError())
 
-        with patch.object(uploader, '_get_session', return_value=mock_session):
+        with patch.object(uploader, "_get_session", return_value=mock_session):
             result = await uploader.upload_single(temp_image)
 
-        assert result['success'] is False
-        assert result['error'] == 'Timeout'
+        assert result["success"] is False
+        assert result["error"] == "Timeout"
         assert "Upload timeout" in caplog.text
         await uploader.close()
 
@@ -289,11 +291,11 @@ class TestAsyncImageUploader:
         mock_session = MagicMock()
         mock_session.post = MagicMock(side_effect=aiohttp.ClientError("Connection failed"))
 
-        with patch.object(uploader, '_get_session', return_value=mock_session):
+        with patch.object(uploader, "_get_session", return_value=mock_session):
             result = await uploader.upload_single(temp_image)
 
-        assert result['success'] is False
-        assert "Client error" in result['error']
+        assert result["success"] is False
+        assert "Client error" in result["error"]
         assert "Upload failed" in caplog.text
         await uploader.close()
 
@@ -306,11 +308,11 @@ class TestAsyncImageUploader:
         mock_session = MagicMock()
         mock_session.post = MagicMock(side_effect=RuntimeError("Unexpected"))
 
-        with patch.object(uploader, '_get_session', return_value=mock_session):
+        with patch.object(uploader, "_get_session", return_value=mock_session):
             result = await uploader.upload_single(temp_image)
 
-        assert result['success'] is False
-        assert "Unexpected" in result['error']
+        assert result["success"] is False
+        assert "Unexpected" in result["error"]
         assert "Unexpected error" in caplog.text
         await uploader.close()
 
@@ -321,16 +323,18 @@ class TestAsyncImageUploader:
 
         mock_response = AsyncMock()
         mock_response.status = 200
-        mock_response.json = AsyncMock(return_value={'url': 'https://example.com/img.jpg', 'id': '123'})
+        mock_response.json = AsyncMock(
+            return_value={"url": "https://example.com/img.jpg", "id": "123"}
+        )
 
         mock_session = MagicMock()
         mock_session.post = MagicMock(return_value=AsyncContextManager(mock_response))
 
-        with patch.object(uploader, '_get_session', return_value=mock_session):
+        with patch.object(uploader, "_get_session", return_value=mock_session):
             await uploader.upload_single(temp_image, auth_token="secret_token")
 
         call_kwargs = mock_session.post.call_args[1]
-        assert call_kwargs['headers']['Authorization'] == 'Bearer secret_token'
+        assert call_kwargs["headers"]["Authorization"] == "Bearer secret_token"
         await uploader.close()
 
     @pytest.mark.asyncio
@@ -340,15 +344,17 @@ class TestAsyncImageUploader:
 
         mock_response = AsyncMock()
         mock_response.status = 200
-        mock_response.json = AsyncMock(return_value={'url': 'https://example.com/img.jpg', 'id': '123'})
+        mock_response.json = AsyncMock(
+            return_value={"url": "https://example.com/img.jpg", "id": "123"}
+        )
 
         mock_session = MagicMock()
         mock_session.post = MagicMock(return_value=AsyncContextManager(mock_response))
 
-        with patch.object(uploader, '_get_session', return_value=mock_session):
+        with patch.object(uploader, "_get_session", return_value=mock_session):
             result = await uploader.upload_single(temp_image, product_id="PROD123")
 
-        assert result['success'] is True
+        assert result["success"] is True
         await uploader.close()
 
     # ==================== upload_batch ====================
@@ -360,16 +366,18 @@ class TestAsyncImageUploader:
 
         mock_response = AsyncMock()
         mock_response.status = 200
-        mock_response.json = AsyncMock(return_value={'url': 'https://example.com/img.jpg', 'id': '123'})
+        mock_response.json = AsyncMock(
+            return_value={"url": "https://example.com/img.jpg", "id": "123"}
+        )
 
         mock_session = MagicMock()
         mock_session.post = MagicMock(return_value=AsyncContextManager(mock_response))
 
-        with patch.object(uploader, '_get_session', return_value=mock_session):
+        with patch.object(uploader, "_get_session", return_value=mock_session):
             results = await uploader.upload_batch(temp_images)
 
         assert len(results) == 3
-        assert all(r['success'] for r in results)
+        assert all(r["success"] for r in results)
         await uploader.close()
 
     @pytest.mark.asyncio
@@ -377,14 +385,14 @@ class TestAsyncImageUploader:
         """Test batch upload when exception is raised."""
         uploader = AsyncImageUploader()
         img = tmp_path / "test.jpg"
-        img.write_bytes(b'content')
+        img.write_bytes(b"content")
 
-        with patch.object(uploader, 'upload_single', side_effect=Exception("Test error")):
+        with patch.object(uploader, "upload_single", side_effect=Exception("Test error")):
             results = await uploader.upload_batch([str(img)])
 
         assert len(results) == 1
-        assert results[0]['success'] is False
-        assert "Test error" in results[0]['error']
+        assert results[0]["success"] is False
+        assert "Test error" in results[0]["error"]
         await uploader.close()
 
     # ==================== close ====================
@@ -426,7 +434,7 @@ class TestAsyncImageUploader:
     async def test_get_returns_copy(self, temp_image):
         """Test that get_results returns a copy."""
         uploader = AsyncImageUploader()
-        uploader._upload_results.append({'test': 'data'})
+        uploader._upload_results.append({"test": "data"})
 
         results1 = uploader.get_results()
         results2 = uploader.get_results()

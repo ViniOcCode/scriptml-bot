@@ -33,7 +33,9 @@ class TestSpreadsheetParserCSV:
         """Test that CSV files raise ValueError (not supported by default parser)."""
         parser = SpreadsheetParser()
 
-        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False, mode='w', encoding='utf-8') as tmp:
+        with tempfile.NamedTemporaryFile(
+            suffix=".csv", delete=False, mode="w", encoding="utf-8"
+        ) as tmp:
             tmp.write("titulo,preco,categoria\nProduct 1,99.99,MLB123\n")
             tmp_path = Path(tmp.name)
 
@@ -48,11 +50,13 @@ class TestSpreadsheetParserCSV:
         parser = SpreadsheetParser()
 
         # Create expected DataFrame
-        expected_df = pd.DataFrame({
-            "titulo": ["Product 1", "Product 2"],
-            "preco": [99.99, 199.99],
-            "categoria": ["MLB123", "MLB456"],
-        })
+        expected_df = pd.DataFrame(
+            {
+                "titulo": ["Product 1", "Product 2"],
+                "preco": [99.99, 199.99],
+                "categoria": ["MLB123", "MLB456"],
+            }
+        )
 
         with patch("pandas.read_excel") as mock_read_excel:
             mock_read_excel.return_value = expected_df
@@ -80,10 +84,12 @@ class TestSpreadsheetParserCSV:
         """Test CSV parsing with semicolon delimiter (common in some locales)."""
         parser = SpreadsheetParser()
 
-        expected_df = pd.DataFrame({
-            "titulo": ["Product 1", "Product 2"],
-            "preco": [99.99, 199.99],
-        })
+        expected_df = pd.DataFrame(
+            {
+                "titulo": ["Product 1", "Product 2"],
+                "preco": [99.99, 199.99],
+            }
+        )
 
         with patch("pandas.read_excel") as mock_read_excel:
             mock_read_excel.return_value = expected_df
@@ -109,10 +115,12 @@ class TestSpreadsheetParserCSV:
         """Test CSV parsing with tab delimiter (TSV format)."""
         parser = SpreadsheetParser()
 
-        expected_df = pd.DataFrame({
-            "titulo": ["Product 1", "Product 2"],
-            "preco": [99.99, 199.99],
-        })
+        expected_df = pd.DataFrame(
+            {
+                "titulo": ["Product 1", "Product 2"],
+                "preco": [99.99, 199.99],
+            }
+        )
 
         with patch("pandas.read_excel") as mock_read_excel:
             mock_read_excel.return_value = expected_df
@@ -135,10 +143,12 @@ class TestSpreadsheetParserCSV:
         """Test CSV parsing with pipe delimiter."""
         parser = SpreadsheetParser()
 
-        expected_df = pd.DataFrame({
-            "titulo": ["Product 1"],
-            "preco": [99.99],
-        })
+        expected_df = pd.DataFrame(
+            {
+                "titulo": ["Product 1"],
+                "preco": [99.99],
+            }
+        )
 
         with patch("pandas.read_excel") as mock_read_excel:
             mock_read_excel.return_value = expected_df
@@ -168,12 +178,12 @@ class TestSpreadsheetParserExcel:
         sheet_name: str = "Sheet1",
     ) -> Path:
         """Helper to create a test Excel file.
-        
+
         Args:
             data: Dictionary with column names as keys and lists as values.
             filename: Name of the temporary file.
             sheet_name: Name of the sheet to create.
-            
+
         Returns:
             Path to the created file.
         """
@@ -245,14 +255,18 @@ class TestSpreadsheetParserExcel:
         # Create Excel with multiple sheets
         temp_file = Path(tempfile.gettempdir()) / "multi_sheet.xlsx"
 
-        df1 = pd.DataFrame({
-            "titulo": ["Product A"],
-            "preco": [100.00],
-        })
-        df2 = pd.DataFrame({
-            "titulo": ["Product B"],
-            "preco": [200.00],
-        })
+        df1 = pd.DataFrame(
+            {
+                "titulo": ["Product A"],
+                "preco": [100.00],
+            }
+        )
+        df2 = pd.DataFrame(
+            {
+                "titulo": ["Product B"],
+                "preco": [200.00],
+            }
+        )
 
         with pd.ExcelWriter(temp_file, engine="openpyxl") as writer:
             df1.to_excel(writer, sheet_name="Products", index=False)
@@ -274,14 +288,18 @@ class TestSpreadsheetParserExcel:
 
         temp_file = Path(tempfile.gettempdir()) / "multi_sheet_idx.xlsx"
 
-        df1 = pd.DataFrame({
-            "titulo": ["First Sheet Product"],
-            "preco": [100.00],
-        })
-        df2 = pd.DataFrame({
-            "titulo": ["Second Sheet Product"],
-            "preco": [200.00],
-        })
+        df1 = pd.DataFrame(
+            {
+                "titulo": ["First Sheet Product"],
+                "preco": [100.00],
+            }
+        )
+        df2 = pd.DataFrame(
+            {
+                "titulo": ["Second Sheet Product"],
+                "preco": [200.00],
+            }
+        )
 
         with pd.ExcelWriter(temp_file, engine="openpyxl") as writer:
             df1.to_excel(writer, sheet_name="Sheet1", index=False)
@@ -967,9 +985,9 @@ class TestEncoding:
         data = {
             "titulo": [
                 "日本語",  # Japanese
-                "中文",    # Chinese
-                "العربية", # Arabic
-                "русский", # Russian
+                "中文",  # Chinese
+                "العربية",  # Arabic
+                "русский",  # Russian
             ],
             "preco": [10.0, 20.0, 30.0, 40.0],
         }
@@ -992,10 +1010,12 @@ class TestEncoding:
         parser = SpreadsheetParser()
 
         # Mock DataFrame with UTF-8 content
-        expected_df = pd.DataFrame({
-            "titulo": ["Café", "Maçã"],
-            "preco": [10.0, 20.0],
-        })
+        expected_df = pd.DataFrame(
+            {
+                "titulo": ["Café", "Maçã"],
+                "preco": [10.0, 20.0],
+            }
+        )
 
         with patch("pandas.read_excel") as mock_read_excel:
             mock_read_excel.return_value = expected_df
@@ -1071,11 +1091,13 @@ class TestNormalizeColumnsMethod:
         """Test column normalization with various mappings."""
         parser = SpreadsheetParser()
 
-        df = pd.DataFrame({
-            "Title": ["Product 1"],
-            "PRICE": [99.99],
-            "Category_ID": ["MLB123"],
-        })
+        df = pd.DataFrame(
+            {
+                "Title": ["Product 1"],
+                "PRICE": [99.99],
+                "Category_ID": ["MLB123"],
+            }
+        )
 
         normalized = parser._normalize_columns(df)
 
@@ -1087,10 +1109,12 @@ class TestNormalizeColumnsMethod:
         """Test that column names with whitespace are handled."""
         parser = SpreadsheetParser()
 
-        df = pd.DataFrame({
-            "  title  ": ["Product 1"],
-            " price ": [99.99],
-        })
+        df = pd.DataFrame(
+            {
+                "  title  ": ["Product 1"],
+                " price ": [99.99],
+            }
+        )
 
         normalized = parser._normalize_columns(df)
 
@@ -1142,8 +1166,15 @@ class TestIntegrationScenarios:
 
             # Verify all expected fields are present
             expected_fields = [
-                "titulo", "preco", "categoria", "moeda",
-                "quantidade", "condicao", "descricao", "sku", "marca"
+                "titulo",
+                "preco",
+                "categoria",
+                "moeda",
+                "quantidade",
+                "condicao",
+                "descricao",
+                "sku",
+                "marca",
             ]
             for field in expected_fields:
                 assert field in result[0], f"Field {field} not found in parsed data"
@@ -1249,8 +1280,10 @@ class TestLoggerIntegration:
         # Should have logged reading message
         assert any("Lendo planilha" in record.message for record in caplog.records)
         # Should have logged parsed count
-        assert any("Parsed" in record.message and "registros" in record.message
-                   for record in caplog.records)
+        assert any(
+            "Parsed" in record.message and "registros" in record.message
+            for record in caplog.records
+        )
 
     def test_warning_logging_on_empty(self, caplog):
         """Test that warning is logged for empty file."""

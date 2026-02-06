@@ -1,6 +1,7 @@
 """
 Tests for text_utils.py - 100% coverage.
 """
+
 from mercadolivre_upload.shared.utils.text_utils import (
     capitalize_words,
     clean_html,

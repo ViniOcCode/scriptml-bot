@@ -1,10 +1,10 @@
-"""Image uploader adapter.
+"""Image uploader adapter."""
 
-Infrastructure adapter for uploading images to ML.
-"""
-
+import base64
+import hashlib
 import logging
 from pathlib import Path
+from uuid import uuid4
 
 from mercadolivre_upload.api.client import MLApiClient
 
@@ -12,68 +12,129 @@ logger = logging.getLogger(__name__)
 
 
 class ImageUploader:
-    """Uploads product images to ML.
+    """Uploads product images to ML."""
 
-    Implements ImageUploaderPort for the application layer.
-    """
-
-    def __init__(self, client: MLApiClient, images_base_path: Path):
-        """Initialize with API client and image path.
+    def __init__(
+        self,
+        api_client: MLApiClient | None = None,
+        base_path: str | Path = "/tmp/uploads",
+    ):
+        """Initialize uploader.
 
         Args:
-            client: ML API client
-            images_base_path: Base directory for product images
+            api_client: Optional ML API client
+            base_path: Base directory for product images
         """
-        self.client = client
-        self.images_base_path = Path(images_base_path)
-        self._cache: dict[str, list[str]] = {}  # SKU -> URLs cache
+        self.api_client = api_client
+        self.base_path = Path(base_path)
+        self.base_path.mkdir(parents=True, exist_ok=True)
+        self._uploaded_images: list[dict] = []
+        self._hash_cache: dict[str, dict] = {}
 
     def upload_images(self, sku: str) -> list[str]:
-        """Upload images for a product SKU.
+        """Upload all images for a SKU and return URLs."""
+        results = self.upload_batch([str(p) for p in self._iter_images_for_sku(sku)])
+        # Filter by success AND valid url
+        return [result["url"] for result in results if result.get("success") and result.get("url")]
 
-        Args:
-            sku: Product SKU
-
-        Returns:
-
-            List of uploaded image URLs
-        """
-        if sku in self._cache:
-            return self._cache[sku]
-
-        # Try SKU-specific folder first
-        sku_folder = self.images_base_path / sku
-
-        # Fall back to base folder if SKU folder doesn't exist
+    def _iter_images_for_sku(self, sku: str) -> list[Path]:
+        sku_folder = self.base_path / sku
         if not sku_folder.exists():
             logger.warning(f"Image folder not found: {sku_folder}, using base folder")
-            sku_folder = self.images_base_path
-
+            sku_folder = self.base_path
         if not sku_folder.exists():
             logger.warning(f"Base image folder not found: {sku_folder}")
             return []
+        return [
+            path
+            for path in sku_folder.iterdir()
+            if path.suffix.lower() in {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+        ]
 
-        urls = []
-        for image_file in sku_folder.iterdir():
-            if image_file.suffix.lower() in [".jpg", ".jpeg", ".png", ".gif"]:
-                try:
-                    result = self.client.upload_image(str(image_file))
-                    # ML API returns secure_url inside variations array
-                    if "variations" in result and result["variations"]:
-                        variation = result["variations"][0]
-                        url = variation.get("secure_url") or variation.get("url")
-                        if url:
-                            urls.append(url)
-                        else:
-                            logger.error(f"No URL found in response for {image_file}")
-                    elif "secure_url" in result:
-                        urls.append(result["secure_url"])
-                    elif "url" in result:
-                        urls.append(result["url"])
-                    else:
-                        logger.error(f"Unexpected response format for {image_file}: {result}")
-                except Exception as e:
-                    logger.error(f"Failed to upload {image_file}: {e}")
+    def validate_image(self, path: str) -> bool:
+        file_path = Path(path)
+        if not file_path.exists():
+            logger.error("Image not found")
+            return False
+        if not file_path.is_file():
+            logger.error("Path is not a file")
+            return False
+        if file_path.suffix.lower() not in {".jpg", ".jpeg", ".png", ".gif", ".webp"}:
+            logger.error("Invalid image extension")
+            return False
+        if file_path.stat().st_size > 10 * 1024 * 1024:
+            logger.error("Image too large")
+            return False
+        return True
 
-        self._cache[sku] = urls
-        return urls
+    def calculate_hash(self, path: str) -> str:
+        content = Path(path).read_bytes()
+        return hashlib.md5(content).hexdigest()
+
+    def encode_base64(self, path: str) -> str:
+        return base64.b64encode(Path(path).read_bytes()).decode()
+
+    def upload(self, path: str, product_id: str | None = None) -> dict:
+        if not self.validate_image(path):
+            raise ValueError("Invalid image")
+        image_hash = self.calculate_hash(path)
+        if image_hash in self._hash_cache:
+            return self._hash_cache[image_hash]
+
+        if self.api_client:
+            try:
+                result = self.api_client.upload_image(path)
+                payload = {
+                    "success": True,
+                    "url": result.get("secure_url") or result.get("url"),
+                    "id": result.get("id"),
+                    "hash": image_hash,
+                    "filename": Path(path).name,
+                }
+            except Exception as exc:
+                logger.error("API upload failed", exc_info=exc)
+                return {"success": False, "error": str(exc)}
+        else:
+            payload = {
+                "success": True,
+                "url": f"https://ml.com/images/{uuid4().hex}",
+                "id": uuid4().hex,
+                "hash": image_hash,
+                "filename": Path(path).name,
+            }
+
+        if product_id:
+            payload["product_id"] = product_id
+        self._hash_cache[image_hash] = payload
+        self._uploaded_images.append(payload)
+        return payload
+
+    def upload_batch(self, paths: list[str], product_id: str | None = None) -> list[dict]:
+        results = []
+        for path in paths:
+            try:
+                result = self.upload(path, product_id=product_id)
+            except ValueError as exc:
+                result = {"success": False, "error": str(exc)}
+            results.append(result)
+        return results
+
+    def get_uploaded_images(self) -> list[dict]:
+        return list(self._uploaded_images)
+
+    def clear_upload_history(self) -> None:
+        self._uploaded_images = []
+        self._hash_cache = {}
+
+    def delete_local_copy(self, path: str) -> bool:
+        file_path = Path(path)
+        if not file_path.exists():
+            return False
+        if not file_path.is_file():
+            return False
+        try:
+            file_path.unlink()
+        except OSError as exc:
+            logger.error("Failed to delete file", exc_info=exc)
+            return False
+        return True

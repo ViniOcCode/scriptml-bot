@@ -1,4 +1,5 @@
 """Tests for variation_builder.py module."""
+
 import sys
 from pathlib import Path
 
@@ -326,8 +327,7 @@ class TestIntegration:
 
         # Create variations
         variations = (
-            builder
-            .start_variation(price=99.99, qty=10)
+            builder.start_variation(price=99.99, qty=10)
             .add_color("Red")
             .add_size("M")
             .add_picture("https://example.com/red-m.jpg")

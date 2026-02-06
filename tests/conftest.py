@@ -1,6 +1,7 @@
 """
 Pytest configuration and shared fixtures.
 """
+
 import os
 import sys
 from pathlib import Path
@@ -14,6 +15,7 @@ sys.path.insert(0, str(project_root))
 
 
 # ==================== Fixtures de Credenciais Mockadas ====================
+
 
 @pytest.fixture(autouse=True)
 def mock_credentials():
@@ -87,6 +89,7 @@ def mock_auth_manager_global():
 
 
 # ==================== Fixtures de Autenticação Mockada ====================
+
 
 @pytest.fixture
 def mock_oauth_manager():
@@ -185,9 +188,11 @@ def mock_category_data():
 
 # ==================== Fixtures de Resposta HTTP Mockada ====================
 
+
 @pytest.fixture
 def mock_api_response():
     """Factory fixture para criar respostas HTTP mockadas."""
+
     def _create_response(status_code=200, json_data=None, text="", raise_error=None):
         response = Mock()
         response.status_code = status_code
@@ -200,12 +205,14 @@ def mock_api_response():
             response.raise_for_status.return_value = None
 
         return response
+
     return _create_response
 
 
 @pytest.fixture
 def mock_session_factory():
     """Factory fixture para criar sessions mockadas do requests."""
+
     def _create_session(responses_dict=None):
         """
         Args:
@@ -236,10 +243,12 @@ def mock_session_factory():
         session.delete = lambda url, **kw: mock_request("DELETE", url, **kw)
 
         return session
+
     return _create_session
 
 
 # ==================== Fixtures de Arquivo ====================
+
 
 @pytest.fixture
 def sample_csv_file(tmp_path):
@@ -267,6 +276,7 @@ def sample_json_file(tmp_path):
 
 
 # ==================== Fixtures de Configuração ====================
+
 
 @pytest.fixture
 def mock_config():

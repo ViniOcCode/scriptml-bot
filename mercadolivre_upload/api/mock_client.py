@@ -1,5 +1,6 @@
 """Mock API client for testing without real auth."""
 
+
 class MockMLApiClient:
     """Mock client that simulates API responses."""
 
@@ -11,14 +12,15 @@ class MockMLApiClient:
         return {
             "id": category_id,
             "name": "Livros Infantis",
-            "path_from_root": [{"id": "MLB437616", "name": "Livros"}]
+            "path_from_root": [{"id": "MLB437616", "name": "Livros"}],
         }
 
     def publish_item(self, item_data):
         """Simulate publishing."""
         import random
+
         return {
             "id": f"MLB{random.randint(1000000000, 9999999999)}",
             "status": "active",
-            "permalink": "https://mercadolivre.com.br/..."
+            "permalink": "https://mercadolivre.com.br/...",
         }

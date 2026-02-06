@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 class FiscalSubmissionStatus(Enum):
     """Status of fiscal data submission."""
+
     ALREADY_EXISTS = "already_exists"
     REGISTERED = "registered"
     VERIFIED = "verified"
@@ -94,7 +95,7 @@ class RetryConfig:
         base_delay: float = 1.0,
         max_delay: float = 60.0,
         exponential_base: float = 2.0,
-        retryable_status_codes: set[int] | None = None
+        retryable_status_codes: set[int] | None = None,
     ):
         self.max_retries = max_retries
         self.base_delay = base_delay
@@ -104,7 +105,7 @@ class RetryConfig:
 
     def get_delay(self, attempt: int) -> float:
         """Calculate delay for retry attempt with exponential backoff."""
-        delay = self.base_delay * (self.exponential_base ** attempt)
+        delay = self.base_delay * (self.exponential_base**attempt)
         return min(delay, self.max_delay)
 
 
@@ -126,7 +127,7 @@ class FiscalService:
         api_client: FiscalApiPort,
         retry_config: RetryConfig | None = None,
         can_invoice_wait_delay: float = 60.0,
-        can_invoice_max_retries: int = 5
+        can_invoice_max_retries: int = 5,
     ):
         """Initialize fiscal service.
 
@@ -142,11 +143,7 @@ class FiscalService:
         self.can_invoice_max_retries = can_invoice_max_retries
 
     def _execute_with_retry(
-        self,
-        operation: Callable[[], Any],
-        operation_name: str,
-        sku: str,
-        item_id: str
+        self, operation: Callable[[], Any], operation_name: str, sku: str, item_id: str
     ) -> tuple[Any, int]:
         """Execute an operation with retry logic.
 
@@ -199,15 +196,13 @@ class FiscalService:
 
     def _extract_status_code(self, exception: Exception) -> int:
         """Extract HTTP status code from exception."""
-        response = getattr(exception, 'response', None)
+        response = getattr(exception, "response", None)
         if response is not None:
-            return getattr(response, 'status_code', 0)
+            return getattr(response, "status_code", 0)
         return 0
 
     def _wait_for_fiscal_data_ready(
-        self,
-        item_id: str,
-        sku: str
+        self, item_id: str, sku: str
     ) -> tuple[bool, dict[str, Any] | None, int]:
         """Wait for item to be ready for fiscal data submission.
 
@@ -260,9 +255,7 @@ class FiscalService:
         return False, None, self.can_invoice_max_retries
 
     def submit_fiscal_data_workflow(
-        self,
-        item_id: str,
-        fiscal_data: FiscalData
+        self, item_id: str, fiscal_data: FiscalData
     ) -> FiscalSubmissionResult:
         """Execute complete fiscal data submission workflow.
 
@@ -296,7 +289,7 @@ class FiscalService:
                 status=FiscalSubmissionStatus.FAILED,
                 fiscal_data=fiscal_data,
                 error_message=error_msg,
-                error_code="INVALID_FISCAL_DATA"
+                error_code="INVALID_FISCAL_DATA",
             )
 
         # Step 1: Wait for item to be ready for fiscal data
@@ -320,7 +313,7 @@ class FiscalService:
                     response=fiscal_info_response,
                     error_message=error_msg,
                     error_code="NOT_READY_FOR_FISCAL_DATA",
-                    retry_count=wait_retries
+                    retry_count=wait_retries,
                 )
 
             logger.info(
@@ -338,7 +331,7 @@ class FiscalService:
                 status=FiscalSubmissionStatus.FAILED,
                 fiscal_data=fiscal_data,
                 error_message=error_msg,
-                error_code="FISCAL_INFO_CHECK_ERROR"
+                error_code="FISCAL_INFO_CHECK_ERROR",
             )
 
         # Step 2: Check if fiscal data exists
@@ -348,7 +341,7 @@ class FiscalService:
                 lambda: self.api_client.check_fiscal_data_exists(sku),
                 "Check fiscal data exists",
                 sku,
-                item_id
+                item_id,
             )
 
             if exists:
@@ -358,8 +351,11 @@ class FiscalService:
                 )
                 # Skip to verification
                 return self._verify_invoice_readiness(
-                    item_id, sku, fiscal_data, FiscalSubmissionStatus.ALREADY_EXISTS,
-                    wait_retries + check_exists_retry_count
+                    item_id,
+                    sku,
+                    fiscal_data,
+                    FiscalSubmissionStatus.ALREADY_EXISTS,
+                    wait_retries + check_exists_retry_count,
                 )
 
         except Exception as e:
@@ -373,7 +369,7 @@ class FiscalService:
                 fiscal_data=fiscal_data,
                 error_message=error_msg,
                 error_code="CHECK_EXISTS_ERROR",
-                retry_count=wait_retries + check_exists_retry_count
+                retry_count=wait_retries + check_exists_retry_count,
             )
 
         # Step 3: Register new fiscal data
@@ -387,12 +383,10 @@ class FiscalService:
                 lambda: self.api_client.register_fiscal_data(payload),
                 "Register fiscal data",
                 sku,
-                item_id
+                item_id,
             )
 
-            logger.info(
-                f"Successfully registered fiscal data for SKU {sku} (item {item_id})"
-            )
+            logger.info(f"Successfully registered fiscal data for SKU {sku} (item {item_id})")
 
         except Exception as e:
             error_msg = f"Failed to register fiscal data: {str(e)}"
@@ -400,7 +394,7 @@ class FiscalService:
             # Try to extract response body for more details on 400 errors
             error_detail = None
             try:
-                if hasattr(e, 'response') and e.response is not None:
+                if hasattr(e, "response") and e.response is not None:
                     error_detail = e.response.json()
                     error_msg = f"{error_msg} - Response: {error_detail}"
             except Exception:
@@ -415,13 +409,16 @@ class FiscalService:
                 response=error_detail,
                 error_message=error_msg,
                 error_code=error_code or "REGISTER_ERROR",
-                retry_count=wait_retries + check_exists_retry_count + registration_retry_count
+                retry_count=wait_retries + check_exists_retry_count + registration_retry_count,
             )
 
         # Step 4: Verify invoice readiness
         return self._verify_invoice_readiness(
-            item_id, sku, fiscal_data, FiscalSubmissionStatus.REGISTERED,
-            wait_retries + check_exists_retry_count + registration_retry_count
+            item_id,
+            sku,
+            fiscal_data,
+            FiscalSubmissionStatus.REGISTERED,
+            wait_retries + check_exists_retry_count + registration_retry_count,
         )
 
     def _verify_invoice_readiness(
@@ -430,7 +427,7 @@ class FiscalService:
         sku: str,
         fiscal_data: FiscalData,
         previous_status: FiscalSubmissionStatus,
-        previous_retry_count: int = 0
+        previous_retry_count: int = 0,
     ) -> FiscalSubmissionResult:
         """Verify invoice readiness for an item.
 
@@ -449,15 +446,13 @@ class FiscalService:
                 lambda: self.api_client.verify_invoice_readiness(item_id),
                 "Verify invoice readiness",
                 sku,
-                item_id
+                item_id,
             )
 
             total_retry_count = previous_retry_count + retry_count
 
             if is_ready:
-                logger.info(
-                    f"Invoice readiness verified for item {item_id} (SKU: {sku})"
-                )
+                logger.info(f"Invoice readiness verified for item {item_id} (SKU: {sku})")
                 return FiscalSubmissionResult(
                     success=True,
                     item_id=item_id,
@@ -465,7 +460,7 @@ class FiscalService:
                     status=FiscalSubmissionStatus.VERIFIED,
                     fiscal_data=fiscal_data,
                     response=response,
-                    retry_count=total_retry_count
+                    retry_count=total_retry_count,
                 )
             else:
                 logger.warning(
@@ -480,7 +475,7 @@ class FiscalService:
                     response=response,
                     error_message="Item not ready for invoice generation",
                     error_code="NOT_INVOICE_READY",
-                    retry_count=total_retry_count
+                    retry_count=total_retry_count,
                 )
 
         except Exception as e:
@@ -494,12 +489,12 @@ class FiscalService:
                 fiscal_data=fiscal_data,
                 error_message=error_msg,
                 error_code="VERIFY_ERROR",
-                retry_count=previous_retry_count
+                retry_count=previous_retry_count,
             )
 
     def _extract_error_code(self, exception: Exception) -> str | None:
         """Extract error code from API exception."""
-        response = getattr(exception, 'response', None)
+        response = getattr(exception, "response", None)
         if response is None:
             return None
 
@@ -517,8 +512,7 @@ class FiscalService:
         return None
 
     def submit_fiscal_data_batch(
-        self,
-        items: list[tuple[str, FiscalData]]
+        self, items: list[tuple[str, FiscalData]]
     ) -> list[FiscalSubmissionResult]:
         """Submit fiscal data for multiple items.
 
@@ -541,21 +535,14 @@ class FiscalService:
             if result.success:
                 logger.info(f"Successfully processed {item_id}")
             else:
-                logger.error(
-                    f"Failed to process {item_id}: {result.error_message}"
-                )
+                logger.error(f"Failed to process {item_id}: {result.error_message}")
 
         success_count = sum(1 for r in results if r.success)
-        logger.info(
-            f"Batch submission complete: {success_count}/{total} successful"
-        )
+        logger.info(f"Batch submission complete: {success_count}/{total} successful")
 
         return results
 
-    def validate_fiscal_data(
-        self,
-        fiscal_data: FiscalData
-    ) -> tuple[bool, list[str]]:
+    def validate_fiscal_data(self, fiscal_data: FiscalData) -> tuple[bool, list[str]]:
         """Validate fiscal data without submitting.
 
         Args:
@@ -573,9 +560,7 @@ class FiscalService:
         return is_valid, missing
 
     def check_fiscal_data_exists(
-        self,
-        sku: str,
-        item_id: str = ""
+        self, sku: str, item_id: str = ""
     ) -> tuple[bool, dict[str, Any] | None, int]:
         """Check if fiscal data exists for a SKU.
 
@@ -591,7 +576,7 @@ class FiscalService:
                 lambda: self.api_client.check_fiscal_data_exists(sku),
                 "Check fiscal data exists",
                 sku,
-                item_id or sku
+                item_id or sku,
             )
             return exists, data, retry_count
         except Exception as e:
@@ -599,9 +584,7 @@ class FiscalService:
             raise
 
     def register_fiscal_data(
-        self,
-        fiscal_data: FiscalData,
-        item_id: str = ""
+        self, fiscal_data: FiscalData, item_id: str = ""
     ) -> tuple[dict[str, Any], int]:
         """Register fiscal data for a product.
 
@@ -624,7 +607,7 @@ class FiscalService:
                 lambda: self.api_client.register_fiscal_data(payload),
                 "Register fiscal data",
                 sku,
-                item_id or sku
+                item_id or sku,
             )
             return response, retry_count
         except Exception as e:
@@ -632,9 +615,7 @@ class FiscalService:
             raise
 
     def verify_invoice_readiness(
-        self,
-        item_id: str,
-        sku: str = ""
+        self, item_id: str, sku: str = ""
     ) -> tuple[bool, dict[str, Any], int]:
         """Verify if an item is ready for invoice generation.
 
@@ -650,7 +631,7 @@ class FiscalService:
                 lambda: self.api_client.verify_invoice_readiness(item_id),
                 "Verify invoice readiness",
                 sku or item_id,
-                item_id
+                item_id,
             )
             return is_ready, response, retry_count
         except Exception as e:

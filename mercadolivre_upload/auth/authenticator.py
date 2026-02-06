@@ -23,7 +23,4 @@ class AuthManager:
 
     def get_auth_status(self) -> dict:
         """Get authentication status."""
-        return {
-            "authenticated": self.is_authenticated(),
-            "user_id": None
-        }
+        return {"authenticated": self.is_authenticated(), "user_id": None}

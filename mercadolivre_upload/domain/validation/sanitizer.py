@@ -14,16 +14,16 @@ logger = logging.getLogger(__name__)
 
 def _load_protected_attributes() -> set:
     """Load protected attributes from config file.
-    
+
     Returns:
         Set of attribute IDs that should never be dropped
     """
     try:
         config_path = Path("config/generic_mappings.yaml")
-        with open(config_path, encoding='utf-8') as f:
+        with open(config_path, encoding="utf-8") as f:
             config = yaml.safe_load(f)
 
-        protected = config.get('protected_attributes', [])
+        protected = config.get("protected_attributes", [])
         return set(protected)
     except Exception as e:
         logger.warning(f"Could not load protected attributes from config: {e}. Using empty set.")
@@ -32,16 +32,16 @@ def _load_protected_attributes() -> set:
 
 def _load_similarity_threshold() -> float:
     """Load similarity threshold from config file.
-    
+
     Returns:
         Threshold value for redundancy detection
     """
     try:
         config_path = Path("config/generic_mappings.yaml")
-        with open(config_path, encoding='utf-8') as f:
+        with open(config_path, encoding="utf-8") as f:
             config = yaml.safe_load(f)
 
-        return config.get('similarity', {}).get('redundancy_threshold', 0.9)
+        return config.get("similarity", {}).get("redundancy_threshold", 0.9)
     except Exception as e:
         logger.warning(f"Could not load similarity threshold from config: {e}. Using default 0.9.")
         return 0.9
@@ -49,14 +49,14 @@ def _load_similarity_threshold() -> float:
 
 class AttributeSanitizer:
     """Drops attributes that increase rejection risk or add noise.
-    
+
     Uses configuration from config/generic_mappings.yaml as the single source of truth.
-    
+
     NOTE: This sanitizer is intentionally conservative. We preserve most
     attributes because Mercado Livre's API accepts them. Only drop:
     - Very low quality attributes (score < threshold)
     - Truly redundant values (nearly identical text)
-    
+
     We do NOT drop:
     - Optional logistics (HEIGHT, WIDTH, WEIGHT are important for shipping)
     - Editorial attributes (they provide useful product info)
@@ -64,7 +64,7 @@ class AttributeSanitizer:
 
     def __init__(self, min_score: int = 40, config: dict | None = None):
         """Initialize the sanitizer.
-        
+
         Args:
             min_score: Minimum score threshold for keeping attributes
             config: Optional custom config to override file-based config
@@ -74,8 +74,10 @@ class AttributeSanitizer:
 
         # Load from config (single source of truth), allow override
         if config:
-            self.protected_attributes = set(config.get('protected_attributes', []))
-            self.similarity_threshold = config.get('similarity', {}).get('redundancy_threshold', 0.9)
+            self.protected_attributes = set(config.get("protected_attributes", []))
+            self.similarity_threshold = config.get("similarity", {}).get(
+                "redundancy_threshold", 0.9
+            )
         else:
             self.protected_attributes = _load_protected_attributes()
             self.similarity_threshold = _load_similarity_threshold()
@@ -102,15 +104,11 @@ class AttributeSanitizer:
 
             # Drop low-score attributes (but keep protected ones above)
             if attr.score < self.min_score:
-                logger.debug(
-                    f"Dropping {attr.id}: score {attr.score} < {self.min_score}"
-                )
+                logger.debug(f"Dropping {attr.id}: score {attr.score} < {self.min_score}")
                 continue
 
             # Drop only truly redundant editorial attributes
-            if attr.classification == CLASS_EDITORIAL and self._is_redundant(
-                attr, seen_values
-            ):
+            if attr.classification == CLASS_EDITORIAL and self._is_redundant(attr, seen_values):
                 logger.debug(f"Dropping redundant editorial {attr.id}")
                 continue
 
@@ -125,9 +123,7 @@ class AttributeSanitizer:
         logger.info(f"Sanitized {len(scored_attrs)} -> {len(result)} attributes")
         return result
 
-    def _is_redundant(
-        self, attr: ScoredAttribute, seen_values: dict[str, str]
-    ) -> bool:
+    def _is_redundant(self, attr: ScoredAttribute, seen_values: dict[str, str]) -> bool:
         """Check for semantic similarity with already-kept attributes."""
         val_lower = attr.value.lower()
 
@@ -146,9 +142,7 @@ class AttributeSanitizer:
         """Adjust the minimum score threshold."""
         self.min_score = threshold
 
-    def get_dropped_reason(
-        self, attr: ScoredAttribute
-    ) -> str | None:
+    def get_dropped_reason(self, attr: ScoredAttribute) -> str | None:
         """Get the reason an attribute would be dropped."""
         if attr.score < self.min_score:
             return f"score too low ({attr.score} < {self.min_score})"

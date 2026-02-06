@@ -99,7 +99,7 @@ class ClipUploader:
             logger.error(
                 f"Unexpected error uploading clip for {item_id}: {type(e).__name__}: {e}, "
                 f"video={video_path.name}, sites={sites}",
-                exc_info=True
+                exc_info=True,
             )
             return None
 

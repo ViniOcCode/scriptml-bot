@@ -1,4 +1,5 @@
 """Tests for product_builder.py module."""
+
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch

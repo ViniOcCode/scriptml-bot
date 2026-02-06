@@ -51,7 +51,8 @@ dev = [
 ml-upload = "mercadolivre_upload.main:main"
 
 [tool.setuptools]
-packages = ["mercadolivre_upload", "mercadolivre_upload.cli", "mercadolivre_upload.cli.commands", "mercadolivre_upload.adapters", "mercadolivre_upload.adapters.spreadsheet", "mercadolivre_upload.api", "mercadolivre_upload.application", "mercadolivre_upload.application.builders", "mercadolivre_upload.auth", "mercadolivre_upload.domain", "mercadolivre_upload.domain.fiscal", "mercadolivre_upload.domain.product", "mercadolivre_upload.domain.category", "mercadolivre_upload.domain.shipping", "mercadolivre_upload.domain.validation", "mercadolivre_upload.infrastructure", "mercadolivre_upload.infrastructure.cache", "mercadolivre_upload.utils"]
+# Use a minimal explicit package list to avoid referencing missing subpackages during build.
+packages = ["mercadolivre_upload"]
 
 [project.urls]
 Homepage = "https://github.com/vinicius/scriptml"

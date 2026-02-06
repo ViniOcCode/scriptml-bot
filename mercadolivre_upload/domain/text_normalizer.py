@@ -10,7 +10,7 @@ from difflib import SequenceMatcher
 
 class PortugueseTextNormalizer:
     """Normalizes Portuguese text for comparison and matching.
-    
+
     Handles:
     - Accent removal (é -> e, ã -> a, etc.)
     - Case normalization
@@ -20,32 +20,50 @@ class PortugueseTextNormalizer:
 
     # Common Portuguese accent mappings
     ACCENT_MAP = {
-        'á': 'a', 'à': 'a', 'ã': 'a', 'â': 'a', 'ä': 'a',
-        'é': 'e', 'è': 'e', 'ê': 'e', 'ë': 'e',
-        'í': 'i', 'ì': 'i', 'î': 'i', 'ï': 'i',
-        'ó': 'o', 'ò': 'o', 'õ': 'o', 'ô': 'o', 'ö': 'o',
-        'ú': 'u', 'ù': 'u', 'û': 'u', 'ü': 'u',
-        'ç': 'c',
-        'ñ': 'n',
-        'ý': 'y', 'ÿ': 'y',
+        "á": "a",
+        "à": "a",
+        "ã": "a",
+        "â": "a",
+        "ä": "a",
+        "é": "e",
+        "è": "e",
+        "ê": "e",
+        "ë": "e",
+        "í": "i",
+        "ì": "i",
+        "î": "i",
+        "ï": "i",
+        "ó": "o",
+        "ò": "o",
+        "õ": "o",
+        "ô": "o",
+        "ö": "o",
+        "ú": "u",
+        "ù": "u",
+        "û": "u",
+        "ü": "u",
+        "ç": "c",
+        "ñ": "n",
+        "ý": "y",
+        "ÿ": "y",
     }
 
     @staticmethod
     def normalize(text: str) -> str:
         """Normalize Portuguese text for comparison.
-        
+
         Process:
         1. Convert to lowercase
         2. Remove accents
         3. Remove special characters (keep only alphanumeric and spaces)
         4. Normalize whitespace
-        
+
         Args:
             text: Input text to normalize
-            
+
         Returns:
             Normalized text string
-            
+
         Example:
             >>> PortugueseTextNormalizer.normalize("Título do Livro")
             'titulo do livro'
@@ -57,27 +75,27 @@ class PortugueseTextNormalizer:
         text = text.lower().strip()
 
         # Remove accents using NFKD decomposition
-        text = unicodedata.normalize('NFKD', text)
-        text = ''.join(c for c in text if not unicodedata.combining(c))
+        text = unicodedata.normalize("NFKD", text)
+        text = "".join(c for c in text if not unicodedata.combining(c))
 
         # Remove special characters, keep only alphanumeric and spaces
-        text = ''.join(c for c in text if c.isalnum() or c.isspace())
+        text = "".join(c for c in text if c.isalnum() or c.isspace())
 
         # Normalize whitespace (multiple spaces -> single space)
-        text = ' '.join(text.split())
+        text = " ".join(text.split())
 
         return text
 
     @staticmethod
     def normalize_keep_accents(text: str) -> str:
         """Normalize without removing accents.
-        
+
         Use this when you want case/whitespace normalization
         but need to preserve accents for display.
-        
+
         Args:
             text: Input text to normalize
-            
+
         Returns:
             Normalized text with accents preserved
         """
@@ -85,23 +103,25 @@ class PortugueseTextNormalizer:
             return ""
 
         text = text.lower().strip()
-        text = ''.join(c for c in text if c.isalnum() or c.isspace() or unicodedata.category(c).startswith('M'))
-        text = ' '.join(text.split())
+        text = "".join(
+            c for c in text if c.isalnum() or c.isspace() or unicodedata.category(c).startswith("M")
+        )
+        text = " ".join(text.split())
         return text
 
     @staticmethod
     def similarity(a: str, b: str) -> float:
         """Calculate similarity ratio between two strings.
-        
+
         Uses SequenceMatcher on normalized versions of the strings.
-        
+
         Args:
             a: First string
             b: Second string
-            
+
         Returns:
             Similarity ratio from 0.0 to 1.0
-            
+
         Example:
             >>> PortugueseTextNormalizer.similarity("Título", "titulo")
             1.0
@@ -119,14 +139,14 @@ class PortugueseTextNormalizer:
     @staticmethod
     def partial_similarity(a: str, b: str) -> float:
         """Calculate partial similarity (good for substring matching).
-        
+
         Returns the best similarity ratio when comparing all substrings
         of the shorter string against the longer string.
-        
+
         Args:
             a: First string
             b: Second string
-            
+
         Returns:
             Best partial similarity ratio from 0.0 to 1.0
         """
@@ -150,10 +170,10 @@ class PortugueseTextNormalizer:
     @staticmethod
     def tokenize(text: str) -> list[str]:
         """Tokenize text into words.
-        
+
         Args:
             text: Input text
-            
+
         Returns:
             List of normalized tokens
         """
@@ -163,7 +183,7 @@ class PortugueseTextNormalizer:
     @staticmethod
     def acronym_match(a: str, b: str) -> float:
         """Check if strings match by acronym.
-        
+
         Example:
             >>> PortugueseTextNormalizer.acronym_match("NCM", "Número Código Mercadoria")
             1.0
@@ -173,7 +193,7 @@ class PortugueseTextNormalizer:
 
         # Get first letters of each word in b
         words_b = norm_b.split()
-        acronym_b = ''.join(word[0] for word in words_b if word)
+        acronym_b = "".join(word[0] for word in words_b if word)
 
         if norm_a == acronym_b:
             return 1.0
@@ -187,10 +207,10 @@ class PortugueseTextNormalizer:
 
 def normalize_text(text: str) -> str:
     """Convenience function for quick normalization.
-    
+
     Args:
         text: Text to normalize
-        
+
     Returns:
         Normalized text
     """
@@ -199,11 +219,11 @@ def normalize_text(text: str) -> str:
 
 def text_similarity(a: str, b: str) -> float:
     """Convenience function for quick similarity calculation.
-    
+
     Args:
         a: First string
         b: Second string
-        
+
     Returns:
         Similarity ratio
     """

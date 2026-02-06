@@ -20,13 +20,13 @@ MLPayload = dict[str, Any]
 
 class CachedAttributeMapper:
     """Maps Excel column headers to ML API attributes using cached category data.
-    
+
     Loads category attribute definitions from JSON cache files and provides
     methods to:
     - Find attribute definitions by Excel column header (name matching)
     - Map Excel cell values to ML API value IDs for list-type attributes
     - Return complete ML API payload format
-    
+
     Example:
         mapper = CachedAttributeMapper("cache/categories", "MLB437616")
         attr = mapper.find_attribute_by_name("Idioma")
@@ -35,7 +35,7 @@ class CachedAttributeMapper:
 
     def __init__(self, cache_dir: str, category_id: str):
         """Initialize mapper with cache directory and category ID.
-        
+
         Args:
             cache_dir: Path to directory containing category cache JSON files
             category_id: ML category ID (e.g., "MLB437616")
@@ -52,10 +52,10 @@ class CachedAttributeMapper:
 
     def load_cache(self) -> dict[str, Any]:
         """Load category cache from JSON file.
-        
+
         Returns:
             Dictionary containing category attributes cache
-            
+
         Raises:
             FileNotFoundError: If cache file doesn't exist
             json.JSONDecodeError: If cache file is invalid JSON
@@ -64,33 +64,32 @@ class CachedAttributeMapper:
 
         if not cache_file.exists():
             raise FileNotFoundError(
-                f"Cache file not found: {cache_file}. "
-                f"Please fetch category attributes first."
+                f"Cache file not found: {cache_file}. " f"Please fetch category attributes first."
             )
 
-        with open(cache_file, encoding='utf-8') as f:
+        with open(cache_file, encoding="utf-8") as f:
             self._cache = json.load(f)
 
         return self._cache
 
     def build_name_index(self) -> NameIndex:
         """Build index mapping normalized attribute names to definitions.
-        
+
         Creates two-level index:
         1. Normalized name -> attribute definition
         2. Value name index for list-type attributes
-        
+
         Returns:
             Dictionary mapping normalized names to attribute definitions
         """
         self._name_index = {}
         self._value_index = {}
 
-        attributes = self._cache.get('attributes', [])
+        attributes = self._cache.get("attributes", [])
 
         for attr in attributes:
-            name = attr.get('name', '')
-            attr_id = attr.get('id', '')
+            name = attr.get("name", "")
+            attr_id = attr.get("id", "")
 
             if not name or not attr_id:
                 continue
@@ -100,10 +99,10 @@ class CachedAttributeMapper:
             self._name_index[normalized_name] = attr
 
             # Build value index for list-type attributes
-            if attr.get('value_type') == 'list' and 'values' in attr:
+            if attr.get("value_type") == "list" and "values" in attr:
                 value_map: dict[str, ValueDef] = {}
-                for value in attr['values']:
-                    value_name = value.get('name', '')
+                for value in attr["values"]:
+                    value_name = value.get("name", "")
                     if value_name:
                         normalized_value = PortugueseTextNormalizer.normalize(value_name)
                         value_map[normalized_value] = value
@@ -113,16 +112,16 @@ class CachedAttributeMapper:
 
     def find_attribute_by_name(self, excel_header: str) -> AttributeDef | None:
         """Find attribute definition by Excel column header.
-        
+
         Performs exact match first, then falls back to near-exact matching
         using normalized text comparison.
-        
+
         Args:
             excel_header: Excel column header text
-            
+
         Returns:
             Attribute definition dict if found, None otherwise
-            
+
         Example:
             >>> mapper.find_attribute_by_name("Idioma")
             {'id': 'LANGUAGE', 'name': 'Idioma', 'value_type': 'list', ...}
@@ -149,7 +148,7 @@ class CachedAttributeMapper:
                     best_match = attr
             else:
                 # Use similarity for fuzzy matching
-                attr_name = attr.get('name', '')
+                attr_name = attr.get("name", "")
                 score = PortugueseTextNormalizer.similarity(excel_header, attr_name)
                 if score > best_score and score >= 0.85:  # High threshold for near-exact
                     best_score = score
@@ -159,17 +158,17 @@ class CachedAttributeMapper:
 
     def map_value(self, attribute_id: str, excel_value: str) -> MLPayload:
         """Map Excel cell value to ML API value payload.
-        
+
         For list-type attributes, finds the matching value_id from the cache.
         For string/number types, uses the value directly.
-        
+
         Args:
             attribute_id: ML API attribute ID
             excel_value: Value from Excel cell
-            
+
         Returns:
             Complete ML API payload dict with id, name, value_id, value_name, values
-            
+
         Example:
             >>> mapper.map_value("LANGUAGE", "Português")
             {
@@ -182,8 +181,8 @@ class CachedAttributeMapper:
         """
         # Find the attribute definition
         attr: AttributeDef | None = None
-        for a in self._cache.get('attributes', []):
-            if a.get('id') == attribute_id:
+        for a in self._cache.get("attributes", []):
+            if a.get("id") == attribute_id:
                 attr = a
                 break
 
@@ -194,15 +193,15 @@ class CachedAttributeMapper:
                 "name": excel_value,
                 "value_id": None,
                 "value_name": excel_value,
-                "values": []
+                "values": [],
             }
 
-        attr_name = attr.get('name', '')
-        value_type = attr.get('value_type', 'string')
-        default_unit = attr.get('default_unit')
+        attr_name = attr.get("name", "")
+        value_type = attr.get("value_type", "string")
+        default_unit = attr.get("default_unit")
 
         # Handle number_unit type attributes (WIDTH, HEIGHT, WEIGHT, etc.)
-        if value_type == 'number_unit' and default_unit:
+        if value_type == "number_unit" and default_unit:
             # Extract numeric value from the input
             numeric_value = self._extract_numeric_value(excel_value)
             if numeric_value is not None:
@@ -212,32 +211,31 @@ class CachedAttributeMapper:
                     "name": attr_name,
                     "value_id": None,
                     "value_name": value_with_unit,
-                    "values": [{
-                        "id": None,
-                        "name": value_with_unit,
-                        "struct": {
-                            "number": numeric_value,
-                            "unit": default_unit
+                    "values": [
+                        {
+                            "id": None,
+                            "name": value_with_unit,
+                            "struct": {"number": numeric_value, "unit": default_unit},
                         }
-                    }]
+                    ],
                 }
 
         # Handle list-type attributes
-        if value_type == 'list' and attribute_id in self._value_index:
+        if value_type == "list" and attribute_id in self._value_index:
             normalized_input = PortugueseTextNormalizer.normalize(excel_value)
             value_map = self._value_index[attribute_id]
 
             # Try exact match first
             if normalized_input in value_map:
                 matched_value = value_map[normalized_input]
-                value_id = matched_value.get('id')
-                value_name = matched_value.get('name')
+                value_id = matched_value.get("id")
+                value_name = matched_value.get("name")
                 return {
                     "id": attribute_id,
                     "name": attr_name,
                     "value_id": value_id,
                     "value_name": value_name,
-                    "values": [{"id": value_id, "name": value_name, "struct": None}]
+                    "values": [{"id": value_id, "name": value_name, "struct": None}],
                 }
 
             # Try partial/fuzzy matching
@@ -249,21 +247,23 @@ class CachedAttributeMapper:
                 if normalized_input in normalized_value or normalized_value in normalized_input:
                     score = 0.9
                 else:
-                    score = PortugueseTextNormalizer.similarity(excel_value, value_def.get('name', ''))
+                    score = PortugueseTextNormalizer.similarity(
+                        excel_value, value_def.get("name", "")
+                    )
 
                 if score > best_score:
                     best_score = score
                     best_match = value_def
 
             if best_match and best_score >= 0.8:
-                value_id = best_match.get('id')
-                value_name = best_match.get('name')
+                value_id = best_match.get("id")
+                value_name = best_match.get("name")
                 return {
                     "id": attribute_id,
                     "name": attr_name,
                     "value_id": value_id,
                     "value_name": value_name,
-                    "values": [{"id": value_id, "name": value_name, "struct": None}]
+                    "values": [{"id": value_id, "name": value_name, "struct": None}],
                 }
 
         # For string/number types or when no value match found
@@ -272,18 +272,18 @@ class CachedAttributeMapper:
             "name": attr_name,
             "value_id": None,
             "value_name": excel_value,
-            "values": [{"id": None, "name": excel_value, "struct": None}]
+            "values": [{"id": None, "name": excel_value, "struct": None}],
         }
 
     def map_product_attributes(self, product_attributes: dict[str, str]) -> list[MLPayload]:
         """Map all product attributes from Excel to ML API format.
-        
+
         Args:
             product_attributes: Dictionary mapping Excel column headers to cell values
-            
+
         Returns:
             List of complete ML API attribute payloads
-            
+
         Example:
             >>> mapper.map_product_attributes({"Idioma": "Português", "Autor": "John Doe"})
             [
@@ -314,7 +314,7 @@ class CachedAttributeMapper:
             if not attr:
                 continue
 
-            attribute_id = attr.get('id')
+            attribute_id = attr.get("id")
             if not attribute_id:
                 continue
 
@@ -326,29 +326,29 @@ class CachedAttributeMapper:
 
     def get_attribute_by_id(self, attribute_id: str) -> AttributeDef | None:
         """Get attribute definition by its ID.
-        
+
         Args:
             attribute_id: ML API attribute ID
-            
+
         Returns:
             Attribute definition if found, None otherwise
         """
-        for attr in self._cache.get('attributes', []):
-            if attr.get('id') == attribute_id:
+        for attr in self._cache.get("attributes", []):
+            if attr.get("id") == attribute_id:
                 return attr
         return None
 
     def get_available_attributes(self) -> list[AttributeDef]:
         """Get list of all available attributes in the category.
-        
+
         Returns:
             List of attribute definitions
         """
-        return self._cache.get('attributes', [])
+        return self._cache.get("attributes", [])
 
     def reload_cache(self) -> dict[str, Any]:
         """Reload cache from disk and rebuild indexes.
-        
+
         Returns:
             Reloaded cache dictionary
         """
@@ -361,12 +361,12 @@ class CachedAttributeMapper:
 
     def _extract_numeric_value(self, excel_value: str) -> float | int | None:
         """Extract numeric value from Excel cell value.
-        
+
         Handles various formats like "23", "23 cm", "0.3", "3 kg", etc.
-        
+
         Args:
             excel_value: Value from Excel cell
-            
+
         Returns:
             Numeric value as int or float, or None if no number found
         """
@@ -380,12 +380,12 @@ class CachedAttributeMapper:
 
         # Try to extract a number (integer or decimal)
         # Match patterns like "23", "23.5", "0.3", etc.
-        match = re.match(r'^([\d]+(?:\.\d+)?)', value_str.replace(',', '.'))
+        match = re.match(r"^([\d]+(?:\.\d+)?)", value_str.replace(",", "."))
 
         if match:
             num_str = match.group(1)
             # Return as int if it's a whole number, otherwise float
-            if '.' in num_str:
+            if "." in num_str:
                 return float(num_str)
             else:
                 return int(num_str)
