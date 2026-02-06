@@ -224,3 +224,30 @@ class TestCbtIdExtractor:
         cbt_id = extractor.extract_cbt_id(result)
         
         assert cbt_id == "CBT3333333333"
+
+    def test_extract_from_parent_item_id_field(self):
+        """Test extraction from top-level parent_item_id field."""
+        extractor = CbtIdExtractor()
+        result = {
+            "id": "MLB2222222222",
+            "parent_item_id": "CBT4444444444",
+        }
+
+        cbt_id = extractor.extract_cbt_id(result)
+
+        assert cbt_id == "CBT4444444444"
+
+    def test_extract_from_item_relations_structure(self):
+        """Test extraction when CBT appears inside item_relations nested structure."""
+        extractor = CbtIdExtractor()
+        result = {
+            "id": "MLB3333333333",
+            "item_relations": [
+                {"relation": "CHILD", "item_id": "MLB3333333333"},
+                {"relation": "PARENT", "details": {"parent_id": "CBT5555555555"}},
+            ],
+        }
+
+        cbt_id = extractor.extract_cbt_id(result)
+
+        assert cbt_id == "CBT5555555555"

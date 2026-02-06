@@ -36,7 +36,9 @@ class CbtIdExtractor:
         1. Direct `cbt_item_id` field
         2. `id` field if it starts with "CBT"
         3. `parent_id` from first marketplace_items entry
-        4. Fallback GET request to /items/{marketplace_id} (if api_client available)
+        4. `parent_item_id` top-level field
+        5. `item_relations` or other nested structures
+        6. Fallback GET request to /items/{marketplace_id} (if api_client available)
         
         Args:
             result: Response dict from POST /items or GET /items/{id}
@@ -66,8 +68,28 @@ class CbtIdExtractor:
                         f"CBT ID extracted from marketplace_items[].parent_id: {parent_id}"
                     )
                     return parent_id
-        
-        # Strategy 4: Fallback GET request (if we have a marketplace ID)
+
+        # Strategy 4: top-level parent_item_id (some endpoints use this field)
+        parent_item_id = result.get("parent_item_id")
+        if parent_item_id and self._is_valid_cbt_id(parent_item_id):
+            logger.debug(f"CBT ID extracted from parent_item_id field: {parent_item_id}")
+            return parent_item_id
+
+        # Strategy 5: search nested structures like item_relations for any CBT ID
+        item_relations = result.get("item_relations")
+        if item_relations is not None:
+            found = self._search_for_cbt_in_structure(item_relations)
+            if found:
+                logger.debug(f"CBT ID extracted from nested item_relations: {found}")
+                return found
+
+        # As a last-ditch effort before API fallback, scan entire response for CBT ids
+        found_anywhere = self._search_for_cbt_in_structure(result)
+        if found_anywhere:
+            logger.debug(f"CBT ID found by scanning entire response: {found_anywhere}")
+            return found_anywhere
+
+        # Strategy 6: Fallback GET request (if we have a marketplace ID)
         if item_id and not self._is_valid_cbt_id(item_id):
             # Check cache first
             if item_id in self._cache:
@@ -105,6 +127,30 @@ class CbtIdExtractor:
         """
         return isinstance(item_id, str) and item_id.startswith("CBT")
     
+    def _search_for_cbt_in_structure(self, obj) -> str | None:
+        """Recursively search a nested structure for the first CBT ID string.
+
+        This is a defensive helper to discover CBT IDs inside unexpected
+        structures such as item_relations, nested dicts, or lists.
+        """
+        if isinstance(obj, str):
+            return obj if self._is_valid_cbt_id(obj) else None
+        if isinstance(obj, dict):
+            # Search values and keys
+            for k, v in obj.items():
+                if isinstance(k, str) and self._is_valid_cbt_id(k):
+                    return k
+                found = self._search_for_cbt_in_structure(v)
+                if found:
+                    return found
+            return None
+        if isinstance(obj, (list, tuple, set)):
+            for item in obj:
+                found = self._search_for_cbt_in_structure(item)
+                if found:
+                    return found
+        return None
+    
     def _fetch_cbt_id_from_api(self, marketplace_item_id: str) -> str | None:
         """Fetch CBT parent ID via GET /items/{id} as fallback.
         
@@ -126,10 +172,15 @@ class CbtIdExtractor:
             if cbt_id and self._is_valid_cbt_id(cbt_id):
                 return cbt_id
             
-            # Try parent_id field
-            parent_id = item_data.get("parent_id")
+            # Try parent_id and parent_item_id fields
+            parent_id = item_data.get("parent_id") or item_data.get("parent_item_id")
             if parent_id and self._is_valid_cbt_id(parent_id):
                 return parent_id
+            
+            # Search common nested structures for CBT IDs (item_relations etc.)
+            found = self._search_for_cbt_in_structure(item_data)
+            if found:
+                return found
             
             logger.warning(
                 f"GET /items/{marketplace_item_id} did not return a valid CBT parent ID"
