@@ -523,9 +523,13 @@ class PublishProductUseCase:
 
         # Publish
         published_item_id: str | None = None
+        cbt_item_id: str | None = None
         try:
             result = self.publisher.create_item(item)
             published_item_id = result.get("id")
+            # Extract CBT parent item ID for clips upload (Global Selling API requirement)
+            # Clips can only be uploaded to CBT parent items, not marketplace-specific items
+            cbt_item_id = result.get("cbt_item_id") or published_item_id
             logger.info(f"Published {product.sku}: {published_item_id}")
             self.published += 1
 
@@ -547,17 +551,18 @@ class PublishProductUseCase:
                 self._pending_fiscal.append((published_item_id, product.fiscal))
 
             # Upload clips if available (soft failure - does not fail the product publish)
-            if self.clip_uploader and published_item_id:
+            # Note: Clips must be uploaded to CBT parent item ID, not marketplace-specific IDs
+            if self.clip_uploader and cbt_item_id:
                 sku = product.sku or ""
                 if sku:
-                    logger.info(f"Uploading clips for {sku} (item: {published_item_id})")
+                    logger.info(f"Uploading clips for {sku} (CBT item: {cbt_item_id})")
                     clip_summary = self.clip_uploader.upload_clips(
                         sku=sku,
-                        item_id=published_item_id,
+                        item_id=cbt_item_id,
                     )
                     self.clip_results.append({
                         "sku": sku,
-                        "item_id": published_item_id,
+                        "item_id": cbt_item_id,
                         "clips_uploaded": clip_summary.clips_uploaded,
                         "clips_failed": clip_summary.clips_failed,
                         "clips_skipped": clip_summary.clips_skipped,

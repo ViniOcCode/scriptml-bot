@@ -183,13 +183,23 @@ class ClipUploader:
 
         Args:
             sku: Product SKU for video discovery
-            item_id: Published ML item ID
+            item_id: CBT parent item ID (required, must start with 'CBT')
             sites: Optional list of target sites
 
         Returns:
             ClipUploadSummary with per-clip results
         """
         summary = ClipUploadSummary(item_id=item_id)
+        
+        # Defensive validation: clips only work with CBT parent items
+        if not item_id.startswith("CBT"):
+            logger.warning(
+                f"Item ID '{item_id}' does not appear to be a CBT parent item. "
+                f"Clips upload requires CBT item IDs, not marketplace-specific IDs. "
+                f"Skipping clip upload for {sku}."
+            )
+            return summary
+        
         clips = self.find_clips_for_sku(sku)
 
         if not clips:

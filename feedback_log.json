@@ -1526,5 +1526,37 @@
     "cause_type": "warning",
     "attribute_id": null,
     "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-02-06T01:18:50.492133",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-02-06T01:18:50.492336",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-02-06T01:20:23.485392",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-02-06T01:20:23.485586",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
   }
 ]

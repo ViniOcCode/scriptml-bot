@@ -329,7 +329,7 @@ class MLApiClient:
         """Upload a video clip for an item.
 
         Args:
-            item_id: Mercado Livre item ID (e.g., MLB1234567890)
+            item_id: CBT parent item ID (e.g., CBT1234567890) - NOT marketplace-specific IDs
             file_path: Path to video file (mp4, mov, mpeg, avi)
             sites: Optional list of sites for clip visibility
 
@@ -337,7 +337,7 @@ class MLApiClient:
             Upload result with clip UUID
 
         Raises:
-            requests.HTTPError: On API error
+            requests.HTTPError: On API error with detailed message
         """
         import mimetypes
         from pathlib import Path
@@ -371,7 +371,27 @@ class MLApiClient:
 
             url = f"{self.base_url}/marketplace/items/{item_id}/clips/upload"
             logger.debug(f"Uploading clip to {url}")
-            response = self.session.post(url, headers=headers, files=files, data=data, timeout=120)
-            response.raise_for_status()
+            
+            try:
+                response = self.session.post(url, headers=headers, files=files, data=data, timeout=120)
+                response.raise_for_status()
+            except requests.HTTPError as e:
+                status_code = e.response.status_code if e.response else "unknown"
+                try:
+                    error_body = e.response.json() if e.response else {}
+                    api_message = error_body.get("message", "")
+                    error_status = error_body.get("error_status", "")
+                    logger.error(
+                        f"Clip upload failed for item {item_id}: "
+                        f"[{status_code}] {error_status}: {api_message}"
+                    )
+                    logger.debug(f"Full error response: {error_body}")
+                except Exception:
+                    error_text = e.response.text if e.response else str(e)
+                    logger.error(
+                        f"Clip upload failed for item {item_id}: "
+                        f"[{status_code}] {error_text}"
+                    )
+                raise
 
         return response.json()

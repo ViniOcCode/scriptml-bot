@@ -227,7 +227,7 @@ class TestUploadClips:
         }
 
         uploader = ClipUploader(mock_client, base_path=tmp_path)
-        summary = uploader.upload_clips("SKU123", "MLB999")
+        summary = uploader.upload_clips("SKU123", "CBT1234567890")
 
         assert summary.clips_uploaded == 2
         assert summary.clips_failed == 0
@@ -248,8 +248,27 @@ class TestUploadClips:
         }
 
         uploader = ClipUploader(mock_client, base_path=tmp_path)
-        summary = uploader.upload_clips("SKU123", "MLB999")
+        summary = uploader.upload_clips("SKU123", "CBT1234567890")
 
         assert summary.clips_uploaded == 1
         assert summary.clips_skipped == 1
         assert mock_client.upload_clip.call_count == 1
+
+    def test_upload_clips_rejects_non_cbt_item_id(self, tmp_path):
+        """Test that non-CBT item IDs are rejected with warning."""
+        sku_folder = tmp_path / "SKU123"
+        sku_folder.mkdir()
+        (sku_folder / "video1.mp4").write_bytes(b"video content")
+
+        mock_client = Mock()
+        uploader = ClipUploader(mock_client, base_path=tmp_path)
+        
+        # Test with marketplace-specific ID
+        summary = uploader.upload_clips("SKU123", "MLB1234567890")
+        
+        assert summary.clips_uploaded == 0
+        assert summary.clips_failed == 0
+        assert summary.clips_skipped == 0
+        assert len(summary.results) == 0
+        # Should not have called API
+        mock_client.upload_clip.assert_not_called()
