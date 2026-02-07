@@ -50,7 +50,9 @@ class CategoryApiPort(Protocol):
         """
         ...
 
-    def predict_category(self, title: str, site_id: str) -> list[dict[str, Any]]:
+    def predict_category(
+        self, title: str, site_id: str, limit: int | None = None
+    ) -> list[dict[str, Any]]:
         """Predict category based on product title.
 
         Args:

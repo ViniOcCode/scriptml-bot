@@ -29,6 +29,17 @@ core_item_fields:
     currency_id: "BRL"
     listing_type_id: "gold_special"
     buying_mode: "buy_it_now"
+    channels:
+      - "marketplace"
+    item_condition:
+      id: "ITEM_CONDITION"
+      values:
+        new:
+          value_id: "2230284"
+          value_name: "Novo"
+        used:
+          value_id: "2230581"
+          value_name: "Usado"
 
     # Default sale terms (warranty) - Full ML API format
     sale_terms:

@@ -453,6 +453,32 @@ class PublishProductUseCase:
         else:
             listing_type_id = "free"
 
+        item_condition_config = core_defaults.get("item_condition", {})
+        if isinstance(item_condition_config, dict):
+            item_condition_id = item_condition_config.get("id")
+            item_condition_values = item_condition_config.get("values", {})
+            condition_payload = (
+                item_condition_values.get(product.condition)
+                if isinstance(item_condition_values, dict)
+                else None
+            )
+            if item_condition_id and isinstance(condition_payload, dict):
+                existing_ids = {
+                    attr.get("id")
+                    for attr in ml_attributes
+                    if isinstance(attr, dict) and attr.get("id")
+                }
+                if item_condition_id not in existing_ids:
+                    item_condition_attr = {"id": item_condition_id}
+                    value_id = condition_payload.get("value_id")
+                    value_name = condition_payload.get("value_name")
+                    if value_id is not None:
+                        item_condition_attr["value_id"] = value_id
+                    if value_name is not None:
+                        item_condition_attr["value_name"] = value_name
+                    if len(item_condition_attr) > 1:
+                        ml_attributes.append(item_condition_attr)
+
         # Build item with values from config only (no hardcoded fallbacks)
         item = {
             "title": product.title,
@@ -470,6 +496,10 @@ class PublishProductUseCase:
             "sale_terms": sale_terms,
             "seller_custom_field": product.sku,
         }
+
+        channels = core_defaults.get("channels")
+        if channels:
+            item["channels"] = channels
 
         # Log shipping section before validation
         logger.info(

@@ -23,6 +23,7 @@ from mercadolivre_upload.infrastructure.http import (
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://api.mercadolibre.com"
+DEFAULT_PREDICTION_LIMIT = 3
 
 ITEM_ID_PATTERN = re.compile(r"^ML[A-Z]\d+$")
 
@@ -154,7 +155,9 @@ class MLApiClient:
         """
         return cast(list[dict[str, Any]], self.get(f"/sites/{site_id}/categories"))
 
-    def predict_category(self, title: str, site_id: str = "MLB") -> list[dict[str, Any]]:
+    def predict_category(
+        self, title: str, site_id: str = "MLB", limit: int | None = None
+    ) -> list[dict[str, Any]]:
         """Predict category based on product title.
 
         Uses ML domain discovery to predict the best category for a title.
@@ -162,12 +165,16 @@ class MLApiClient:
         Args:
             title: Product title
             site_id: Site ID (default: MLB for Brazil)
+            limit: Maximum number of predictions (default from client settings)
 
         Returns:
             List of predicted categories with confidence scores
         """
+        if limit is None:
+            limit = DEFAULT_PREDICTION_LIMIT
         endpoint = f"/sites/{site_id}/domain_discovery/search"
-        return cast(list[dict[str, Any]], self.get(endpoint, params={"q": title}))
+        params = {"q": title, "limit": limit}
+        return cast(list[dict[str, Any]], self.get(endpoint, params=params))
 
     def get_category(self, category_id: str) -> dict[str, Any]:
         """Get category details."""

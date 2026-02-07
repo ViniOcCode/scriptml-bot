@@ -101,10 +101,12 @@ class CategoryAdapter(CategoryApiPort):
             logger.debug(f"Failed to get conditional attributes for {category_id}: {e}")
             return []
 
-    def predict_category(self, title: str, site_id: str = "MLB") -> list[dict[str, Any]]:
+    def predict_category(
+        self, title: str, site_id: str = "MLB", limit: int | None = None
+    ) -> list[dict[str, Any]]:
         """Predict category based on product title."""
         try:
-            result = self.client.predict_category(title, site_id)
+            result = self.client.predict_category(title, site_id, limit=limit)
             # Ensure we return a list
             if not isinstance(result, list):
                 logger.warning(f"Expected list for predictions, got {type(result)}")
