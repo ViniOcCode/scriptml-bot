@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from mercadolivre_upload.adapters.spreadsheet.dynamic_parser import DynamicExcelParser
-from mercadolivre_upload.adapters.spreadsheet.models import Product
+from mercadolivre_upload.domain.product.model import Product
 from mercadolivre_upload.api.category_resolver import CategoryResolver
 from mercadolivre_upload.api.client import MLApiClient
 from mercadolivre_upload.auth.manager import AuthManager
