@@ -1,11 +1,24 @@
-# Compatibility shim package exposing mercadolivre_upload.auth as top-level `auth`
-from importlib import import_module
+# Compatibility shim: re-export everything from mercadolivre_upload.auth
+from mercadolivre_upload.auth import (
+    AuthError,
+    AuthManager,
+    OAuthError,
+    OAuthHandler,
+    TokenExpiredError,
+    TokenManager,
+)
 
-mod = import_module("mercadolivre_upload.auth")
+# Additional exports for test compatibility (from stub)
+from mercadolivre_upload.auth.exceptions import AuthError as ConfigError
+from mercadolivre_upload.auth.exceptions import TokenExpiredError as TokenError
 
-# Re-export common names if present
-for name in dir(mod):
-    if not name.startswith("_"):
-        globals()[name] = getattr(mod, name)
-
-__all__ = [n for n in dir(mod) if not n.startswith("_")]
+__all__ = [
+    "AuthManager",
+    "TokenManager",
+    "OAuthHandler",
+    "AuthError",
+    "TokenExpiredError",
+    "OAuthError",
+    "ConfigError",
+    "TokenError",
+]

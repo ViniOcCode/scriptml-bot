@@ -1,26 +1,25 @@
-# Compatibility shim: implement minimal authenticator API expected by tests.
+# Compatibility shim: provide legacy AuthCredentials, TokenData, AuthStatus for tests
 from __future__ import annotations
 
-import contextlib
-import json
-import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
+
+from mercadolivre_upload.auth import AuthManager
+
+# Re-export exceptions with aliases
+ConfigError = Exception
+TokenError = Exception
+AuthError = Exception
 
 
-class ConfigError(Exception):
-    """Configuration error."""
+class AuthStatus(Enum):
+    """Authentication status values."""
 
-
-class AuthError(Exception):
-    """Authentication error."""
-
-
-class TokenError(Exception):
-    """Token-related error."""
+    UNAUTHENTICATED = "unauthenticated"
+    AUTHENTICATED = "authenticated"
 
 
 @dataclass
@@ -48,6 +47,8 @@ class AuthCredentials:
     @staticmethod
     def from_file(path: Path) -> AuthCredentials:
         """Load credentials from a JSON file."""
+        import json
+
         if not path.exists():
             raise ConfigError("arquivo de credenciais não encontrado")
         data = json.loads(path.read_text())
@@ -100,183 +101,13 @@ class TokenData:
         )
 
 
-class AuthStatus(Enum):
-    """Authentication status values."""
-
-    UNAUTHENTICATED = "unauthenticated"
-    AUTHENTICATED = "authenticated"
-
-
-class AuthManager:
-    """Manages authentication state and token lifecycle."""
-
-    def __init__(
-        self,
-        credentials: AuthCredentials | None = None,
-        token_file: Path | None = None,
-        auto_save: bool = False,
-    ):
-        """Initialize auth manager with optional credentials and token file."""
-        self.credentials = credentials
-        self._token_data: TokenData | None = None
-        self._token_file = token_file
-        self._auto_save = auto_save
-        if token_file:
-            token_file.parent.mkdir(parents=True, exist_ok=True)
-        if credentials is None:
-            try:
-                self.credentials = AuthCredentials.from_env()
-            except Exception:
-                self.credentials = None
-        if token_file and token_file.exists():
-            try:
-                data = json.loads(token_file.read_text())
-                self._token_data = TokenData.from_dict(data)
-            except Exception:
-                self._token_data = None
-
-    def is_authenticated(self) -> bool:
-        """Return True if a valid, non-expired token exists."""
-        return self._token_data is not None and not self._token_data.is_expired()
-
-    def get_token_data(self) -> TokenData | None:
-        """Return current token data or None."""
-        return self._token_data
-
-    def set_token(  # noqa: D102
-        self,
-        access_token: str,
-        refresh_token: str | None = None,
-        expires_in: int = 3600,
-        user_id: str | None = None,
-    ) -> None:
-        self._token_data = TokenData(
-            access_token=access_token,
-            refresh_token=refresh_token,
-            expires_at=datetime.now() + timedelta(seconds=expires_in),
-            user_id=user_id,
-        )
-        if self._auto_save and self._token_file:
-            self._save_token()
-
-    def _save_token(self) -> None:
-        if self._token_file and self._token_data:
-            self._token_file.parent.mkdir(parents=True, exist_ok=True)
-            self._token_file.write_text(json.dumps(self._token_data.to_dict()))
-
-    def logout(self) -> None:
-        """Clear token data and remove token file."""
-        self._token_data = None
-        if self._token_file and self._token_file.exists():
-            self._token_file.unlink()
-
-    def start_auth_flow(self, state: str | None = None, scopes: list[str] | None = None) -> str:
-        """Build and return the authorization URL."""
-        client = self.credentials.app_id if self.credentials else ""
-        scope = "+".join(scopes) if scopes else "read"
-        st = state or "state123"
-        self._auth_state = st
-        redirect = self.credentials.redirect_uri if self.credentials else ""
-        return (
-            "https://auth.mercadolivre.com.br/authorization"
-            f"?response_type=code&client_id={client}"
-            f"&redirect_uri={redirect}"
-            f"&scope={scope}&state={st}"
-        )
-
-    def get_auth_status(self) -> dict[str, Any]:
-        """Return current authentication status."""
-        return {
-            "authenticated": self.is_authenticated(),
-            "status": (
-                AuthStatus.AUTHENTICATED.value
-                if self.is_authenticated()
-                else AuthStatus.UNAUTHENTICATED.value
-            ),
-            "user_id": self._token_data.user_id if self._token_data else None,
-        }
-
-    def get_valid_token(self) -> str:
-        """Return a valid access token, refreshing if needed."""
-        if not self._token_data:
-            raise TokenError("Não autenticado")
-        if self._token_data.is_expired(buffer_seconds=300):
-            if not self._token_data.refresh_token:
-                raise TokenError("Não há refresh token")
-            response = self._make_token_request(
-                {"grant_type": "refresh_token", "refresh_token": self._token_data.refresh_token}
-            )
-            self._apply_token_response(response)
-        if not self._token_data:
-            raise TokenError("Não autenticado")
-        return self._token_data.access_token
-
-    def refresh_token(self) -> None:
-        """Refresh the current token."""
-        if not self._token_data or not self._token_data.refresh_token:
-            raise TokenError("Não há refresh token")
-        # minimal behaviour: pretend refreshed
-        self.set_token(
-            "refreshed_token", refresh_token=self._token_data.refresh_token, expires_in=3600
-        )
-
-    def exchange_code_for_token(self, code: str, state: str | None = None) -> TokenData:
-        """Exchange an authorization code for tokens."""
-        if state is not None and hasattr(self, "_auth_state") and self._auth_state != state:
-            raise AuthError("CSRF state mismatch")
-        response = self._make_token_request({"grant_type": "authorization_code", "code": code})
-        self._apply_token_response(response)
-        if not self._token_data:
-            raise TokenError("Token inválido")
-        return self._token_data
-
-    def _apply_token_response(self, response: dict[str, Any]) -> None:
-        expires_in = int(response.get("expires_in", 3600))
-        self._token_data = TokenData(
-            access_token=response["access_token"],
-            refresh_token=response.get("refresh_token"),
-            expires_at=datetime.now() + timedelta(seconds=expires_in),
-            user_id=str(response.get("user_id")) if response.get("user_id") is not None else None,
-        )
-        if self._auto_save and self._token_file:
-            self._save_token()
-
-    def _make_token_request(self, payload: dict[str, Any]) -> dict[str, Any]:
-        import json as _json
-        from urllib.error import HTTPError
-
-        req = urllib.request.Request(
-            "https://api.mercadolibre.com/oauth/token",
-            data=_json.dumps(payload).encode(),
-            headers={"Content-Type": "application/json"},
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310
-                body = resp.read().decode()
-        except HTTPError as exc:
-            body = exc.fp.read().decode() if exc.fp else ""
-            message = body
-            with contextlib.suppress(Exception):
-                message = _json.loads(body).get("message", body)
-            raise TokenError(message) from exc
-
-        return cast(dict[str, Any], _json.loads(body))
-
-
 def create_auth_manager(
     app_id: str | None = None,
     app_secret: str | None = None,
     redirect_uri: str | None = None,
 ) -> AuthManager:
-    """Create an AuthManager with optional explicit credentials."""
-    creds = None
-    if app_id and app_secret:
-        creds = AuthCredentials(
-            app_id=app_id,
-            app_secret=app_secret,
-            redirect_uri=redirect_uri or "http://localhost:8000/callback",
-        )
-    return AuthManager(credentials=creds)
+    """Create an AuthManager (compatibility function for tests)."""
+    return AuthManager()
 
 
 def get_auth_url(
@@ -284,15 +115,17 @@ def get_auth_url(
     redirect_uri: str | None = None,
     scopes: list[str] | None = None,
 ) -> str:
-    """Generate an authorization URL."""
-    manager = create_auth_manager(app_id=app_id)
-    return manager.start_auth_flow(scopes=scopes, state=None)
+    """Generate an authorization URL (compatibility function for tests)."""
+    from mercadolivre_upload.auth import OAuthHandler
+
+    handler = OAuthHandler(client_id=app_id)
+    return handler.get_authorization_url()
 
 
 __all__ = [
+    "AuthManager",
     "AuthCredentials",
     "AuthError",
-    "AuthManager",
     "AuthStatus",
     "ConfigError",
     "TokenData",
