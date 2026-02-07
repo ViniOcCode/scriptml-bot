@@ -65,6 +65,10 @@ class CategoryApiPort(Protocol):
         """Get attributes for a category."""
         ...
 
+    def get_category_technical_specs(self, category_id: str) -> dict[str, Any]:
+        """Get technical specs input for a category."""
+        ...
+
     def get_category_conditional_attributes(
         self, category_id: str, current_attributes: dict[str, Any]
     ) -> list[dict[str, Any]]:
@@ -628,6 +632,53 @@ class CategoryResolver:
 
         return required + required_conditional
 
+    def _extract_technical_spec_attributes(
+        self, specs: dict[str, Any]
+    ) -> dict[str, dict[str, Any]]:
+        """Flatten technical specs input into an attribute ID map."""
+        attributes: dict[str, dict[str, Any]] = {}
+        groups = specs.get("groups", []) if isinstance(specs, dict) else []
+
+        for group in groups:
+            components = group.get("components", []) if isinstance(group, dict) else []
+            for component in components:
+                comp_attrs = component.get("attributes", []) if isinstance(component, dict) else []
+                for attr in comp_attrs:
+                    if not isinstance(attr, dict):
+                        continue
+                    attr_id = attr.get("id")
+                    if attr_id:
+                        attributes[attr_id] = attr
+
+        return attributes
+
+    def _merge_technical_spec(self, attr: dict[str, Any], spec: dict[str, Any]) -> None:
+        """Merge technical spec metadata into a base attribute definition."""
+        if "relevance" in spec:
+            attr["relevance"] = spec.get("relevance")
+        if "hierarchy" in spec:
+            attr["hierarchy"] = spec.get("hierarchy")
+
+        if "tags" in spec:
+            base_tags = attr.get("tags", {})
+            merged_tags: dict[str, Any] = {}
+            if isinstance(base_tags, dict):
+                merged_tags.update(base_tags)
+            elif isinstance(base_tags, list):
+                merged_tags.update({tag: True for tag in base_tags})
+
+            spec_tags = spec.get("tags", [])
+            if isinstance(spec_tags, dict):
+                merged_tags.update(spec_tags)
+            elif isinstance(spec_tags, list):
+                merged_tags.update({tag: True for tag in spec_tags})
+
+            if merged_tags:
+                attr["tags"] = merged_tags
+
+        if spec.get("values") and not attr.get("values"):
+            attr["values"] = spec.get("values")
+
     def get_attribute_metadata(self, category_id: str) -> list[AttributeMeta]:
         """Get normalized attribute metadata for a category.
 
@@ -638,15 +689,32 @@ class CategoryResolver:
             List of AttributeMeta objects
         """
         # Try cache first if available
+        raw_attributes: list[dict[str, Any]] | None = None
         if self._attribute_cache:
             cached = self._attribute_cache.get_attributes(category_id)
             if cached is not None:
                 logger.debug(f"Using cached metadata for {category_id}")
-                # Convert cached dicts to AttributeMeta objects
-                return [AttributeMeta.from_ml_api(attr) for attr in cached]
+                raw_attributes = cached
 
-        # Fetch from API
-        raw_attributes = self._api.get_category_attributes(category_id)
+        # Fetch from API when cache is not available
+        if raw_attributes is None:
+            raw_attributes = self._api.get_category_attributes(category_id)
+
+        # Enrich with technical specs input (relevance, hierarchy, tags)
+        technical_specs = {}
+        if hasattr(self._api, "get_category_technical_specs"):
+            try:
+                technical_specs = self._api.get_category_technical_specs(category_id)
+            except Exception:
+                technical_specs = {}
+
+        if technical_specs:
+            spec_map = self._extract_technical_spec_attributes(technical_specs)
+            if spec_map:
+                for attr in raw_attributes:
+                    spec = spec_map.get(attr.get("id"))
+                    if spec:
+                        self._merge_technical_spec(attr, spec)
 
         # Normalize to AttributeMeta
         metadata = []
@@ -658,7 +726,7 @@ class CategoryResolver:
                 logger.warning(f"Failed to parse attribute: {attr.get('id', 'unknown')}: {e}")
 
         # Save to cache
-        if self._attribute_cache:
+        if self._attribute_cache and raw_attributes is not None:
             self._attribute_cache.save_attributes(category_id, raw_attributes)
 
         return metadata

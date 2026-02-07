@@ -156,25 +156,30 @@ class AttributeBuilderService:
         for attr_id in dropped:
             logger.warning(f"Dropped attribute {attr_id} due to low score or redundancy")
 
-        # 7. Get conditional attributes
+        # Convert final attributes back to dict format
+        final_attr_dicts = [{"id": a.id, "value_name": a.value} for a in final_attrs]
+
+        # 7. Validate conditional attributes (required based on current values)
         attr_dict = {a.id: a.value for a in final_attrs}
         try:
             conditional_attrs = self.category_resolver.get_conditional_attributes(
                 category_id, attr_dict
             )
 
-            # Check if any conditional attributes should be added
-            existing_ids = {a["id"] for a in ml_attributes if "id" in a}
-            for cond_attr in conditional_attrs:
-                if cond_attr["id"] not in existing_ids:
-                    ml_attributes.append(cond_attr)
-                    logger.info(f"Added conditional attribute: {cond_attr['id']}")
+            conditional_ids = {
+                attr.get("id")
+                for attr in conditional_attrs
+                if isinstance(attr, dict) and attr.get("id")
+            }
+            existing_ids = {a["id"] for a in final_attr_dicts if "id" in a}
+            missing = sorted([attr_id for attr_id in conditional_ids if attr_id not in existing_ids])
 
+            if missing:
+                message = f"Missing conditional attributes: {', '.join(missing)}"
+                errors.append(message)
+                logger.warning(message)
         except Exception as e:
             logger.warning(f"Could not get conditional attributes: {e}")
-
-        # Convert final attributes back to dict format
-        final_attr_dicts = [{"id": a.id, "value_name": a.value} for a in final_attrs]
 
         return final_attr_dicts, sale_terms, warnings, errors
 

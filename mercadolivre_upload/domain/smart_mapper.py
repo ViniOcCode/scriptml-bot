@@ -16,6 +16,15 @@ from .text_normalizer import PortugueseTextNormalizer
 logger = logging.getLogger(__name__)
 
 
+def _load_yaml_config(primary: Path, fallback: Path | None = None) -> dict[str, Any]:
+    """Load YAML config with optional fallback."""
+    for path in (primary, fallback):
+        if path and path.exists():
+            with open(path, encoding="utf-8") as f:
+                return yaml.safe_load(f) or {}
+    return {}
+
+
 @dataclass
 class ColumnMapping:
     """Result of mapping an Excel column."""
@@ -50,14 +59,14 @@ class SmartAttributeMapper:
     def __init__(
         self,
         api_client: Any,  # MLApiClient
-        config_path: str = "config/generic_mappings.yaml",
+        config_path: str = "config/standard_fields.yaml",
         min_confidence: float = 0.85,
     ):
         """Initialize mapper.
 
         Args:
             api_client: MLApiClient instance for fetching category attributes
-            config_path: Path to generic mappings YAML config
+            config_path: Path to standard fields YAML config
             min_confidence: Minimum similarity score (0.0-1.0) to accept a match
         """
         self.api = api_client
@@ -71,15 +80,17 @@ class SmartAttributeMapper:
 
         Also loads fiscal fields from fiscal_config.yaml and merges them.
         """
-        config_file = Path(config_path)
-        if not config_file.exists():
-            logger.warning(f"Config file not found: {config_path}")
-            return {}
-
         try:
-            with open(config_file, encoding="utf-8") as f:
-                config = yaml.safe_load(f)
-            logger.info(f"Loaded config from {config_path}")
+            config_file = Path(config_path)
+            legacy_file = Path("config/generic_mappings.yaml")
+            config = _load_yaml_config(config_file, legacy_file)
+            if not config:
+                logger.warning(f"Config file not found: {config_path}")
+                return {}
+            if config_file.exists():
+                logger.info(f"Loaded config from {config_file}")
+            elif legacy_file.exists():
+                logger.info(f"Loaded config from {legacy_file}")
 
             # Also load fiscal fields from fiscal_config.yaml
             fiscal_config_path = Path("config/fiscal_config.yaml")

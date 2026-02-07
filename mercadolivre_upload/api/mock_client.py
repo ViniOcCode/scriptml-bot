@@ -17,6 +17,10 @@ class MockMLApiClient:
             "path_from_root": [{"id": "MLB437616", "name": "Livros"}],
         }
 
+    def get_category_technical_specs(self, category_id: str) -> dict[str, Any]:
+        """Return empty technical specs for tests."""
+        return {}
+
     def publish_item(self, item_data: dict[str, Any]) -> dict[str, Any]:
         """Simulate publishing."""
         import random

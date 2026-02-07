@@ -13,6 +13,15 @@ from .scoring import ScoredAttribute
 logger = logging.getLogger(__name__)
 
 
+def _load_yaml_config(primary: Path, fallback: Path | None = None) -> dict[str, Any]:
+    """Load YAML config with optional fallback."""
+    for path in (primary, fallback):
+        if path and path.exists():
+            with open(path, encoding="utf-8") as f:
+                return yaml.safe_load(f) or {}
+    return {}
+
+
 def _load_protected_attributes() -> set:  # type: ignore[type-arg]
     """Load protected attributes from config file.
 
@@ -20,9 +29,9 @@ def _load_protected_attributes() -> set:  # type: ignore[type-arg]
         Set of attribute IDs that should never be dropped
     """
     try:
-        config_path = Path("config/generic_mappings.yaml")
-        with open(config_path, encoding="utf-8") as f:
-            config = yaml.safe_load(f)
+        config = _load_yaml_config(
+            Path("config/attribute_rules.yaml"), Path("config/generic_mappings.yaml")
+        )
 
         protected = config.get("protected_attributes", [])
         return set(protected)
@@ -38,9 +47,9 @@ def _load_similarity_threshold() -> float:
         Threshold value for redundancy detection
     """
     try:
-        config_path = Path("config/generic_mappings.yaml")
-        with open(config_path, encoding="utf-8") as f:
-            config = yaml.safe_load(f)
+        config = _load_yaml_config(
+            Path("config/attribute_rules.yaml"), Path("config/generic_mappings.yaml")
+        )
 
         return config.get("similarity", {}).get("redundancy_threshold", 0.9)  # type: ignore[no-any-return]
     except Exception as e:
@@ -51,7 +60,7 @@ def _load_similarity_threshold() -> float:
 class AttributeSanitizer:
     """Drops attributes that increase rejection risk or add noise.
 
-    Uses configuration from config/generic_mappings.yaml as the single source of truth.
+    Uses configuration from config/attribute_rules.yaml as the single source of truth.
 
     NOTE: This sanitizer is intentionally conservative. We preserve most
     attributes because Mercado Livre's API accepts them. Only drop:

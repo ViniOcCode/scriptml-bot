@@ -7,10 +7,10 @@ import logging
 import re
 from typing import Any
 
-from auth.authenticator import AuthManager
 from mercadolivre_upload.adapters.spreadsheet.parser import SpreadsheetParser
 from mercadolivre_upload.api.cbt_extractor import CbtIdExtractor
 from mercadolivre_upload.application.builders.product_builder import ProductBuilder
+from mercadolivre_upload.auth import AuthManager
 from mercadolivre_upload.domain.cache_attribute_mapper import CachedAttributeMapper
 from mercadolivre_upload.domain.category.resolver import CategoryResolver
 from mercadolivre_upload.domain.fiscal.data import FiscalData
@@ -23,6 +23,20 @@ from .attribute_builder import AttributeBuilderService
 from .ports import ClipUploaderPort, ImageUploaderPort, ItemPublisherPort, ShippingResolverPort
 
 logger = logging.getLogger(__name__)
+
+DIMENSION_KEYWORDS = [
+    "height",
+    "altura",
+    "width",
+    "largura",
+    "length",
+    "comprimento",
+    "depth",
+    "profundidade",
+]
+DIMENSION_NUMERIC_ONLY_PATTERN = r"^\s*\d+(?:[\.,]\d+)?\s*$"
+DIMENSION_UNIT_MARKER_PATTERN = r"\b(cm|mm|m|in|pouce|polegadas)\b"
+DIMENSION_DEFAULT_UNIT = "cm"
 
 
 class PublishProductUseCase:
@@ -42,6 +56,7 @@ class PublishProductUseCase:
         enable_feedback: bool = True,
         enable_fiscal_submission: bool = True,
         cache_dir: str | None = None,
+        attribute_cache: Any | None = None,
     ):
         """Initialize use case.
 
@@ -57,7 +72,8 @@ class PublishProductUseCase:
             min_attribute_score: Minimum score for attributes (0-100)
             enable_feedback: Enable validation feedback tracking
             enable_fiscal_submission: Whether to submit fiscal data after publishing
-            cache_dir: Directory containing category attribute cache files (optional)
+            cache_dir: Directory containing category attribute cache files (deprecated, use attribute_cache)
+            attribute_cache: AttributeCache instance for cached attribute mapping (optional)
         """
         self.category_resolver = category_resolver
         self.publisher = publisher
@@ -68,7 +84,8 @@ class PublishProductUseCase:
         self.config = config or {}
         self.dry_run = dry_run
         self.enable_fiscal_submission = enable_fiscal_submission
-        self.cache_dir = cache_dir
+        self.cache_dir = cache_dir  # Deprecated but kept for backward compatibility
+        self.attribute_cache = attribute_cache
 
         self.published = 0
         self.failed = 0
@@ -340,26 +357,31 @@ class PublishProductUseCase:
         if self._current_category_id == category_id and self._cache_mapper is not None:
             return
 
-        # Skip if no cache directory configured
-        if not self.cache_dir:
-            logger.debug("No cache_dir configured, skipping cache mapper initialization")
+        # Skip if no attribute cache configured
+        if not self.attribute_cache:
+            logger.debug("No attribute_cache configured, skipping cache mapper initialization")
             return
 
         try:
-            self._cache_mapper = CachedAttributeMapper(self.cache_dir, category_id)
+            self._cache_mapper = CachedAttributeMapper(self.attribute_cache, category_id)
             self._current_category_id = category_id
-            logger.info(f"Cache loaded successfully for category {category_id}")
-        except FileNotFoundError:
+            logger.info(f"Cache mapper initialized successfully for category {category_id}")
+            
+            # Pass to attribute builder for use
+            self._attribute_builder.set_cache_mapper(self._cache_mapper)
+        except ValueError as e:
             logger.warning(
-                f"Cache file not found for category {category_id}. "
-                f"Falling back to fuzzy mapper."
+                f"No cached attributes for category {category_id}: {e}. "
+                f"Will use fuzzy mapper instead."
             )
             self._cache_mapper = None
             self._current_category_id = None
+            self._attribute_builder.set_cache_mapper(None)
         except Exception as e:
-            logger.error(f"Failed to load cache for category {category_id}: {e}")
+            logger.error(f"Failed to initialize cache mapper for category {category_id}: {e}")
             self._cache_mapper = None
             self._current_category_id = None
+            self._attribute_builder.set_cache_mapper(None)
 
     def _publish_one(self, product: Product, category_id: str) -> bool:
         """Publish a single product."""
@@ -750,23 +772,11 @@ class PublishProductUseCase:
             return
 
         # Get dimension patterns from config
-        dim_config = self.config.get("dimension_patterns", {})
-        keywords = dim_config.get(
-            "keywords",
-            [
-                "height",
-                "altura",
-                "width",
-                "largura",
-                "length",
-                "comprimento",
-                "depth",
-                "profundidade",
-            ],
-        )
-        default_unit = dim_config.get("default_unit", "cm")
-        numeric_pattern = dim_config.get("numeric_only", r"^\s*\d+(?:[\.,]\d+)?\s*$")
-        unit_pattern = dim_config.get("unit_marker", r"\b(cm|mm|m|in|pouce|polegadas)\b")
+        dim_config = self.config.get("dimension_patterns") or {}
+        keywords = dim_config.get("keywords", DIMENSION_KEYWORDS)
+        default_unit = dim_config.get("default_unit", DIMENSION_DEFAULT_UNIT)
+        numeric_pattern = dim_config.get("numeric_only", DIMENSION_NUMERIC_ONLY_PATTERN)
+        unit_pattern = dim_config.get("unit_marker", DIMENSION_UNIT_MARKER_PATTERN)
 
         # Compile patterns
         numeric_only = re.compile(numeric_pattern)
@@ -862,7 +872,7 @@ class PublishProductService:
         """Return or lazily initialize the API client."""
         if self._api is None:
             # Instantiate AuthManager (tests mock it)
-            from auth.authenticator import AuthManager
+            from mercadolivre_upload.auth import AuthManager
 
             self._auth = AuthManager()  # type: ignore[assignment]
 

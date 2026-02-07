@@ -18,6 +18,15 @@ CLASS_COMMERCIAL = "commercial"  # Warranty, pricing, terms
 CLASS_LOGISTICS = "logistics"  # Shipping, packaging
 
 
+def _load_yaml_config(primary: Path, fallback: Path | None = None) -> dict[str, Any]:
+    """Load YAML config with optional fallback."""
+    for path in (primary, fallback):
+        if path and path.exists():
+            with open(path, encoding="utf-8") as f:
+                return yaml.safe_load(f) or {}
+    return {}
+
+
 def _load_classification_config() -> dict[str, Any]:
     """Load attribute classification patterns from config file.
 
@@ -25,9 +34,9 @@ def _load_classification_config() -> dict[str, Any]:
         Dictionary with logistics_patterns and commercial_patterns
     """
     try:
-        config_path = Path("config/generic_mappings.yaml")
-        with open(config_path, encoding="utf-8") as f:
-            config = yaml.safe_load(f)
+        config = _load_yaml_config(
+            Path("config/attribute_rules.yaml"), Path("config/generic_mappings.yaml")
+        )
 
         classification_config = config.get("attribute_classification", {})
 
@@ -46,7 +55,7 @@ def _load_classification_config() -> dict[str, Any]:
 class AttributeClassifier:
     """Classifies attributes by their behavior, not by category.
 
-    Uses configuration from config/generic_mappings.yaml as the single source of truth.
+    Uses configuration from config/attribute_rules.yaml as the single source of truth.
     """
 
     def __init__(self, config: dict[str, Any] | None = None):

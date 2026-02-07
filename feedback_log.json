@@ -1926,5 +1926,197 @@
     "cause_type": "warning",
     "attribute_id": null,
     "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-02-06T19:59:00.005914",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-02-06T19:59:00.006073",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-02-07T10:47:13.755707",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-02-07T10:47:13.755861",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17510CRIANCAU",
+    "timestamp": "2026-02-07T10:47:26.961389",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17510CRIANCAU",
+    "timestamp": "2026-02-07T10:47:26.961410",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-02-07T10:49:39.746529",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-02-07T10:49:39.746724",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17510CRIANCAU",
+    "timestamp": "2026-02-07T10:49:52.981143",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17510CRIANCAU",
+    "timestamp": "2026-02-07T10:49:52.981163",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-02-07T11:05:10.627059",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-02-07T11:05:10.627221",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17510CRIANCAU",
+    "timestamp": "2026-02-07T11:05:23.817159",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17510CRIANCAU",
+    "timestamp": "2026-02-07T11:05:23.817179",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-02-07T11:40:27.061485",
+    "cause_code": "item.attributes.omitted",
+    "cause_type": "warning",
+    "attribute_id": "WEIGHT",
+    "message": "Attribute WEIGHT with value 0,220 was omitted. You can use a number followed by one of these valid units: [g, kg]."
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-02-07T11:40:27.061678",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-02-07T11:40:27.061685",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-02-07T11:40:27.061689",
+    "cause_code": "item.attributes.omitted",
+    "cause_type": "warning",
+    "attribute_id": "WIDTH",
+    "message": "Attribute WIDTH with value 23 was omitted. You can use a number followed by one of these valid units: [mm, cm]."
+  },
+  {
+    "sku": "17515PETU",
+    "timestamp": "2026-02-07T11:40:27.061695",
+    "cause_code": "item.attributes.omitted",
+    "cause_type": "warning",
+    "attribute_id": "HEIGHT",
+    "message": "Attribute HEIGHT with value 3 was omitted. You can use a number followed by one of these valid units: [mm, cm]."
+  },
+  {
+    "sku": "17510CRIANCAU",
+    "timestamp": "2026-02-07T11:40:40.175508",
+    "cause_code": "item.shipping.mandatory_free_shipping",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "Mandatory free shipping added"
+  },
+  {
+    "sku": "17510CRIANCAU",
+    "timestamp": "2026-02-07T11:40:40.175529",
+    "cause_code": "item.attributes.omitted",
+    "cause_type": "warning",
+    "attribute_id": "WIDTH",
+    "message": "Attribute WIDTH with value 23 was omitted. You can use a number followed by one of these valid units: [mm, cm]."
+  },
+  {
+    "sku": "17510CRIANCAU",
+    "timestamp": "2026-02-07T11:40:40.175535",
+    "cause_code": "shipping.lost_me1_by_user",
+    "cause_type": "warning",
+    "attribute_id": null,
+    "message": "User has not mode me1"
+  },
+  {
+    "sku": "17510CRIANCAU",
+    "timestamp": "2026-02-07T11:40:40.175538",
+    "cause_code": "item.attributes.omitted",
+    "cause_type": "warning",
+    "attribute_id": "HEIGHT",
+    "message": "Attribute HEIGHT with value 3 was omitted. You can use a number followed by one of these valid units: [mm, cm]."
+  },
+  {
+    "sku": "17510CRIANCAU",
+    "timestamp": "2026-02-07T11:40:40.175543",
+    "cause_code": "item.attributes.omitted",
+    "cause_type": "warning",
+    "attribute_id": "WEIGHT",
+    "message": "Attribute WEIGHT with value 0,220 was omitted. You can use a number followed by one of these valid units: [g, kg]."
   }
 ]

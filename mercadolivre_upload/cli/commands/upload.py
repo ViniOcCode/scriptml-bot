@@ -22,16 +22,34 @@ from mercadolivre_upload.infrastructure.cache.attribute_cache import AttributeCa
 logger = logging.getLogger(__name__)
 
 
-def load_config():  # type: ignore[no-untyped-def]
-    """Load configuration from YAML file."""
-    config_path = Path("config/generic_mappings.yaml")
-    if config_path.exists():
+def _load_yaml_config(path: Path):  # type: ignore[no-untyped-def]
+    """Load YAML config from a single path."""
+    if path.exists():
         try:
-            with open(config_path, encoding="utf-8") as f:
-                return yaml.safe_load(f)
+            with open(path, encoding="utf-8") as f:
+                return yaml.safe_load(f) or {}
         except Exception as e:
-            logger.warning(f"Failed to load config: {e}")
+            logger.warning(f"Failed to load config {path}: {e}")
     return {}
+
+
+def load_config():  # type: ignore[no-untyped-def]
+    """Load configuration from split YAML files with legacy fallback."""
+    config = {}
+    for path in [
+        Path("config/standard_fields.yaml"),
+        Path("config/shipping.yaml"),
+        Path("config/attribute_rules.yaml"),
+        Path("config/header_detection.yaml"),
+    ]:
+        config.update(_load_yaml_config(path))
+
+    legacy_config = _load_yaml_config(Path("config/generic_mappings.yaml"))
+    if legacy_config:
+        for key, value in legacy_config.items():
+            config.setdefault(key, value)
+
+    return config
 
 
 console = Console()
@@ -97,7 +115,7 @@ def upload(  # type: ignore[no-untyped-def]
         clip_uploader=clip_uploader,
         config=config,
         dry_run=dry_run,
-        cache_dir=str(cache_dir),
+        attribute_cache=cache,
     )
 
     # Parse products

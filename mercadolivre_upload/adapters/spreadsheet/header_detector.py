@@ -11,6 +11,15 @@ import yaml
 logger = logging.getLogger(__name__)
 
 
+def _load_yaml_config(primary: Path, fallback: Path | None = None) -> dict[str, Any]:
+    """Load YAML config with optional fallback."""
+    for path in (primary, fallback):
+        if path and path.exists():
+            with open(path, encoding="utf-8") as f:
+                return yaml.safe_load(f) or {}
+    return {}
+
+
 def _load_header_config() -> dict[str, Any]:
     """Load header detection config from config file.
 
@@ -18,9 +27,9 @@ def _load_header_config() -> dict[str, Any]:
         Dictionary with column_patterns, header_indicators, and validation limits
     """
     try:
-        config_path = Path("config/generic_mappings.yaml")
-        with open(config_path, encoding="utf-8") as f:
-            config = yaml.safe_load(f)
+        config = _load_yaml_config(
+            Path("config/header_detection.yaml"), Path("config/generic_mappings.yaml")
+        )
 
         header_config = config.get("header_detection", {})
 
@@ -53,7 +62,7 @@ def _load_header_config() -> dict[str, Any]:
 class HeaderDetector:
     """Detects header rows and maps columns dynamically.
 
-    Uses configuration from config/generic_mappings.yaml as the single source of truth.
+    Uses configuration from config/header_detection.yaml as the single source of truth.
     """
 
     def __init__(self, config: dict[str, Any] | None = None):

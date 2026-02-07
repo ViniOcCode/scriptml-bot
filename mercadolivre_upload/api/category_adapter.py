@@ -61,6 +61,18 @@ class CategoryAdapter(CategoryApiPort):
             logger.error(f"Failed to get attributes for {category_id}: {e}")
             return []
 
+    def get_category_technical_specs(self, category_id: str) -> dict[str, Any]:
+        """Get technical specs input for a category."""
+        try:
+            result = self.client.get_category_technical_specs(category_id)
+            if not isinstance(result, dict):
+                logger.error(f"Invalid technical specs response for {category_id}: {result}")
+                return {}
+            return result
+        except Exception as e:
+            logger.debug(f"Failed to get technical specs for {category_id}: {e}")
+            return {}
+
     def get_category_conditional_attributes(
         self, category_id: str, current_attributes: dict[str, Any]
     ) -> list[dict[str, Any]]:

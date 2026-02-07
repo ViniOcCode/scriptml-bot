@@ -1,12 +1,10 @@
 """Cached attribute mapper for Excel columns to ML API attributes.
 
-Uses pre-fetched category cache files to map Excel column headers to
-Mercado Livre API attribute definitions with value mapping support.
+Uses AttributeCache to map Excel column headers to Mercado Livre API
+attribute definitions with value mapping support.
 """
 
-import json
-from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from mercadolivre_upload.domain.text_normalizer import PortugueseTextNormalizer
 
@@ -18,29 +16,39 @@ ValueIndex = dict[str, dict[str, ValueDef]]
 MLPayload = dict[str, Any]
 
 
+class AttributeCachePort(Protocol):
+    """Protocol for attribute cache implementations."""
+
+    def get_attributes(self, category_id: str) -> list[dict[str, Any]] | None:
+        """Get cached attributes for a category."""
+        ...
+
+
 class CachedAttributeMapper:
     """Maps Excel column headers to ML API attributes using cached category data.
 
-    Loads category attribute definitions from JSON cache files and provides
+    Uses AttributeCache to load category attribute definitions and provides
     methods to:
     - Find attribute definitions by Excel column header (name matching)
     - Map Excel cell values to ML API value IDs for list-type attributes
     - Return complete ML API payload format
 
     Example:
-        mapper = CachedAttributeMapper("cache/categories", "MLB437616")
+        from mercadolivre_upload.infrastructure.cache import AttributeCache
+        cache = AttributeCache(cache_dir="cache/categories")
+        mapper = CachedAttributeMapper(cache, "MLB437616")
         attr = mapper.find_attribute_by_name("Idioma")
         value_payload = mapper.map_value("LANGUAGE", "Português")
     """
 
-    def __init__(self, cache_dir: str, category_id: str):
-        """Initialize mapper with cache directory and category ID.
+    def __init__(self, attribute_cache: AttributeCachePort, category_id: str):
+        """Initialize mapper with attribute cache and category ID.
 
         Args:
-            cache_dir: Path to directory containing category cache JSON files
+            attribute_cache: AttributeCache instance for retrieving category attributes
             category_id: ML category ID (e.g., "MLB437616")
         """
-        self.cache_dir = Path(cache_dir)
+        self.attribute_cache = attribute_cache
         self.category_id = category_id
         self._cache: dict[str, Any] = {}
         self._name_index: NameIndex = {}
@@ -51,24 +59,24 @@ class CachedAttributeMapper:
         self.build_name_index()
 
     def load_cache(self) -> dict[str, Any]:
-        """Load category cache from JSON file.
+        """Load category cache from AttributeCache.
 
         Returns:
             Dictionary containing category attributes cache
 
         Raises:
-            FileNotFoundError: If cache file doesn't exist
-            json.JSONDecodeError: If cache file is invalid JSON
+            ValueError: If cache doesn't contain attributes for this category
         """
-        cache_file = self.cache_dir / f"{self.category_id}.json"
+        attributes = self.attribute_cache.get_attributes(self.category_id)
 
-        if not cache_file.exists():
-            raise FileNotFoundError(
-                f"Cache file not found: {cache_file}. " f"Please fetch category attributes first."
+        if attributes is None:
+            raise ValueError(
+                f"No cached attributes found for category {self.category_id}. "
+                f"Attributes may not have been fetched yet."
             )
 
-        with open(cache_file, encoding="utf-8") as f:
-            self._cache = json.load(f)
+        # Wrap in cache structure format expected by the rest of the class
+        self._cache = {"attributes": attributes}
 
         return self._cache
 

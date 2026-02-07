@@ -1,0 +1,88 @@
+# =============================================================================
+# ATTRIBUTE CLASSIFICATION PATTERNS
+# =============================================================================
+attribute_classification:
+  # Patterns for logistics attributes (shipping, packaging, dimensions)
+  logistics_patterns:
+    - "SELLER"
+    - "PACKAGE"
+    - "SHIPPING"
+    - "WEIGHT"
+    - "DIMENSION"
+    - "LENGTH"
+    - "WIDTH"
+    - "HEIGHT"
+    - "DIMENSIONS"
+    - "SIZE_CM"
+
+  # Patterns for commercial attributes (warranty, pricing, terms)
+  commercial_patterns:
+    - "WARRANTY"
+    - "GARANTIA"
+    - "PRICE"
+    - "DISCOUNT"
+    - "PAYMENT"
+    - "FINANCING"
+    - "INSTALLMENTS"
+    - "COST"
+
+# =============================================================================
+# PROTECTED ATTRIBUTES
+# =============================================================================
+# Attributes that should never be dropped during sanitization
+protected_attributes:
+  # Dimensions - important for shipping calculations
+  - "HEIGHT"
+  - "WIDTH"
+  - "LENGTH"
+  - "WEIGHT"
+  - "SELLER_PACKAGE_HEIGHT"
+  - "SELLER_PACKAGE_WIDTH"
+  - "SELLER_PACKAGE_LENGTH"
+  - "SELLER_PACKAGE_WEIGHT"
+  # Product identifiers (per official ML API)
+  - "GTIN"
+  - "ISBN"
+  - "ITEM_CONDITION"
+  - "BRAND"
+  - "MODEL"
+  # Important product features
+  - "WITH_AUGMENTED_REALITY"
+  - "IS_WRITTEN_IN_CAPITAL_LETTERS"
+  - "WITH_COLORING_PAGES"
+  - "WITH_INDEX"
+  # Book-specific
+  - "PAGES_NUMBER"
+  - "BOOKS_NUMBER_PER_SET"
+  - "BOOK_SIZE"
+
+# =============================================================================
+# SCORING WEIGHTS
+# =============================================================================
+scoring:
+  # Base score for attributes
+  base_score: 100
+
+  # Penalties (subtracted from base score)
+  penalties:
+    optional_attribute: 10
+    low_relevance: 20
+    value_not_allowed: 30
+    free_text_leakage: 40
+    logistics_attribute: 50
+
+  # Bonuses (added to base score)
+  bonuses:
+    required_attribute: 20
+    high_relevance: 10
+
+  # Minimum score threshold for keeping attributes
+  min_score: 40
+
+# =============================================================================
+# SIMILARITY THRESHOLDS
+# =============================================================================
+similarity:
+  # Threshold for considering values redundant (0.0 - 1.0)
+  # Higher = more strict (only very similar values are considered redundant)
+  redundancy_threshold: 0.9

@@ -13,6 +13,15 @@ from .models import FiscalData, Product
 logger = logging.getLogger(__name__)
 
 
+def _load_yaml_config(primary: Path, fallback: Path | None = None) -> dict[str, Any]:
+    """Load YAML config with optional fallback."""
+    for path in (primary, fallback):
+        if path and path.exists():
+            with open(path, encoding="utf-8") as f:
+                return yaml.safe_load(f) or {}
+    return {}
+
+
 def _load_config_mappings() -> dict[str, Any]:
     """Load column mappings from config file.
 
@@ -22,10 +31,10 @@ def _load_config_mappings() -> dict[str, Any]:
     try:
         mappings = {}
 
-        # Load standard fields from generic_mappings.yaml
-        config_path = Path("config/generic_mappings.yaml")
-        with open(config_path, encoding="utf-8") as f:
-            config = yaml.safe_load(f)
+        # Load standard fields from standard_fields.yaml (fallback to legacy generic_mappings.yaml)
+        config = _load_yaml_config(
+            Path("config/standard_fields.yaml"), Path("config/generic_mappings.yaml")
+        )
 
         standard_fields = config.get("standard_fields", {})
 
@@ -80,7 +89,7 @@ class ExcelParser:
 
     Reads Excel files and converts rows to Product objects.
     Supports flexible column naming with case-insensitive matching.
-    Uses configuration from config/generic_mappings.yaml as the single source of truth.
+    Uses configuration from config/standard_fields.yaml as the single source of truth.
     """
 
     REQUIRED_COLUMNS = ["sku", "title", "description", "price", "available_quantity", "condition"]

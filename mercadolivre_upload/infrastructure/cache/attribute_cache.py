@@ -77,6 +77,12 @@ class AttributeCache:
                 self._save()
             return default
         entry = self._cache.get(key, {})
+        
+        # Handle wrapped non-dict values (lists, strings, etc.)
+        if "_value" in entry and len(entry) == 3:  # _value, _expires, _created
+            return entry["_value"]
+        
+        # Handle dict values (filter out internal keys)
         payload = {k: v for k, v in entry.items() if not k.startswith("_")}
         return payload if payload else default
 
