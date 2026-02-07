@@ -10,8 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from mercadolivre_upload.shared.utils.config_loader import load_yaml_config
-
-from .text_normalizer import PortugueseTextNormalizer
+from mercadolivre_upload.shared.utils.text_utils import PortugueseTextNormalizer
 
 logger = logging.getLogger(__name__)
 

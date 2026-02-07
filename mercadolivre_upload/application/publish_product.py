@@ -16,8 +16,8 @@ from mercadolivre_upload.domain.category.resolver import CategoryResolver
 from mercadolivre_upload.domain.fiscal.data import FiscalData
 from mercadolivre_upload.domain.fiscal.service import FiscalService, FiscalSubmissionResult
 from mercadolivre_upload.domain.product.model import Product
-from mercadolivre_upload.domain.text_normalizer import PortugueseTextNormalizer
 from mercadolivre_upload.domain.validation import ValidationFeedback
+from mercadolivre_upload.shared.utils.text_utils import PortugueseTextNormalizer
 
 from .attribute_builder import AttributeBuilderService
 from .ports import ClipUploaderPort, ImageUploaderPort, ItemPublisherPort, ShippingResolverPort
