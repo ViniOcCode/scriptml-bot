@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .exceptions import TokenExpiredError
+from .exceptions import AuthError, TokenExpiredError
 from .oauth import OAuthHandler
 
 
@@ -126,3 +126,76 @@ class TokenManager:
         Call this if tokens.json is modified externally.
         """
         self._tokens = None
+
+    def is_authenticated(self) -> bool:
+        """Check if authenticated with valid token.
+
+        Returns:
+            True if token exists and is not expired
+        """
+        try:
+            tokens = self.load_tokens()
+            return not self.is_token_expired() and bool(tokens.get("access_token"))
+        except FileNotFoundError:
+            return False
+
+    def get_auth_status(self) -> dict[str, Any]:
+        """Get current authentication status.
+
+        Returns:
+            Dictionary with authenticated status and user_id
+        """
+        try:
+            tokens = self.load_tokens()
+            return {
+                "authenticated": self.is_authenticated(),
+                "user_id": tokens.get("user_id"),
+            }
+        except FileNotFoundError:
+            return {"authenticated": False, "user_id": None}
+
+    def set_token(
+        self,
+        access_token: str,
+        refresh_token: str | None = None,
+        expires_in: int = 3600,
+        user_id: str | None = None,
+    ) -> None:
+        """Set token data manually (for testing).
+
+        Args:
+            access_token: Access token string
+            refresh_token: Optional refresh token
+            expires_in: Token lifetime in seconds (default: 3600)
+            user_id: Optional user ID
+        """
+        expires_at = int(time.time()) + expires_in
+        tokens = {
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "expires_at": expires_at,
+            "user_id": user_id,
+        }
+        self.save_tokens(tokens)
+
+    def get_valid_token(self) -> str:
+        """Get valid access token, refreshing if needed.
+
+        This is an alias for get_access_token() for backward compatibility.
+
+        Returns:
+            Valid access token string
+
+        Raises:
+            TokenExpiredError: If token is expired and refresh fails
+            AuthError: If not authenticated
+        """
+        if not self.is_authenticated():
+            raise AuthError("Not authenticated")
+        return self.get_access_token(auto_refresh=True)
+
+    def logout(self) -> None:
+        """Clear tokens and remove token file."""
+        self._tokens = None
+        if self.token_path.exists():
+            self.token_path.unlink()
