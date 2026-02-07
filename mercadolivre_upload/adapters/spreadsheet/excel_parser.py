@@ -6,10 +6,11 @@ from typing import Any
 
 import pandas as pd
 
+from mercadolivre_upload.domain.fiscal.data import FiscalData
+from mercadolivre_upload.domain.product.model import Product
 from mercadolivre_upload.shared.utils.config_loader import load_yaml_config
 
 from .exceptions import MissingColumnError, ValidationError
-from .models import FiscalData, Product
 
 logger = logging.getLogger(__name__)
 
