@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-import yaml
+from mercadolivre_upload.shared.utils.config_loader import load_yaml_config
 
 from .attribute_metadata import AttributeMeta
 
@@ -18,15 +18,6 @@ CLASS_COMMERCIAL = "commercial"  # Warranty, pricing, terms
 CLASS_LOGISTICS = "logistics"  # Shipping, packaging
 
 
-def _load_yaml_config(primary: Path, fallback: Path | None = None) -> dict[str, Any]:
-    """Load YAML config with optional fallback."""
-    for path in (primary, fallback):
-        if path and path.exists():
-            with open(path, encoding="utf-8") as f:
-                return yaml.safe_load(f) or {}
-    return {}
-
-
 def _load_classification_config() -> dict[str, Any]:
     """Load attribute classification patterns from config file.
 
@@ -34,7 +25,7 @@ def _load_classification_config() -> dict[str, Any]:
         Dictionary with logistics_patterns and commercial_patterns
     """
     try:
-        config = _load_yaml_config(
+        config = load_yaml_config(
             Path("config/attribute_rules.yaml"), Path("config/generic_mappings.yaml")
         )
 
