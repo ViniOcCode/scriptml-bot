@@ -4,7 +4,6 @@ import logging
 from pathlib import Path
 
 import typer
-import yaml
 from rich.console import Console
 from rich.panel import Panel
 
@@ -18,19 +17,9 @@ from mercadolivre_upload.domain.category.resolver import CategoryResolver
 from mercadolivre_upload.domain.fiscal.service import FiscalService
 from mercadolivre_upload.domain.shipping.resolver import ShippingResolver
 from mercadolivre_upload.infrastructure.cache.attribute_cache import AttributeCache
+from mercadolivre_upload.shared.utils.config_loader import load_yaml_config as _load_yaml_config
 
 logger = logging.getLogger(__name__)
-
-
-def _load_yaml_config(path: Path):  # type: ignore[no-untyped-def]
-    """Load YAML config from a single path."""
-    if path.exists():
-        try:
-            with open(path, encoding="utf-8") as f:
-                return yaml.safe_load(f) or {}
-        except Exception as e:
-            logger.warning(f"Failed to load config {path}: {e}")
-    return {}
 
 
 def load_config():  # type: ignore[no-untyped-def]

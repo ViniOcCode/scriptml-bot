@@ -9,20 +9,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import yaml
+from mercadolivre_upload.shared.utils.config_loader import load_yaml_config
 
 from .text_normalizer import PortugueseTextNormalizer
 
 logger = logging.getLogger(__name__)
-
-
-def _load_yaml_config(primary: Path, fallback: Path | None = None) -> dict[str, Any]:
-    """Load YAML config with optional fallback."""
-    for path in (primary, fallback):
-        if path and path.exists():
-            with open(path, encoding="utf-8") as f:
-                return yaml.safe_load(f) or {}
-    return {}
 
 
 @dataclass
