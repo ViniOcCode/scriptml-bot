@@ -5,9 +5,9 @@ to Mercado Livre API attribute definitions.
 """
 
 import logging
-import unicodedata
-from difflib import SequenceMatcher
 from typing import Any
+
+from mercadolivre_upload.shared.utils.text_utils import TextNormalizer
 
 logger = logging.getLogger(__name__)
 
@@ -23,41 +23,6 @@ class AttributeMapper:
         """
         self.threshold = similarity_threshold
 
-    @staticmethod
-    def normalize(text: str) -> str:
-        """Normalize text for comparison.
-
-        - Lowercase
-        - Remove accents
-        - Remove special characters (keep only alphanumeric and spaces)
-
-        Args:
-            text: Input text
-
-        Returns:
-            Normalized text
-        """
-        text = text.lower().strip()
-        # Remove accents (é -> e, ã -> a, etc.)
-        text = unicodedata.normalize("NFKD", text)
-        text = "".join(c for c in text if not unicodedata.combining(c))
-        # Remove special chars except alphanumeric and spaces
-        text = "".join(c for c in text if c.isalnum() or c.isspace())
-        return text
-
-    @staticmethod
-    def similarity(a: str, b: str) -> float:
-        """Calculate string similarity ratio.
-
-        Args:
-            a: First string
-            b: Second string
-
-        Returns:
-            Similarity ratio (0.0 to 1.0)
-        """
-        return SequenceMatcher(None, a, b).ratio()
-
     def find_best_match(
         self, excel_column: str, ml_attributes: list[dict[str, Any]]
     ) -> tuple[dict[str, Any] | None, float]:
@@ -72,19 +37,19 @@ class AttributeMapper:
         Returns:
             Tuple of (best_attribute_definition, similarity_score) or (None, 0.0)
         """
-        excel_normalized = self.normalize(excel_column)
+        excel_normalized = TextNormalizer.normalize(excel_column)
         best_match = None
         best_score = 0.0
 
         for attr in ml_attributes:
             # Try matching against attribute name
             attr_name = attr.get("name", "")
-            name_normalized = self.normalize(attr_name)
-            name_score = self.similarity(excel_normalized, name_normalized)
+            name_normalized = TextNormalizer.normalize(attr_name)
+            name_score = TextNormalizer.similarity(excel_normalized, name_normalized)
 
             # Try matching against attribute ID (with underscores replaced by spaces)
             attr_id = attr.get("id", "").replace("_", " ").lower()
-            id_score = self.similarity(excel_normalized, attr_id)
+            id_score = TextNormalizer.similarity(excel_normalized, attr_id)
 
             # Use the better of the two scores
             score = max(name_score, id_score)

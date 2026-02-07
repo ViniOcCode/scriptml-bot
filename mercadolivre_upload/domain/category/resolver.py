@@ -5,46 +5,13 @@ Infrastructure layer provides the implementation (adapter).
 """
 
 import logging
-import unicodedata
-from difflib import SequenceMatcher
 from typing import Any, Protocol
+
+from mercadolivre_upload.shared.utils.text_utils import TextNormalizer
 
 from ..attribute_metadata import AttributeMeta
 
 logger = logging.getLogger(__name__)
-
-
-def normalize_text(text: str) -> str:
-    """Normalize text for comparison.
-
-    - Lowercase
-    - Remove accents
-    - Strip whitespace
-
-    Args:
-        text: Input text
-
-    Returns:
-        Normalized text
-    """
-    text = text.lower().strip()
-    # Remove accents (é -> e, ã -> a, etc.)
-    text = unicodedata.normalize("NFKD", text)
-    text = "".join(c for c in text if not unicodedata.combining(c))
-    return text
-
-
-def similarity(a: str, b: str) -> float:
-    """Calculate string similarity ratio.
-
-    Args:
-        a: First string
-        b: Second string
-
-    Returns:
-        Similarity ratio (0.0 to 1.0)
-    """
-    return SequenceMatcher(None, normalize_text(a), normalize_text(b)).ratio()
 
 
 class CategoryApiPort(Protocol):
@@ -146,7 +113,7 @@ class CategoryResolver:
         categories = self._api.get_site_categories(site_id)
 
         for cat in categories:
-            name_normalized = normalize_text(cat["name"])
+            name_normalized = TextNormalizer.normalize(cat["name"])
             self._categories[name_normalized] = cat["id"]
 
     def _get_category_children(self, category_id: str) -> list[dict[str, Any]]:
@@ -196,7 +163,7 @@ class CategoryResolver:
             return None
 
         visited.add(parent_id)
-        name_normalized = normalize_text(name)
+        name_normalized = TextNormalizer.normalize(name)
 
         # Get children of this category
         children = self._get_category_children(parent_id)
@@ -207,7 +174,7 @@ class CategoryResolver:
         for child in children:
             child_name = child["name"]
             child_id = child["id"]
-            child_normalized = normalize_text(child_name)
+            child_normalized = TextNormalizer.normalize(child_name)
 
             # Cache this child
             self._categories[child_normalized] = child_id
@@ -223,7 +190,7 @@ class CategoryResolver:
                 return child_id  # type: ignore[no-any-return]
 
             # Fuzzy similarity check
-            sim = similarity(child_name, name)
+            sim = TextNormalizer.similarity(child_name, name)
             if sim > best_similarity:
                 best_similarity = sim
                 best_match = (child_id, child_name)
@@ -297,7 +264,7 @@ class CategoryResolver:
         if not self._categories:
             self.load_categories(site_id)
 
-        name_normalized = normalize_text(name)
+        name_normalized = TextNormalizer.normalize(name)
         logger.info(f"Looking for category: '{name}' (normalized: '{name_normalized}')")
 
         # Fast path: Check root categories with fuzzy matching
@@ -316,7 +283,7 @@ class CategoryResolver:
                 return cat_id
 
             # Track best fuzzy match
-            sim = similarity(cat_name, name)
+            sim = TextNormalizer.similarity(cat_name, name)
             if sim > best_root_sim:
                 best_root_sim = sim
                 best_root_match = (cat_name, cat_id)
@@ -415,7 +382,7 @@ class CategoryResolver:
         if not product_titles:
             return None
 
-        category_normalized = normalize_text(category_name)
+        category_normalized = TextNormalizer.normalize(category_name)
         logger.info(
             f"Finding category '{category_name}' using predictor "
             f"with {len(product_titles)} titles..."
@@ -458,7 +425,7 @@ class CategoryResolver:
                 path_from_root = category_data.get("path_from_root", [])
                 for node in path_from_root:
                     node_name = node.get("name", "")
-                    if normalize_text(node_name) == category_normalized:
+                    if TextNormalizer.normalize(node_name) == category_normalized:
                         logger.info(
                             f"Found matching category in prediction path: "
                             f"'{node_name}' ({node.get('id')})"
@@ -467,7 +434,7 @@ class CategoryResolver:
 
                 # Also check predicted category name itself
                 predicted_name = prediction.get("category_name", "")
-                if normalize_text(predicted_name) == category_normalized:
+                if TextNormalizer.normalize(predicted_name) == category_normalized:
                     logger.info(
                         f"Predicted category matches requested: "
                         f"'{predicted_name}' ({predicted_id})"

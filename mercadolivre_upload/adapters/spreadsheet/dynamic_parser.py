@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from mercadolivre_upload.domain.text_normalizer import PortugueseTextNormalizer
+from mercadolivre_upload.shared.utils.text_utils import PortugueseTextNormalizer
 
 from .exceptions import MissingColumnError, ValidationError
 from .models import FiscalData, Product

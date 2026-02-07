@@ -11,7 +11,7 @@ from typing import Any
 
 import pandas as pd
 
-from mercadolivre_upload.domain.text_normalizer import PortugueseTextNormalizer
+from mercadolivre_upload.shared.utils.text_utils import PortugueseTextNormalizer
 
 logger = logging.getLogger(__name__)
 

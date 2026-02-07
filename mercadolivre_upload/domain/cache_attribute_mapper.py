@@ -6,7 +6,7 @@ attribute definitions with value mapping support.
 
 from typing import Any, Protocol
 
-from mercadolivre_upload.domain.text_normalizer import PortugueseTextNormalizer
+from mercadolivre_upload.shared.utils.text_utils import PortugueseTextNormalizer
 
 # Type aliases for clarity
 AttributeDef = dict[str, Any]

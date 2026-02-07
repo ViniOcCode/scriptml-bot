@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from mercadolivre_upload.domain.text_normalizer import PortugueseTextNormalizer
+from mercadolivre_upload.shared.utils.text_utils import PortugueseTextNormalizer
 
 
 @dataclass
