@@ -13,7 +13,8 @@ import pandas as pd
 from mercadolivre_upload.shared.utils.text_utils import PortugueseTextNormalizer
 
 from .exceptions import MissingColumnError, ValidationError
-from .models import FiscalData, Product
+from mercadolivre_upload.domain.fiscal.data import FiscalData
+from mercadolivre_upload.domain.product.model import Product
 
 logger = logging.getLogger(__name__)
 
