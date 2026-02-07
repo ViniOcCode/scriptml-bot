@@ -75,6 +75,13 @@ class TokenManager:
         try:
             tokens = self.load_tokens()
             expires_at = tokens.get("expires_at", 0)
+
+            # Handle both timestamp and ISO string formats
+            if isinstance(expires_at, str):
+                from datetime import datetime
+
+                expires_at = datetime.fromisoformat(expires_at).timestamp()
+
             return time.time() >= (expires_at - buffer_seconds)  # type: ignore[no-any-return]
         except FileNotFoundError:
             return True
@@ -143,16 +150,22 @@ class TokenManager:
         """Get current authentication status.
 
         Returns:
-            Dictionary with authenticated status and user_id
+            Dictionary with authenticated status, status string, and user_id
         """
         try:
             tokens = self.load_tokens()
+            authenticated = self.is_authenticated()
             return {
-                "authenticated": self.is_authenticated(),
+                "authenticated": authenticated,
+                "status": "authenticated" if authenticated else "unauthenticated",
                 "user_id": tokens.get("user_id"),
             }
         except FileNotFoundError:
-            return {"authenticated": False, "user_id": None}
+            return {
+                "authenticated": False,
+                "status": "unauthenticated",
+                "user_id": None,
+            }
 
     def set_token(
         self,
