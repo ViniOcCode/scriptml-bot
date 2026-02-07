@@ -13,8 +13,9 @@ All configuration is read from infrastructure.config.Settings or passed explicit
 import logging
 import random
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from threading import Lock
+from typing import Any
 
 import requests
 
@@ -47,7 +48,7 @@ NON_IDEMPOTENT = RetryPolicy(max_retries=0, idempotent=False)
 class TokenBucketLimiter:
     """Simple thread-safe token-bucket rate limiter."""
 
-    def __init__(self, rate: float = 2.0, burst: int = 5):
+    def __init__(self, rate: float = 2.0, burst: int = 5):  # noqa: D107
         self.rate = rate
         self.burst = burst
         self._tokens = float(burst)
@@ -71,7 +72,7 @@ class TokenBucketLimiter:
 class ResilientHTTPClient:
     """HTTP client with retry/backoff/rate-limiting built in."""
 
-    def __init__(
+    def __init__(  # noqa: D107
         self,
         *,
         timeout: int = 30,
@@ -92,11 +93,12 @@ class ResilientHTTPClient:
         self,
         url: str,
         *,
-        headers: dict | None = None,
-        params: dict | None = None,
+        headers: dict[str, str] | None = None,
+        params: dict[str, str] | None = None,
         policy: RetryPolicy | None = None,
         timeout: int | None = None,
     ) -> requests.Response:
+        """Send a GET request with retry logic."""
         return self._request(
             "GET", url, headers=headers, params=params, policy=policy, timeout=timeout
         )
@@ -105,13 +107,14 @@ class ResilientHTTPClient:
         self,
         url: str,
         *,
-        headers: dict | None = None,
-        json: dict | None = None,
-        data: dict | None = None,
-        files: dict | None = None,
+        headers: dict[str, str] | None = None,
+        json: dict[str, Any] | None = None,
+        data: dict[str, Any] | None = None,
+        files: dict[str, Any] | None = None,
         policy: RetryPolicy | None = None,
         timeout: int | None = None,
     ) -> requests.Response:
+        """Send a POST request with retry logic."""
         return self._request(
             "POST",
             url,
@@ -127,14 +130,13 @@ class ResilientHTTPClient:
         self,
         url: str,
         *,
-        headers: dict | None = None,
-        json: dict | None = None,
+        headers: dict[str, str] | None = None,
+        json: dict[str, Any] | None = None,
         policy: RetryPolicy | None = None,
         timeout: int | None = None,
     ) -> requests.Response:
-        return self._request(
-            "PUT", url, headers=headers, json=json, policy=policy, timeout=timeout
-        )
+        """Send a PUT request with retry logic."""
+        return self._request("PUT", url, headers=headers, json=json, policy=policy, timeout=timeout)
 
     # ------------------------------------------------------------------
     # Internal
@@ -145,11 +147,11 @@ class ResilientHTTPClient:
         method: str,
         url: str,
         *,
-        headers: dict | None = None,
-        params: dict | None = None,
-        json: dict | None = None,
-        data: dict | None = None,
-        files: dict | None = None,
+        headers: dict[str, str] | None = None,
+        params: dict[str, str] | None = None,
+        json: dict[str, Any] | None = None,
+        data: dict[str, Any] | None = None,
+        files: dict[str, Any] | None = None,
         policy: RetryPolicy | None = None,
         timeout: int | None = None,
     ) -> requests.Response:
@@ -244,7 +246,7 @@ class ResilientHTTPClient:
                 except ValueError:
                     pass
 
-        delay = policy.base_delay * (policy.backoff_factor ** attempt)
+        delay = policy.base_delay * (policy.backoff_factor**attempt)
         delay = min(delay, policy.max_delay)
 
         if policy.jitter:

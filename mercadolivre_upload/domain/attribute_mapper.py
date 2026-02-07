@@ -7,6 +7,7 @@ to Mercado Livre API attribute definitions.
 import logging
 import unicodedata
 from difflib import SequenceMatcher
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -58,8 +59,8 @@ class AttributeMapper:
         return SequenceMatcher(None, a, b).ratio()
 
     def find_best_match(
-        self, excel_column: str, ml_attributes: list[dict]
-    ) -> tuple[dict | None, float]:
+        self, excel_column: str, ml_attributes: list[dict[str, Any]]
+    ) -> tuple[dict[str, Any] | None, float]:
         """Find best matching ML attribute for an Excel column.
 
         Compares against both attribute name and attribute ID.
@@ -95,8 +96,8 @@ class AttributeMapper:
         return best_match, best_score
 
     def map_columns_to_attributes(
-        self, excel_columns: list[str], ml_attributes: list[dict]
-    ) -> dict[str, dict]:
+        self, excel_columns: list[str], ml_attributes: list[dict[str, Any]]
+    ) -> dict[str, dict[str, Any]]:
         """Map Excel column names to ML attribute definitions.
 
         Args:
@@ -126,9 +127,9 @@ class AttributeMapper:
     def map_product_attributes(
         self,
         product_attributes: dict[str, str],
-        ml_attributes: list[dict],
-        explicit_mappings: dict[str, dict] | None = None,
-    ) -> tuple[list[dict], list[dict]]:
+        ml_attributes: list[dict[str, Any]],
+        explicit_mappings: dict[str, dict[str, Any]] | None = None,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """Map product attributes to ML format using fuzzy matching.
 
         Args:
@@ -229,18 +230,24 @@ class AttributeMapper:
                     else:
                         # Regular attribute mapping
                         # Sanitize numeric values: convert comma to dot for decimals
-                        if value and isinstance(value, str):
-                            # Check if looks like a number with comma
-                            if "," in value and value.replace(",", "").replace(".", "").isdigit():
-                                # Brazilian format: 0,220 -> 0.220
-                                value = value.replace(",", ".")
+                        # Check if looks like a number with comma (Brazilian format)
+                        if (
+                            value
+                            and isinstance(value, str)
+                            and "," in value
+                            and value.replace(",", "").replace(".", "").isdigit()
+                        ):
+                            # Brazilian format: 0,220 -> 0.220
+                            value = value.replace(",", ".")
 
                         # Apply unit suffix if configured
                         unit_suffix = mapping_config.get("unit_suffix", "")
-                        if unit_suffix and value:
-                            # Check if value already has the unit
-                            if not str(value).lower().endswith(unit_suffix.strip().lower()):
-                                value = f"{value}{unit_suffix}"
+                        if (
+                            unit_suffix
+                            and value
+                            and not str(value).lower().endswith(unit_suffix.strip().lower())
+                        ):
+                            value = f"{value}{unit_suffix}"
 
                         ml_attributes_list.append(
                             {
@@ -260,7 +267,7 @@ class AttributeMapper:
 
         # Build ML attributes list from fuzzy matches
         for col, attr_def in column_to_attr.items():
-            value = product_attributes.get(col)
+            value = product_attributes.get(col)  # type: ignore[assignment]
             if value:
                 ml_attributes_list.append(
                     {

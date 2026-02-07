@@ -4,6 +4,7 @@ Infrastructure layer - depends on external API.
 """
 
 import logging
+from typing import Any
 
 from mercadolivre_upload.api.client import MLApiClient
 from mercadolivre_upload.domain.category.resolver import CategoryApiPort
@@ -26,7 +27,7 @@ class CategoryAdapter(CategoryApiPort):
         """
         self.client = client
 
-    def get_site_categories(self, site_id: str) -> list[dict]:
+    def get_site_categories(self, site_id: str) -> list[dict[str, Any]]:
         """Get all categories for a site."""
         try:
             return self.client.get_site_categories(site_id)
@@ -34,7 +35,7 @@ class CategoryAdapter(CategoryApiPort):
             logger.error(f"Failed to get site categories: {e}")
             return []
 
-    def get_category(self, category_id: str) -> dict:
+    def get_category(self, category_id: str) -> dict[str, Any]:
         """Get category details including children_categories."""
         try:
             result = self.client.get_category(category_id)
@@ -47,7 +48,7 @@ class CategoryAdapter(CategoryApiPort):
             logger.error(f"Failed to get category {category_id}: {e}")
             return {}
 
-    def get_category_attributes(self, category_id: str) -> list[dict]:
+    def get_category_attributes(self, category_id: str) -> list[dict[str, Any]]:
         """Get attributes for a category."""
         try:
             result = self.client.get_category_attributes(category_id)
@@ -61,8 +62,8 @@ class CategoryAdapter(CategoryApiPort):
             return []
 
     def get_category_conditional_attributes(
-        self, category_id: str, current_attributes: dict
-    ) -> list[dict]:
+        self, category_id: str, current_attributes: dict[str, Any]
+    ) -> list[dict[str, Any]]:
         """Get conditional attributes for a category.
 
         Args:
@@ -88,7 +89,7 @@ class CategoryAdapter(CategoryApiPort):
             logger.debug(f"Failed to get conditional attributes for {category_id}: {e}")
             return []
 
-    def predict_category(self, title: str, site_id: str = "MLB") -> list[dict]:
+    def predict_category(self, title: str, site_id: str = "MLB") -> list[dict[str, Any]]:
         """Predict category based on product title."""
         try:
             result = self.client.predict_category(title, site_id)
@@ -101,7 +102,7 @@ class CategoryAdapter(CategoryApiPort):
             logger.warning(f"Failed to predict category for '{title}': {e}")
             return []
 
-    def validate_item(self, item: dict) -> dict:
+    def validate_item(self, item: dict[str, Any]) -> dict[str, Any]:
         """Validate item before publishing."""
         try:
             return self.client.validate_item(item)
@@ -109,6 +110,6 @@ class CategoryAdapter(CategoryApiPort):
             logger.error(f"Failed to validate item: {e}")
             return {"valid": False, "error": str(e)}
 
-    def create_item(self, item: dict) -> dict:
+    def create_item(self, item: dict[str, Any]) -> dict[str, Any]:
         """Create/publish an item."""
         return self.client.create_item(item)

@@ -64,9 +64,9 @@ class SmartAttributeMapper:
         self.normalizer = PortugueseTextNormalizer()
         self.config = self._load_config(config_path)
         self.min_confidence = min_confidence
-        self._category_cache: dict[str, list[dict]] = {}
+        self._category_cache: dict[str, list[dict[str, Any]]] = {}
 
-    def _load_config(self, config_path: str) -> dict:
+    def _load_config(self, config_path: str) -> dict[str, Any]:
         """Load generic mappings from YAML config.
 
         Also loads fiscal fields from fiscal_config.yaml and merges them.
@@ -90,7 +90,7 @@ class SmartAttributeMapper:
                 config["fiscal_fields"] = fiscal_config.get("fiscal_fields", {})
                 logger.info(f"Loaded fiscal config from {fiscal_config_path}")
 
-            return config
+            return config  # type: ignore[no-any-return]
         except Exception as e:
             logger.error(f"Failed to load config: {e}")
             return {}
@@ -144,7 +144,7 @@ class SmartAttributeMapper:
 
         return mappings, unmapped
 
-    def _get_category_attributes(self, category_id: str) -> list[dict]:
+    def _get_category_attributes(self, category_id: str) -> list[dict[str, Any]]:
         """Fetch attributes from ML API (with caching)."""
         if category_id in self._category_cache:
             return self._category_cache[category_id]
@@ -153,12 +153,12 @@ class SmartAttributeMapper:
             attributes = self.api.get_category_attributes(category_id)
             self._category_cache[category_id] = attributes
             logger.debug(f"Cached {len(attributes)} attributes for {category_id}")
-            return attributes
+            return attributes  # type: ignore[no-any-return]
         except Exception as e:
             logger.error(f"Failed to fetch attributes for {category_id}: {e}")
             return []
 
-    def _build_ml_index(self, attributes: list[dict]) -> dict[str, str]:
+    def _build_ml_index(self, attributes: list[dict[str, Any]]) -> dict[str, str]:
         """Build index of normalized attribute names -> IDs.
 
         Args:
@@ -322,11 +322,11 @@ class SmartAttributeMapper:
 
     def get_mapping_summary(
         self, mappings: list[ColumnMapping], unmapped: list[UnmappedColumn]
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Generate a summary of the mapping results."""
         total = len(mappings) + len(unmapped)
 
-        by_type = {}
+        by_type = {}  # type: ignore[var-annotated]
         for m in mappings:
             by_type[m.mapping_type] = by_type.get(m.mapping_type, 0) + 1
 

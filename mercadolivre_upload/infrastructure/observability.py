@@ -35,7 +35,7 @@ try:
     from rich.layout import Layout
     from rich.live import Live
     from rich.panel import Panel
-    from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
+    from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn  # noqa: F401
     from rich.table import Table
     from rich.text import Text
 
@@ -514,7 +514,7 @@ class Alert:
         }
 
         for k, v in self.details.items():
-            embed["fields"].append({"name": k, "value": str(v)[:1024], "inline": True})
+            embed["fields"].append({"name": k, "value": str(v)[:1024], "inline": True})  # type: ignore[attr-defined]
 
         return {"embeds": [embed]}
 
@@ -993,19 +993,18 @@ class ObservabilityManager:
         )
 
         # Alerta em caso de falha crítica
-        if not success and error_category in ["api_error", "auth_error", "timeout"]:
-            if self.alerts:
-                await self.alerts.error(
-                    title="Falha no Upload de Produto",
-                    message=f"Upload falhou para produto {product_id}: {error_category}",
-                    component=self.component,
-                    correlation_id=correlation_id,
-                    details={
-                        "product_id": product_id,
-                        "error_category": error_category,
-                        "duration_ms": duration_ms,
-                    },
-                )
+        if not success and error_category in ["api_error", "auth_error", "timeout"] and self.alerts:
+            await self.alerts.error(
+                title="Falha no Upload de Produto",
+                message=f"Upload falhou para produto {product_id}: {error_category}",
+                component=self.component,
+                correlation_id=correlation_id,
+                details={
+                    "product_id": product_id,
+                    "error_category": error_category,
+                    "duration_ms": duration_ms,
+                },
+            )
 
     def start_dashboard(self) -> None:
         """Inicia o dashboard se habilitado."""

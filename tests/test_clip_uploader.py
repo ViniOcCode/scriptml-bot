@@ -5,8 +5,6 @@ from unittest.mock import Mock
 
 from mercadolivre_upload.adapters.clip_uploader import (
     ClipUploader,
-    ClipUploadResult,
-    ClipUploadSummary,
 )
 from mercadolivre_upload.domain.validation.clip_validator import SUPPORTED_EXTENSIONS
 
@@ -262,10 +260,10 @@ class TestUploadClips:
 
         mock_client = Mock()
         uploader = ClipUploader(mock_client, base_path=tmp_path)
-        
+
         # Test with marketplace-specific ID
         summary = uploader.upload_clips("SKU123", "MLB1234567890")
-        
+
         assert summary.clips_uploaded == 0
         assert summary.clips_failed == 0
         assert summary.clips_skipped == 0

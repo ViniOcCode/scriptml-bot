@@ -1,10 +1,12 @@
 """Authentication manager stub."""
 
+from typing import Any
+
 
 class AuthManager:
     """Manage authentication with Mercado Livre."""
 
-    def __init__(self, credentials_path: str = "config/credentials.yaml"):
+    def __init__(self, credentials_path: str = "config/credentials.yaml"):  # noqa: D107
         self.credentials_path = credentials_path
         self._token: str | None = None
 
@@ -21,6 +23,6 @@ class AuthManager:
         # TODO: Implement real authentication
         return False
 
-    def get_auth_status(self) -> dict:
+    def get_auth_status(self) -> dict[str, Any]:
         """Get authentication status."""
         return {"authenticated": self.is_authenticated(), "user_id": None}

@@ -8,6 +8,7 @@ import json
 import logging
 import time
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +16,9 @@ logger = logging.getLogger(__name__)
 class PredictionCache:
     """TTL-based cache for domain discovery predictions."""
 
-    def __init__(self, cache_dir: str = "cache/predictions", ttl_seconds: int = 86400):
+    def __init__(  # noqa: D107
+        self, cache_dir: str = "cache/predictions", ttl_seconds: int = 86400
+    ):
         self.cache_dir = Path(cache_dir)
         self.ttl_seconds = ttl_seconds
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -26,7 +29,8 @@ class PredictionCache:
         digest = hashlib.sha256(key).hexdigest()[:16]
         return self.cache_dir / f"{site_id}_{digest}.json"
 
-    def get(self, title: str, site_id: str = "MLB") -> list[dict] | None:
+    def get(self, title: str, site_id: str = "MLB") -> list[dict[str, Any]] | None:
+        """Return cached predictions for a title, or None if expired/missing."""
         cache_path = self._get_cache_path(title, site_id)
         if not cache_path.exists():
             return None
@@ -41,13 +45,14 @@ class PredictionCache:
                 return None
 
             logger.debug("Using cached prediction for '%s...'", title[:30])
-            return data.get("predictions", [])
+            return data.get("predictions", [])  # type: ignore[no-any-return]
 
         except (json.JSONDecodeError, OSError) as e:
             logger.warning("Failed to read prediction cache: %s", e)
             return None
 
-    def set(self, title: str, predictions: list[dict], site_id: str = "MLB") -> None:
+    def set(self, title: str, predictions: list[dict[str, Any]], site_id: str = "MLB") -> None:
+        """Store predictions in the cache."""
         cache_path = self._get_cache_path(title, site_id)
         try:
             data = {
@@ -62,6 +67,7 @@ class PredictionCache:
             logger.warning("Failed to write prediction cache: %s", e)
 
     def clear_expired(self) -> int:
+        """Remove expired cache files and return count removed."""
         removed = 0
         now = time.time()
         for cache_file in self.cache_dir.glob("*.json"):

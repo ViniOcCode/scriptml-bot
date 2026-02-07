@@ -47,6 +47,7 @@ class ClipValidator:
     """Validates video files against Mercado Livre clip requirements."""
 
     def __init__(self, ffprobe_path: str = "ffprobe"):
+        """Initialize with optional ffprobe path."""
         self._ffprobe_path = ffprobe_path
         self._ffprobe_available: bool | None = None
 
@@ -55,7 +56,7 @@ class ClipValidator:
         """Check if ffprobe is available on the system (cached)."""
         if self._ffprobe_available is None:
             try:
-                subprocess.run(
+                subprocess.run(  # noqa: S603
                     [self._ffprobe_path, "-version"],
                     capture_output=True,
                     timeout=5,
@@ -78,9 +79,7 @@ class ClipValidator:
         warnings: list[str] = []
 
         if not path.exists():
-            return ClipValidationResult(
-                is_valid=False, errors=[f"File not found: {path}"]
-            )
+            return ClipValidationResult(is_valid=False, errors=[f"File not found: {path}"])
 
         # Format validation
         errors.extend(self._validate_format(path))
@@ -134,15 +133,9 @@ class ClipValidator:
         if props.duration is None:
             return []
         if props.duration < MIN_DURATION_SECONDS:
-            return [
-                f"Video too short: {props.duration:.1f}s "
-                f"(min: {MIN_DURATION_SECONDS}s)"
-            ]
+            return [f"Video too short: {props.duration:.1f}s " f"(min: {MIN_DURATION_SECONDS}s)"]
         if props.duration > MAX_DURATION_SECONDS:
-            return [
-                f"Video too long: {props.duration:.1f}s "
-                f"(max: {MAX_DURATION_SECONDS}s)"
-            ]
+            return [f"Video too long: {props.duration:.1f}s " f"(max: {MAX_DURATION_SECONDS}s)"]
         return []
 
     def _validate_resolution(self, props: VideoProperties) -> list[str]:
@@ -159,14 +152,19 @@ class ClipValidator:
     def _probe_video(self, path: Path) -> VideoProperties | None:
         """Extract video properties using ffprobe."""
         try:
-            result = subprocess.run(
+            result = subprocess.run(  # noqa: S603
                 [
                     self._ffprobe_path,
-                    "-v", "error",
-                    "-select_streams", "v:0",
-                    "-show_entries", "stream=duration,width,height",
-                    "-show_entries", "format=duration",
-                    "-of", "json",
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "v:0",
+                    "-show_entries",
+                    "stream=duration,width,height",
+                    "-show_entries",
+                    "format=duration",
+                    "-of",
+                    "json",
                     str(path),
                 ],
                 capture_output=True,

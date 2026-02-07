@@ -8,6 +8,7 @@
 
 import logging
 from pathlib import Path
+from typing import Any
 
 from mercadolivre_upload.adapters.spreadsheet.dynamic_parser import DynamicExcelParser
 from mercadolivre_upload.adapters.spreadsheet.models import Product
@@ -42,7 +43,7 @@ class MLPipeline:
         self.dry_run = dry_run
 
         # Layer 1: Parser
-        self.parser = DynamicExcelParser()
+        self.parser = DynamicExcelParser()  # type: ignore[no-untyped-call]
 
         # Layer 3: API components
         self.client = MLApiClient(auth_manager)
@@ -52,7 +53,7 @@ class MLPipeline:
 
         prediction_cache = PredictionCache()
 
-        self.resolver = CategoryResolver(
+        self.resolver = CategoryResolver(  # type: ignore[call-arg]
             self.client,
             attribute_cache=None,
             prediction_cache=prediction_cache,
@@ -66,7 +67,7 @@ class MLPipeline:
 
         # Results
         self.products: list[Product] = []
-        self.results: list[dict] = []
+        self.results: list[dict[str, Any]] = []
 
     def parse_excel(self) -> list[Product]:
         """Layer 1: Parse Excel with dynamic header detection."""
@@ -95,7 +96,7 @@ class MLPipeline:
         self,
         category_name: str,
         batch_size: int = 100,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Layer 3: Publish products to ML.
 
         Args:
@@ -120,13 +121,13 @@ class MLPipeline:
         stats = self.publisher.get_stats()
         logger.info(f"Published: {stats['published']}, Failed: {stats['failed']}")
 
-        return stats
+        return stats  # type: ignore[no-any-return]
 
     def run(
         self,
         category_name: str,
         validate_only: bool = False,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Run full pipeline.
 
         Args:

@@ -1,5 +1,6 @@
 """Picture builder utilities."""
 
+from typing import Any
 from urllib.parse import urlparse
 
 
@@ -7,7 +8,8 @@ class PictureBuilder:
     """Builds picture payloads for Mercado Livre items."""
 
     def __init__(self) -> None:
-        self._pictures: list[dict] = []
+        """Initialize with empty pictures list."""
+        self._pictures: list[dict[str, Any]] = []
 
     def add_url(self, url: str) -> "PictureBuilder":
         """Add an image URL."""
@@ -32,7 +34,7 @@ class PictureBuilder:
             self.add_file(path)
         return self
 
-    def build(self) -> list[dict]:
+    def build(self) -> list[dict[str, Any]]:
         """Return a copy of built pictures."""
         return [pic.copy() for pic in self._pictures]
 

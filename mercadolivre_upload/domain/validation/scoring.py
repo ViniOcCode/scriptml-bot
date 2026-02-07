@@ -3,6 +3,7 @@
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -15,7 +16,7 @@ from ..attribute_metadata import AttributeMeta
 logger = logging.getLogger(__name__)
 
 
-def _load_scoring_config() -> dict:
+def _load_scoring_config() -> dict[str, Any]:
     """Load scoring configuration from config file.
 
     Returns:
@@ -70,7 +71,9 @@ class SemanticScorer:
     Uses configuration from config/generic_mappings.yaml as the single source of truth.
     """
 
-    def __init__(self, attribute_metadata: list[AttributeMeta], config: dict | None = None):
+    def __init__(
+        self, attribute_metadata: list[AttributeMeta], config: dict[str, Any] | None = None
+    ):
         """Initialize the scorer.
 
         Args:
@@ -141,16 +144,16 @@ class SemanticScorer:
         # Penalty: Value outside allowed domain
         if meta.allowed_values and safe_value not in meta.allowed_values:
             score -= penalties.get("value_not_allowed", 30)
+            penalty = penalties.get("value_not_allowed", 30)
             logger.warning(
-                f"Value '{safe_value}' not in allowed values for {attr_id}, score -{penalties.get('value_not_allowed', 30)}"
+                f"Value '{safe_value}' not in allowed values for {attr_id}, score -{penalty}"
             )
 
         # Penalty: Free-text semantic leakage
         if self._is_free_text(safe_value) and self._looks_out_of_context(safe_value, meta):
             score -= penalties.get("free_text_leakage", 40)
-            logger.warning(
-                f"Possible semantic leakage in {attr_id}, score -{penalties.get('free_text_leakage', 40)}"
-            )
+            penalty = penalties.get("free_text_leakage", 40)
+            logger.warning(f"Possible semantic leakage in {attr_id}, score -{penalty}")
 
         # Penalty: Aggressive logistics data
         if classification == CLASS_LOGISTICS:
@@ -219,10 +222,7 @@ class SemanticScorer:
             "or",
         ]
         words = value_str.lower().split()
-        if sum(1 for w in words if w in descriptive_words) > 2:
-            return True
-
-        return False
+        return sum(1 for w in words if w in descriptive_words) > 2
 
     def _looks_out_of_context(self, value: str, meta: AttributeMeta) -> bool:
         """Check if free text value looks out of context for attribute.
@@ -235,33 +235,22 @@ class SemanticScorer:
         except Exception:
             return False
 
-        value_lower = value_str.lower()
+        value_str.lower()
         attr_name = meta.name.lower()
 
         # Check for obvious mismatches
         # Example: value describing a TV when attribute is about headphones
-        category_keywords = {
-            "display",
-            "tela",
-            "screen",
-            "tv",
-            "televisão",
-            "mouse",
-            "teclado",
-            "keyboard",
-            "monitor",
-        }
 
         # If value contains many category-specific words not related to attr
-        if len(value_str) > 30:
-            # Long descriptions in non-editorial attributes
-            if "marca" not in attr_name and "modelo" not in attr_name:
-                if meta.value_type == "string":
-                    return True
+        # Long descriptions in non-editorial attributes
+        return (
+            len(value_str) > 30
+            and "marca" not in attr_name
+            and "modelo" not in attr_name
+            and meta.value_type == "string"
+        )
 
-        return False
-
-    def score_all(self, attributes: list[dict]) -> list[ScoredAttribute]:
+    def score_all(self, attributes: list[dict[str, Any]]) -> list[ScoredAttribute]:
         """Score all attributes.
 
         Args:

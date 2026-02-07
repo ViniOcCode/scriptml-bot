@@ -3,6 +3,7 @@
 import logging
 import re
 from dataclasses import dataclass, field
+from typing import Any
 
 from ..attribute_metadata import AttributeMeta
 
@@ -16,7 +17,7 @@ class ValidationResult:
     valid: bool
     blocking_errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
-    sanitized_attrs: list[dict] = field(default_factory=list)
+    sanitized_attrs: list[dict[str, Any]] = field(default_factory=list)
 
 
 class StructuralValidator:
@@ -26,9 +27,10 @@ class StructuralValidator:
     """
 
     def __init__(self, attribute_metadata: list[AttributeMeta]):
+        """Initialize with attribute metadata list."""
         self.metadata = {attr.id: attr for attr in attribute_metadata}
 
-    def validate(self, attributes: list[dict]) -> ValidationResult:
+    def validate(self, attributes: list[dict[str, Any]]) -> ValidationResult:
         """Validate attributes against structural rules.
 
         Args:
@@ -89,12 +91,15 @@ class StructuralValidator:
                 logger.warning(msg)
 
             # Validation pattern
-            if value and meta.validation_pattern:
-                if not re.match(meta.validation_pattern, str(value)):
-                    msg = f"Attribute '{attr_id}': value '{value}' doesn't match pattern - dropping"
-                    warnings.append(msg)
-                    logger.warning(msg)
-                    continue
+            if (
+                value
+                and meta.validation_pattern
+                and not re.match(meta.validation_pattern, str(value))
+            ):
+                msg = f"Attribute '{attr_id}': value '{value}' doesn't match pattern - dropping"
+                warnings.append(msg)
+                logger.warning(msg)
+                continue
 
             # Keep the (possibly truncated) attribute
             sanitized_attr = dict(attr)

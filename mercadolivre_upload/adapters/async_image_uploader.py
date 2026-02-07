@@ -22,11 +22,12 @@ class AsyncImageUploader:
         max_concurrent: int = 5,
         timeout: int = 30,
     ):
+        """Initialize async uploader with connection settings."""
         self.api_base_url = api_base_url
         self.max_concurrent = max_concurrent
         self.timeout = timeout
         self._session: aiohttp.ClientSession | None = None
-        self._upload_results: list[dict] = []
+        self._upload_results: list[dict[str, Any]] = []
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
@@ -35,12 +36,14 @@ class AsyncImageUploader:
         return self._session
 
     async def close(self) -> None:
+        """Close the HTTP session."""
         if self._session:
             if not self._session.closed:
                 await self._session.close()
             self._session = None
 
     async def validate_image_async(self, path: str) -> bool:
+        """Validate image file exists, type, and size."""
         file_path = Path(path)
         if not file_path.exists():
             logger.error("Image not found")
@@ -57,11 +60,13 @@ class AsyncImageUploader:
         return True
 
     async def read_image_async(self, path: str) -> bytes:
+        """Read image file contents as bytes."""
         return Path(path).read_bytes()
 
     async def upload_single(
         self, path: str, auth_token: str | None = None, product_id: str | None = None
     ) -> dict[str, Any]:
+        """Upload a single image via the API."""
         if not await self.validate_image_async(path):
             return {"success": False, "error": "Invalid image"}
         try:
@@ -103,6 +108,7 @@ class AsyncImageUploader:
         return result
 
     async def upload_batch(self, paths: list[str]) -> list[dict[str, Any]]:
+        """Upload multiple images concurrently."""
         semaphore = asyncio.Semaphore(self.max_concurrent)
 
         async def _wrap(path: str) -> dict[str, Any]:
@@ -115,10 +121,13 @@ class AsyncImageUploader:
         return await asyncio.gather(*[_wrap(path) for path in paths])
 
     def get_results(self) -> list[dict[str, Any]]:
+        """Return list of upload results."""
         return list(self._upload_results)
 
     async def __aenter__(self) -> AsyncImageUploader:
+        """Enter async context manager."""
         return self
 
-    async def __aexit__(self, exc_type, exc, tb) -> None:
+    async def __aexit__(self, exc_type, exc, tb) -> None:  # type: ignore[no-untyped-def]
+        """Exit async context manager and close session."""
         await self.close()

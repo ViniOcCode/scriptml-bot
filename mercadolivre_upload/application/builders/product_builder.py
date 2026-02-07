@@ -10,6 +10,8 @@ from mercadolivre_upload.domain.text_normalizer import PortugueseTextNormalizer
 
 @dataclass
 class MappingResult:
+    """Result of a field mapping operation."""
+
     mapped: dict[str, Any]
     errors: list[str]
 
@@ -30,7 +32,8 @@ class SmartMapper:
         "descricao": "description",
     }
 
-    def validate_mapping(self, data: dict, source_type: str = "spreadsheet") -> list[str]:
+    def validate_mapping(self, data: dict[str, Any], source_type: str = "spreadsheet") -> list[str]:
+        """Validate that required fields exist in the data."""
         if source_type != "spreadsheet":
             return [f"Mapping not registered for source type: {source_type}"]
         missing = [key for key in self.REQUIRED_MAPPING if key not in data]
@@ -38,7 +41,8 @@ class SmartMapper:
             return [f"Campos obrigatórios faltando: {', '.join(missing)}"]
         return []
 
-    def map_product(self, data: dict, source_type: str = "spreadsheet") -> dict[str, Any]:
+    def map_product(self, data: dict[str, Any], source_type: str = "spreadsheet") -> dict[str, Any]:
+        """Map source data fields to API fields."""
         if source_type != "spreadsheet":
             raise ValueError(f"Mapping not registered for source type: {source_type}")
         mapped = {}
@@ -56,6 +60,7 @@ class ProductBuilder:
     REQUIRED_FIELDS = ["title", "category_id", "price", "currency_id"]
 
     def __init__(self) -> None:
+        """Initialize builder with mapper and normalizer."""
         self._mapper = SmartMapper()
         self._normalizer = PortugueseTextNormalizer()
 
@@ -79,7 +84,7 @@ class ProductBuilder:
         value_str = str(value).strip()
         return int(float(value_str))
 
-    def _validate_required(self, data: dict) -> list[str]:
+    def _validate_required(self, data: dict[str, Any]) -> list[str]:
         missing = []
         for field in self.REQUIRED_FIELDS:
             value = data.get(field)
@@ -87,7 +92,8 @@ class ProductBuilder:
                 missing.append(field)
         return missing
 
-    def build(self, data: dict, source_type: str = "spreadsheet") -> dict[str, Any]:
+    def build(self, data: dict[str, Any], source_type: str = "spreadsheet") -> dict[str, Any]:
+        """Build a product payload from source data."""
         errors = self._mapper.validate_mapping(data, source_type=source_type)
         if errors:
             raise ValueError("Campos obrigatórios faltando")
@@ -113,7 +119,8 @@ class ProductBuilder:
 
         return payload
 
-    def validate(self, data: dict, source_type: str = "spreadsheet") -> list[str]:
+    def validate(self, data: dict[str, Any], source_type: str = "spreadsheet") -> list[str]:
+        """Validate source data and return list of errors."""
         errors = self._mapper.validate_mapping(data, source_type=source_type)
         if errors:
             return errors
@@ -124,7 +131,8 @@ class ProductBuilder:
         missing = self._validate_required(mapped)
         return [f"Campos obrigatórios faltando: {', '.join(missing)}"] if missing else []
 
-    def build_batch(self, data_list: list[dict]) -> list[dict]:
+    def build_batch(self, data_list: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Build payloads for a batch of products."""
         results = []
         for data in data_list:
             results.append(self.build(data))

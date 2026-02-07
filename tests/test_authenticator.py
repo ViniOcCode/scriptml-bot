@@ -178,7 +178,7 @@ class TestAuthManager:
     def test_init_creates_directories(self, tmp_path, credentials):
         """Testa criação de diretórios no init."""
         token_file = tmp_path / "subdir" / "tokens.json"
-        auth = AuthManager(
+        AuthManager(
             credentials=credentials,
             token_file=token_file,
             auto_save=False,

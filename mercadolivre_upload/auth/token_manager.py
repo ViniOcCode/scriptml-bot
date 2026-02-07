@@ -4,6 +4,7 @@ import json
 import os
 import time
 from pathlib import Path
+from typing import Any
 
 from .exceptions import TokenExpiredError
 from .oauth import OAuthHandler
@@ -32,11 +33,11 @@ class TokenManager:
             token_path: Path to tokens.json. Defaults to 'tokens.json' in current directory
             oauth_handler: OAuthHandler for token refresh. If None, creates default
         """
-        self.token_path = Path(token_path or os.getenv("MERCADO_LIVRE_TOKEN_PATH", "tokens.json"))
+        self.token_path = Path(token_path or os.getenv("MERCADO_LIVRE_TOKEN_PATH", "tokens.json"))  # type: ignore[arg-type]
         self.oauth_handler = oauth_handler or OAuthHandler()
-        self._tokens: dict | None = None
+        self._tokens: dict[str, Any] | None = None
 
-    def load_tokens(self) -> dict:
+    def load_tokens(self) -> dict[str, Any]:
         """Load tokens from the JSON file.
 
         Returns:
@@ -51,7 +52,7 @@ class TokenManager:
                 self._tokens = json.load(f)
         return self._tokens
 
-    def save_tokens(self, tokens: dict) -> None:
+    def save_tokens(self, tokens: dict[str, Any]) -> None:
         """Save tokens to the JSON file.
 
         Args:
@@ -74,7 +75,7 @@ class TokenManager:
         try:
             tokens = self.load_tokens()
             expires_at = tokens.get("expires_at", 0)
-            return time.time() >= (expires_at - buffer_seconds)
+            return time.time() >= (expires_at - buffer_seconds)  # type: ignore[no-any-return]
         except FileNotFoundError:
             return True
 
@@ -105,7 +106,7 @@ class TokenManager:
             self.save_tokens(new_tokens)
             tokens = new_tokens
 
-        return tokens["access_token"]
+        return tokens["access_token"]  # type: ignore[no-any-return]
 
     def get_refresh_token(self) -> str:
         """Get the current refresh token.
@@ -117,7 +118,7 @@ class TokenManager:
             KeyError: If refresh_token is not in tokens
         """
         tokens = self.load_tokens()
-        return tokens["refresh_token"]
+        return tokens["refresh_token"]  # type: ignore[no-any-return]
 
     def invalidate_cache(self) -> None:
         """Clear the in-memory token cache.

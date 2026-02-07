@@ -1,6 +1,7 @@
 """Category resolver for matching ML category names to IDs."""
 
 import logging
+from typing import Any, cast
 
 from mercadolivre_upload.api.client import MLApiClient
 
@@ -21,8 +22,8 @@ class CategoryResolver:
         """
         self.client = client
         self._categories: dict[str, str] = {}  # name -> id cache
-        self._category_cache: dict[str, dict] = {}  # id -> category data cache
-        self._children_cache: dict[str, list] = {}  # id -> children cache
+        self._category_cache: dict[str, dict[str, Any]] = {}  # id -> category data cache
+        self._children_cache: dict[str, list[dict[str, Any]]] = {}  # id -> children cache
 
     def _load_all_categories(self, site_id: str = "MLB") -> None:
         """Load all categories for a site (root level only)."""
@@ -33,7 +34,7 @@ class CategoryResolver:
             name_lower = cat["name"].lower().strip()
             self._categories[name_lower] = cat["id"]
 
-    def _get_category_children(self, category_id: str) -> list[dict]:
+    def _get_category_children(self, category_id: str) -> list[dict[str, Any]]:
         """Get children of a category.
 
         Args:
@@ -44,7 +45,7 @@ class CategoryResolver:
         """
         if category_id not in self._children_cache:
             try:
-                children = self.client.get_category_children(category_id)
+                children = self.client.get_category(category_id).get("children_categories", [])
                 self._children_cache[category_id] = children
             except Exception as e:
                 logger.warning(f"Could not get children for {category_id}: {e}")
@@ -52,7 +53,7 @@ class CategoryResolver:
         return self._children_cache[category_id]
 
     def _search_in_hierarchy(
-        self, name: str, parent_id: str, visited: set | None = None
+        self, name: str, parent_id: str, visited: set[str] | None = None
     ) -> str | None:
         """Search for category name in hierarchy starting from parent.
 
@@ -85,12 +86,12 @@ class CategoryResolver:
 
             # Exact match
             if child_name == name_lower:
-                return child_id
+                return cast(str, child_id)
 
             # Partial match
             if name_lower in child_name or child_name in name_lower:
                 logger.debug(f"Partial match: '{name}' -> '{child_name}'")
-                return child_id
+                return cast(str, child_id)
 
             # Recursively search in child's children
             result = self._search_in_hierarchy(name, child_id, visited)
@@ -137,13 +138,13 @@ class CategoryResolver:
 
         return None
 
-    def get_category_data(self, category_id: str) -> dict:
+    def get_category_data(self, category_id: str) -> dict[str, Any]:
         """Get category data with caching."""
         if category_id not in self._category_cache:
             self._category_cache[category_id] = self.client.get_category(category_id)
         return self._category_cache[category_id]
 
-    def get_mandatory_attributes(self, category_id: str) -> list[dict]:
+    def get_mandatory_attributes(self, category_id: str) -> list[dict[str, Any]]:
         """Get mandatory attributes for a category.
 
         Args:
@@ -155,11 +156,11 @@ class CategoryResolver:
         attributes = self.client.get_category_attributes(category_id)
         return [attr for attr in attributes if attr.get("tags", {}).get("required")]
 
-    def get_all_attributes(self, category_id: str) -> list[dict]:
+    def get_all_attributes(self, category_id: str) -> list[dict[str, Any]]:
         """Get all attributes for a category."""
         return self.client.get_category_attributes(category_id)
 
-    def build_attribute_map(self, category_id: str) -> dict[str, dict]:
+    def build_attribute_map(self, category_id: str) -> dict[str, dict[str, Any]]:
         """Build name -> attribute mapping for a category.
 
         Args:

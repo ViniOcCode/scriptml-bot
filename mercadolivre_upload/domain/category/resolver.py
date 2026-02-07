@@ -53,21 +53,21 @@ class CategoryApiPort(Protocol):
     Infrastructure layer implements this.
     """
 
-    def get_site_categories(self, site_id: str) -> list[dict]:
+    def get_site_categories(self, site_id: str) -> list[dict[str, Any]]:
         """Get all categories for a site."""
         ...
 
-    def get_category(self, category_id: str) -> dict:
+    def get_category(self, category_id: str) -> dict[str, Any]:
         """Get category details including children_categories."""
         ...
 
-    def get_category_attributes(self, category_id: str) -> list[dict]:
+    def get_category_attributes(self, category_id: str) -> list[dict[str, Any]]:
         """Get attributes for a category."""
         ...
 
     def get_category_conditional_attributes(
-        self, category_id: str, current_attributes: dict
-    ) -> list[dict]:
+        self, category_id: str, current_attributes: dict[str, Any]
+    ) -> list[dict[str, Any]]:
         """Get conditional attributes for a category.
 
         Args:
@@ -79,7 +79,7 @@ class CategoryApiPort(Protocol):
         """
         ...
 
-    def predict_category(self, title: str, site_id: str) -> list[dict]:
+    def predict_category(self, title: str, site_id: str) -> list[dict[str, Any]]:
         """Predict category based on product title.
 
         Args:
@@ -95,11 +95,11 @@ class CategoryApiPort(Protocol):
 class AttributeCachePort(Protocol):
     """Port interface for attribute cache."""
 
-    def get_attributes(self, category_id: str) -> list[dict] | None:
+    def get_attributes(self, category_id: str) -> list[dict[str, Any]] | None:
         """Get cached attributes if valid."""
         ...
 
-    def save_attributes(self, category_id: str, attributes: list[dict]) -> None:
+    def save_attributes(self, category_id: str, attributes: list[dict[str, Any]]) -> None:
         """Save attributes to cache."""
         ...
 
@@ -131,8 +131,8 @@ class CategoryResolver:
         self._prediction_cache = prediction_cache
         self._max_predictions = max_predictions
         self._categories: dict[str, str] = {}  # name -> id cache
-        self._category_cache: dict[str, dict] = {}  # id -> data cache
-        self._children_cache: dict[str, list] = {}  # id -> children cache
+        self._category_cache: dict[str, dict[str, Any]] = {}  # id -> data cache
+        self._children_cache: dict[str, list[Any]] = {}  # id -> children cache
 
     def load_categories(self, site_id: str = "MLB") -> None:
         """Load all categories for a site.
@@ -145,7 +145,7 @@ class CategoryResolver:
             name_normalized = normalize_text(cat["name"])
             self._categories[name_normalized] = cat["id"]
 
-    def _get_category_children(self, category_id: str) -> list[dict]:
+    def _get_category_children(self, category_id: str) -> list[dict[str, Any]]:
         """Get children of a category from category data."""
         if category_id not in self._children_cache:
             try:
@@ -162,7 +162,7 @@ class CategoryResolver:
         name: str,
         parent_id: str,
         parent_name: str = "",
-        visited: set | None = None,
+        visited: set | None = None,  # type: ignore[type-arg]
         depth: int = 0,
         max_depth: int = 5,
         min_similarity: float = 0.8,
@@ -211,12 +211,12 @@ class CategoryResolver:
             # Exact normalized match
             if child_normalized == name_normalized:
                 logger.info(f"Found exact match: '{child_name}' ({child_id})")
-                return child_id
+                return child_id  # type: ignore[no-any-return]
 
             # Contains check
             if name_normalized in child_normalized or child_normalized in name_normalized:
                 logger.info(f"Found substring match: '{child_name}' ({child_id})")
-                return child_id
+                return child_id  # type: ignore[no-any-return]
 
             # Fuzzy similarity check
             sim = similarity(child_name, name)
@@ -237,7 +237,7 @@ class CategoryResolver:
                 f"Found fuzzy match (similarity={best_similarity:.2f}): "
                 f"'{best_match[1]}' ({best_match[0]})"
             )
-            return best_match[0]
+            return best_match[0]  # type: ignore[no-any-return]
 
         return None
 
@@ -365,12 +365,12 @@ class CategoryResolver:
             category_id = best_match.get("category_id")
             category_name = best_match.get("category_name", "unknown")
             logger.info(f"Domain discovery found: '{category_name}' ({category_id}) for title")
-            return category_id
+            return category_id  # type: ignore[no-any-return]
 
         logger.warning(f"Domain discovery returned empty for: '{title}'")
         return None
 
-    def _call_domain_discovery(self, title: str, site_id: str) -> list[dict]:
+    def _call_domain_discovery(self, title: str, site_id: str) -> list[dict[str, Any]]:
         """Call domain discovery API.
 
         Args:
@@ -459,7 +459,7 @@ class CategoryResolver:
                             f"Found matching category in prediction path: "
                             f"'{node_name}' ({node.get('id')})"
                         )
-                        return node.get("id")
+                        return node.get("id")  # type: ignore[no-any-return]
 
                 # Also check predicted category name itself
                 predicted_name = prediction.get("category_name", "")
@@ -468,12 +468,12 @@ class CategoryResolver:
                         f"Predicted category matches requested: "
                         f"'{predicted_name}' ({predicted_id})"
                     )
-                    return predicted_id
+                    return predicted_id  # type: ignore[no-any-return]
 
         logger.info(f"No prediction matched category '{category_name}'")
         return None
 
-    def _get_category_cached(self, category_id: str) -> dict:
+    def _get_category_cached(self, category_id: str) -> dict[str, Any]:
         """Get category data with caching.
 
         Args:
@@ -523,12 +523,12 @@ class CategoryResolver:
 
         return None
 
-    def get_mandatory_attributes(self, category_id: str) -> list[dict]:
+    def get_mandatory_attributes(self, category_id: str) -> list[dict[str, Any]]:
         """Get mandatory attributes for a category."""
         attributes = self.get_all_attributes(category_id)
         return [attr for attr in attributes if attr.get("tags", {}).get("required")]
 
-    def get_all_attributes(self, category_id: str) -> list[dict]:
+    def get_all_attributes(self, category_id: str) -> list[dict[str, Any]]:
         """Get all attributes for a category (cached)."""
         # Check cache first
         if self._attribute_cache:
@@ -546,7 +546,7 @@ class CategoryResolver:
 
         return attributes
 
-    def build_attribute_map(self, category_id: str) -> dict[str, dict]:
+    def build_attribute_map(self, category_id: str) -> dict[str, dict[str, Any]]:
         """Build name -> attribute mapping."""
         attributes = self.get_all_attributes(category_id)
         mapping = {}
@@ -560,7 +560,9 @@ class CategoryResolver:
 
         return mapping
 
-    def get_conditional_attributes(self, category_id: str, current_attributes: dict) -> list[dict]:
+    def get_conditional_attributes(
+        self, category_id: str, current_attributes: dict[str, Any]
+    ) -> list[dict[str, Any]]:
         """Get conditional attributes based on current attribute values.
 
         Args:
@@ -585,8 +587,8 @@ class CategoryResolver:
             return []
 
     def get_all_attributes_with_conditionals(
-        self, category_id: str, product_attributes: dict
-    ) -> tuple[list[dict], list[dict]]:
+        self, category_id: str, product_attributes: dict[str, Any]
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """Get all attributes including conditional ones.
 
         Args:
@@ -600,7 +602,9 @@ class CategoryResolver:
         conditional = self.get_conditional_attributes(category_id, product_attributes)
         return base_attrs, conditional
 
-    def get_required_attributes(self, category_id: str, product_attributes: dict) -> list[dict]:
+    def get_required_attributes(
+        self, category_id: str, product_attributes: dict[str, Any]
+    ) -> list[dict[str, Any]]:
         """Get all required attributes including conditionally required.
 
         Args:

@@ -2,6 +2,7 @@
 
 import logging
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -17,7 +18,7 @@ CLASS_COMMERCIAL = "commercial"  # Warranty, pricing, terms
 CLASS_LOGISTICS = "logistics"  # Shipping, packaging
 
 
-def _load_classification_config() -> dict:
+def _load_classification_config() -> dict[str, Any]:
     """Load attribute classification patterns from config file.
 
     Returns:
@@ -48,7 +49,7 @@ class AttributeClassifier:
     Uses configuration from config/generic_mappings.yaml as the single source of truth.
     """
 
-    def __init__(self, config: dict | None = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         """Initialize the classifier.
 
         Args:
@@ -88,9 +89,8 @@ class AttributeClassifier:
             return CLASS_COMMERCIAL
 
         # Editorial: string/boolean with high relevance
-        if attr.value_type in ("string", "boolean"):
-            if attr.relevance and attr.relevance > 0.5:
-                return CLASS_EDITORIAL
+        if attr.value_type in ("string", "boolean") and attr.relevance and attr.relevance > 0.5:
+            return CLASS_EDITORIAL
 
         # Default to technical (product specifications)
         return CLASS_TECHNICAL
@@ -104,7 +104,7 @@ class AttributeClassifier:
         Returns:
             Dictionary mapping classification to list of attributes
         """
-        result = {
+        result = {  # type: ignore[var-annotated]
             CLASS_EDITORIAL: [],
             CLASS_TECHNICAL: [],
             CLASS_COMMERCIAL: [],

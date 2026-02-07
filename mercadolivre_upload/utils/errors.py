@@ -1,6 +1,7 @@
 """Enhanced error handling and user-friendly error messages."""
 
 from enum import Enum
+from typing import Any
 
 from rich.console import Console
 from rich.panel import Panel
@@ -116,7 +117,7 @@ class EnhancedError(Exception):
         self,
         error_code: ErrorCode,
         message: str | None = None,
-        details: dict | None = None,
+        details: dict[str, Any] | None = None,
         suggestion: str | None = None,
     ):
         """Initialize enhanced error.
@@ -167,7 +168,7 @@ class EnhancedError(Exception):
         }
         return suggestions.get(self.error_code.category, "")
 
-    def display(self, console: Console | None = None):
+    def display(self, console: Console | None = None):  # type: ignore[no-untyped-def]
         """Display error in a user-friendly format."""
         console = console or Console()
 

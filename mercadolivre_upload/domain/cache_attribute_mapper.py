@@ -335,7 +335,7 @@ class CachedAttributeMapper:
         """
         for attr in self._cache.get("attributes", []):
             if attr.get("id") == attribute_id:
-                return attr
+                return attr  # type: ignore[no-any-return]
         return None
 
     def get_available_attributes(self) -> list[AttributeDef]:
@@ -344,7 +344,7 @@ class CachedAttributeMapper:
         Returns:
             List of attribute definitions
         """
-        return self._cache.get("attributes", [])
+        return self._cache.get("attributes", [])  # type: ignore[no-any-return]
 
     def reload_cache(self) -> dict[str, Any]:
         """Reload cache from disk and rebuild indexes.

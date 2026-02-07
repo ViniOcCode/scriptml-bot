@@ -17,7 +17,7 @@ import yaml
 logger = logging.getLogger(__name__)
 
 
-def _load_fiscal_config() -> dict:
+def _load_fiscal_config() -> dict[str, Any]:
     """Load full fiscal config from config file.
 
     Returns:
@@ -32,9 +32,9 @@ def _load_fiscal_config() -> dict:
         return {}
 
 
-def _load_fiscal_defaults() -> dict:
+def _load_fiscal_defaults() -> dict[str, Any]:
     """Load fiscal defaults from config file."""
-    return _load_fiscal_config().get("fiscal_defaults", {})
+    return _load_fiscal_config().get("fiscal_defaults", {})  # type: ignore[no-any-return]
 
 
 def _load_field_value_mappings(field_name: str) -> dict[str, str]:
@@ -49,7 +49,7 @@ def _load_field_value_mappings(field_name: str) -> dict[str, str]:
     config = _load_fiscal_config()
     fields = config.get("fiscal_fields", {})
     field_config = fields.get(field_name, {})
-    return field_config.get("value_mappings", {})
+    return field_config.get("value_mappings", {})  # type: ignore[no-any-return]
 
 
 @dataclass
@@ -109,7 +109,7 @@ class FiscalData:
     # Additional attributes storage
     attributes: dict[str, Any] = field(default_factory=dict)
 
-    def __post_init__(self):
+    def __post_init__(self):  # type: ignore[no-untyped-def]
         """Normalize fiscal data using config defaults and value mappings."""
         # Load defaults from config (single source of truth)
         defaults = _load_fiscal_defaults()

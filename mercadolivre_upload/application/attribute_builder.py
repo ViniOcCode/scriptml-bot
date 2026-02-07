@@ -26,7 +26,7 @@ class AttributeBuilderService:
     def __init__(
         self,
         category_resolver: CategoryResolver,
-        config: dict | None = None,
+        config: dict[str, Any] | None = None,
         min_attribute_score: int = 50,
         feedback: ValidationFeedback | None = None,
     ):
@@ -42,7 +42,7 @@ class AttributeBuilderService:
         self.config = config or {}
         self.min_attribute_score = min_attribute_score
         self.feedback = feedback
-        self._attr_metadata_cache: dict[str, list] = {}
+        self._attr_metadata_cache: dict[str, list[Any]] = {}
         self._cache_mapper: CachedAttributeMapper | None = None
         self._current_category_id: str | None = None
 
@@ -52,13 +52,13 @@ class AttributeBuilderService:
 
     def build_attributes(
         self, product: Product, category_id: str
-    ) -> tuple[list[dict], list[dict], list[str], list[str]]:
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], list[str]]:
         """Build sanitized attributes using semantic validation pipeline.
 
         Returns:
             Tuple of (attributes, sale_terms, warnings, errors)
         """
-        warnings = []
+        warnings = []  # type: ignore[var-annotated]
         errors = []
 
         # 1. Get attribute metadata for structural validation
@@ -71,9 +71,9 @@ class AttributeBuilderService:
             return [], [], warnings, errors
 
         # 2. Map product attributes using cache-first strategy
-        ml_attributes: list[dict] = []
-        sale_terms: list[dict] = []
-        cache_attributes: list[dict] = []
+        ml_attributes: list[dict[str, Any]] = []
+        sale_terms: list[dict[str, Any]] = []
+        cache_attributes: list[dict[str, Any]] = []
 
         # Try cache mapper first if available
         if self._cache_mapper is not None:
@@ -152,7 +152,7 @@ class AttributeBuilderService:
         final_attrs = sanitizer.sanitize(scored_attrs)
 
         # Log dropped attributes
-        dropped = set(a.id for a in scored_attrs) - set(a.id for a in final_attrs)
+        dropped = {a.id for a in scored_attrs} - {a.id for a in final_attrs}
         for attr_id in dropped:
             logger.warning(f"Dropped attribute {attr_id} due to low score or redundancy")
 
@@ -178,7 +178,7 @@ class AttributeBuilderService:
 
         return final_attr_dicts, sale_terms, warnings, errors
 
-    def _map_attributes_with_cache(self, attributes: dict[str, Any]) -> list[dict]:
+    def _map_attributes_with_cache(self, attributes: dict[str, Any]) -> list[dict[str, Any]]:
         """Map attributes using cache mapper.
 
         Args:

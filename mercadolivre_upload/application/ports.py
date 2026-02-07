@@ -18,11 +18,11 @@ class ImageUploaderPort(Protocol):
 class ItemPublisherPort(Protocol):
     """Port for item publishing operations."""
 
-    def validate_item(self, item: dict) -> dict:
+    def validate_item(self, item: dict[str, Any]) -> dict[str, Any]:
         """Validate item payload."""
         ...
 
-    def create_item(self, item: dict) -> dict:
+    def create_item(self, item: dict[str, Any]) -> dict[str, Any]:
         """Create/publish item."""
         ...
 
@@ -39,7 +39,7 @@ class ClipUploaderPort(Protocol):
     """Port for video clip upload operations."""
 
     def upload_clips(
-        self, sku: str, item_id: str, sites: list[dict] | None = None
+        self, sku: str, item_id: str, sites: list[dict[str, Any]] | None = None
     ) -> Any:
         """Discover, validate, and upload all clips for a SKU.
 

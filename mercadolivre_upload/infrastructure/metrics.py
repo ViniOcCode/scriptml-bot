@@ -15,12 +15,16 @@ from collections import Counter, defaultdict
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any, TypeVar
 
 # Tentativa de importar prometheus_client (opcional)
 try:
-    from prometheus_client import CONTENT_TYPE_LATEST, generate_latest, start_http_server
+    from prometheus_client import (  # noqa: F401
+        CONTENT_TYPE_LATEST,
+        generate_latest,
+        start_http_server,
+    )
     from prometheus_client import Counter as PrometheusCounter
     from prometheus_client import Histogram as PrometheusHistogram
     from prometheus_client import Summary as PrometheusSummary
@@ -30,7 +34,7 @@ except ImportError:
     PROMETHEUS_AVAILABLE = False
 
 
-class MetricType(str, Enum):
+class MetricType(StrEnum):
     """Tipos de métricas suportadas."""
 
     COUNTER = "counter"
@@ -62,7 +66,7 @@ class MetricsCollector:
             enable_prometheus: Se True, inicia servidor Prometheus.
             prometheus_port: Porta para o servidor Prometheus.
         """
-        self._counters: dict[str, Counter] = defaultdict(Counter)
+        self._counters: dict[str, Counter[str]] = defaultdict(Counter)
         self._timers: dict[str, list[float]] = defaultdict(list)
         self._histograms: dict[str, list[float]] = defaultdict(list)
         self._gauges: dict[str, float] = {}
@@ -99,7 +103,7 @@ class MetricsCollector:
             description: Descrição da métrica (para Prometheus).
         """
         label_key = self._format_labels(labels or {})
-        self._counters[name][label_key] += value
+        self._counters[name][label_key] += value  # type: ignore[assignment]
 
         # Prometheus
         if self._prometheus_enabled:
@@ -138,7 +142,7 @@ class MetricsCollector:
         name: str,
         labels: dict[str, str] | None = None,
         description: str | None = None,
-    ):
+    ) -> Any:
         """Context manager para medir tempo de execução.
 
         Args:
@@ -313,7 +317,7 @@ class MetricsCollector:
         """
         return {
             "counters": dict(self._counters),
-            "timers": {k: self.get_timer_stats(k) for k in self._timers.keys()},
+            "timers": {k: self.get_timer_stats(k) for k in self._timers},
             "gauges": self._gauges,
         }
 

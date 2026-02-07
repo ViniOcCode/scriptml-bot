@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from mercadolivre_upload.domain.fiscal.data import FiscalData
 
@@ -24,7 +25,7 @@ class Product:
     clip_file_path: Path | None = None  # New field for video file path
     clip_uuid: str | None = None  # New field for clip UUID
 
-    def __post_init__(self):
+    def __post_init__(self):  # type: ignore[no-untyped-def]
         """Validate product data."""
         if self.condition not in ("new", "used"):
             raise ValueError("Condition must be 'new' or 'used'")
@@ -33,7 +34,7 @@ class Product:
         if self.available_quantity < 0:
             raise ValueError("Quantity cannot be negative")
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             "sku": self.sku,

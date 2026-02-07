@@ -2,6 +2,7 @@
 
 import logging
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import yaml
@@ -12,7 +13,7 @@ from .models import FiscalData, Product
 logger = logging.getLogger(__name__)
 
 
-def _load_config_mappings() -> dict:
+def _load_config_mappings() -> dict[str, Any]:
     """Load column mappings from config file.
 
     Returns:
@@ -85,7 +86,7 @@ class ExcelParser:
     REQUIRED_COLUMNS = ["sku", "title", "description", "price", "available_quantity", "condition"]
     FISCAL_COLUMNS = ["ncm", "cfop", "origin"]
 
-    def __init__(self, column_mappings: dict | None = None):
+    def __init__(self, column_mappings: dict[str, Any] | None = None):
         """Initialize the parser.
 
         Args:
@@ -125,13 +126,13 @@ class ExcelParser:
 
         return reverse_mapping
 
-    def _get_column_value(self, row: pd.Series, column: str, default=None) -> any:
+    def _get_column_value(self, row: pd.Series, column: str, default=None) -> any:  # type: ignore[no-untyped-def, valid-type]
         """Get value from row using canonical column name."""
         if column in self._reverse_mapping:
             actual_name = self._reverse_mapping[column]
             value = row.get(actual_name, default)
-            return value
-        return default
+            return value  # type: ignore[no-any-return]
+        return default  # type: ignore[no-any-return]
 
     def _validate_columns(self, columns: list[str]) -> None:
         """Validate that required columns are present.
@@ -151,11 +152,11 @@ class ExcelParser:
                 missing.append(required)
 
         if missing:
-            raise MissingColumnError(missing)
+            raise MissingColumnError(missing)  # type: ignore[no-untyped-call]
 
         logger.debug(f"Found columns: {self._reverse_mapping}")
 
-    def _parse_price(self, value: any) -> float:
+    def _parse_price(self, value: any) -> float:  # type: ignore[valid-type]
         """Parse price value to float.
 
         Handles various formats:
@@ -205,9 +206,9 @@ class ExcelParser:
         try:
             return float(value_str)
         except ValueError:
-            raise ValueError(f"Cannot parse price: {value}")
+            raise ValueError(f"Cannot parse price: {value}") from None
 
-    def _parse_quantity(self, value: any) -> int:
+    def _parse_quantity(self, value: any) -> int:  # type: ignore[valid-type]
         """Parse quantity value to integer."""
         if pd.isna(value):
             raise ValueError("Quantity cannot be empty")
@@ -219,9 +220,9 @@ class ExcelParser:
         try:
             return int(float(value_str))
         except ValueError:
-            raise ValueError(f"Cannot parse quantity: {value}")
+            raise ValueError(f"Cannot parse quantity: {value}") from None
 
-    def _parse_condition(self, value: any) -> str:
+    def _parse_condition(self, value: any) -> str:  # type: ignore[valid-type]
         """Parse condition value to 'new' or 'used'."""
         if pd.isna(value):
             raise ValueError("Condition cannot be empty")
@@ -245,7 +246,7 @@ class ExcelParser:
 
         raise ValueError(f"Invalid condition: {value}. Must be 'new' or 'used'")
 
-    def _parse_string(self, value: any) -> str:
+    def _parse_string(self, value: any) -> str:  # type: ignore[valid-type]
         """Parse string value, handling NaN."""
         if pd.isna(value):
             return ""
@@ -278,7 +279,7 @@ class ExcelParser:
         # Check required fields
         for field in self.REQUIRED_COLUMNS:
             value = self._get_column_value(row, field)
-            if pd.isna(value) or (isinstance(value, str) and not value.strip()):
+            if pd.isna(value) or (isinstance(value, str) and not value.strip()):  # type: ignore[attr-defined]
                 errors.append(f"Missing required field: {field}")
 
         # Validate price
@@ -376,7 +377,7 @@ class ExcelParser:
                 # Use the first sheet
                 df = next(iter(df.values()))
         except Exception as e:
-            raise ValidationError(f"Failed to read Excel file: {e}")
+            raise ValidationError(f"Failed to read Excel file: {e}") from e  # type: ignore[no-untyped-call]
 
         if df.empty:
             logger.warning("Excel file is empty")

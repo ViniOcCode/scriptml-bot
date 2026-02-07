@@ -61,7 +61,7 @@ class TestImageUploader:
     def test_init_creates_base_path(self, tmp_path):
         """Test that base path is created if not exists."""
         base = tmp_path / "new_uploads"
-        uploader = ImageUploader(base_path=str(base))
+        ImageUploader(base_path=str(base))
         assert base.exists()
 
     # ==================== validate_image ====================

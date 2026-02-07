@@ -424,7 +424,7 @@ class TestAlertManager:
         assert alert_manager_mock._check_rate_limit()
 
         # Adiciona alertas até o limite
-        for _ in range(MAX_ALERTS_PER_MINUTE := 10):
+        for _ in range(10):
             alert_manager_mock._alert_history.append(datetime.now())
 
         assert not alert_manager_mock._check_rate_limit()

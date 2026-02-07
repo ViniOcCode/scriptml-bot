@@ -3,6 +3,7 @@
 import logging
 from difflib import SequenceMatcher
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -12,7 +13,7 @@ from .scoring import ScoredAttribute
 logger = logging.getLogger(__name__)
 
 
-def _load_protected_attributes() -> set:
+def _load_protected_attributes() -> set:  # type: ignore[type-arg]
     """Load protected attributes from config file.
 
     Returns:
@@ -41,7 +42,7 @@ def _load_similarity_threshold() -> float:
         with open(config_path, encoding="utf-8") as f:
             config = yaml.safe_load(f)
 
-        return config.get("similarity", {}).get("redundancy_threshold", 0.9)
+        return config.get("similarity", {}).get("redundancy_threshold", 0.9)  # type: ignore[no-any-return]
     except Exception as e:
         logger.warning(f"Could not load similarity threshold from config: {e}. Using default 0.9.")
         return 0.9
@@ -62,7 +63,7 @@ class AttributeSanitizer:
     - Editorial attributes (they provide useful product info)
     """
 
-    def __init__(self, min_score: int = 40, config: dict | None = None):
+    def __init__(self, min_score: int = 40, config: dict[str, Any] | None = None):
         """Initialize the sanitizer.
 
         Args:

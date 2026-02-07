@@ -153,7 +153,10 @@ class TitleValidator(ExtendedValidator):
             results.append(
                 ValidationResult(
                     field="title",
-                    message=f"Título muito curto: {len(title)} caracteres (mínimo: {self.MIN_TITLE_LENGTH})",
+                    message=(
+                        f"Título muito curto: {len(title)} caracteres"
+                        f" (mínimo: {self.MIN_TITLE_LENGTH})"
+                    ),
                     severity=ValidationSeverity.ERROR,
                 )
             )
@@ -162,7 +165,10 @@ class TitleValidator(ExtendedValidator):
             results.append(
                 ValidationResult(
                     field="title",
-                    message=f"Título excede o limite: {len(title)} caracteres (máximo: {self.MAX_TITLE_LENGTH})",
+                    message=(
+                        f"Título excede o limite: {len(title)} caracteres"
+                        f" (máximo: {self.MAX_TITLE_LENGTH})"
+                    ),
                     severity=ValidationSeverity.ERROR,
                 )
             )
@@ -214,7 +220,9 @@ class ImageValidator(ExtendedValidator):
             results.append(
                 ValidationResult(
                     field="pictures",
-                    message=f"Produto não pode ter mais que 12 imagens (encontrado: {len(pictures)})",
+                    message=(
+                        "Produto não pode ter mais que 12 imagens" f" (encontrado: {len(pictures)})"
+                    ),
                     severity=ValidationSeverity.ERROR,
                 )
             )
@@ -397,7 +405,7 @@ class StockValidator(ExtendedValidator):
 class ExtendedValidationSuite:
     """Complete extended validation suite."""
 
-    def __init__(self):
+    def __init__(self):  # type: ignore[no-untyped-def]
         """Initialize validation suite."""
         self.validators: list[ExtendedValidator] = [
             PriceValidator(),

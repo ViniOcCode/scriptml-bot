@@ -7,6 +7,7 @@ import json
 import logging
 from importlib import import_module
 from pathlib import Path
+from typing import Any
 
 import typer
 from rich.console import Console
@@ -38,15 +39,15 @@ app = typer.Typer(
 state = {"verbose": False, "output_format": "text"}
 
 
-def _get_publish_service_cls():
+def _get_publish_service_cls():  # type: ignore[no-untyped-def]
     return import_module("mercadolivre_upload.cli").PublishProductService
 
 
-def _get_auth_manager_cls():
+def _get_auth_manager_cls():  # type: ignore[no-untyped-def]
     return import_module("mercadolivre_upload.cli").AuthManager
 
 
-def setup_logging(verbose: bool = False):
+def setup_logging(verbose: bool = False):  # type: ignore[no-untyped-def]
     """Configure logging based on verbosity."""
     level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(
@@ -55,12 +56,12 @@ def setup_logging(verbose: bool = False):
     )
 
 
-def print_json(data: dict):
+def print_json(data: dict[str, Any]):  # type: ignore[no-untyped-def]
     """Print data as JSON."""
     console.print(json.dumps(data, indent=2, default=str))
 
 
-def print_result(result: dict, success_message: str = "", error_message: str = ""):
+def print_result(result: dict[str, Any], success_message: str = "", error_message: str = ""):  # type: ignore[no-untyped-def]
     """Print result based on output format."""
     if state["output_format"] == "json":
         print_json(result)
@@ -78,15 +79,16 @@ def print_result(result: dict, success_message: str = "", error_message: str = "
 
 # Importar comandos
 
+
 @app.command()
-def upload(
-    excel: Path | None = typer.Argument(None, help="Path to Excel file"),
-    excel_option: Path | None = typer.Option(None, "--excel", "-e"),
-    images: Path | None = typer.Option(None, "--images", "-i"),
-    category: str | None = typer.Option(None, "--category", "-c"),
-    verbose: bool = typer.Option(False, "--verbose", "-v"),
-    dry_run: bool = typer.Option(False, "--dry-run", "-n"),
-    config: Path | None = typer.Option(None, "--config"),
+def upload(  # type: ignore[no-untyped-def]
+    excel: Path | None = typer.Argument(None, help="Path to Excel file"),  # noqa: B008
+    excel_option: Path | None = typer.Option(None, "--excel", "-e"),  # noqa: B008
+    images: Path | None = typer.Option(None, "--images", "-i"),  # noqa: B008
+    category: str | None = typer.Option(None, "--category", "-c"),  # noqa: B008
+    verbose: bool = typer.Option(False, "--verbose", "-v"),  # noqa: B008
+    dry_run: bool = typer.Option(False, "--dry-run", "-n"),  # noqa: B008
+    config: Path | None = typer.Option(None, "--config"),  # noqa: B008
 ):
     """Upload products using new CLI implementation when possible.
 
@@ -122,21 +124,21 @@ def upload(
         raise typer.Exit(1)
     if verbose:
         console.print("Processando arquivo")
-    service = _get_publish_service_cls()(config_path=config, dry_run=dry_run)
+    service = _get_publish_service_cls()(config_path=config, dry_run=dry_run)  # type: ignore[no-untyped-call]
     try:
         result = service.publish_from_file(selected_excel)
-    except Exception:
+    except Exception as err:
         err_console.print("Erro durante publicação")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from err
     if result.failure_count > 0:
         raise typer.Exit(1)
     console.print("Publicação concluída")
 
 
 @app.command()
-def validate(
-    excel: Path = typer.Argument(..., help="Path to Excel file"),
-    output: Path | None = typer.Option(None, "--output"),
+def validate(  # type: ignore[no-untyped-def]
+    excel: Path = typer.Argument(..., help="Path to Excel file"),  # noqa: B008
+    output: Path | None = typer.Option(None, "--output"),  # noqa: B008
 ):
     """Validate file using new CLI implementation when possible.
 
@@ -148,19 +150,19 @@ def validate(
     try:
         from importlib import import_module
 
-        validate_cmd = import_module("mercadolivre_upload.cli.commands.validate")
+        import_module("mercadolivre_upload.cli.commands.validate")
         # The new validate expects options --excel, --images, --category; keep
         # compatibility by falling back to legacy when those options are not present.
         # Here we call legacy path by default to match existing behaviour in tests.
         if not excel.exists():
             err_console.print("Arquivo não encontrado")
             raise typer.Exit(1)
-        service = _get_publish_service_cls()()
+        service = _get_publish_service_cls()()  # type: ignore[no-untyped-call]
         try:
             result = service.validate_file(excel)
-        except Exception:
+        except Exception as err:
             err_console.print("Erro na validação")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from err
         if result.is_valid:
             console.print("Arquivo válido")
             return
@@ -170,17 +172,17 @@ def validate(
         for error in result.errors:
             err_console.print(error)
         raise typer.Exit(1)
-    except Exception:
+    except Exception as err:
         # Fallback to legacy behavior if anything unexpected occurs
         if not excel.exists():
             err_console.print("Arquivo não encontrado")
-            raise typer.Exit(1)
-        service = _get_publish_service_cls()()
+            raise typer.Exit(1) from err
+        service = _get_publish_service_cls()()  # type: ignore[no-untyped-call]
         try:
             result = service.validate_file(excel)
-        except Exception:
+        except Exception as err:
             err_console.print("Erro na validação")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from err
         if result.is_valid:
             console.print("Arquivo válido")
             return
@@ -189,16 +191,16 @@ def validate(
         err_console.print(f"{len(result.errors)} erros")
         for error in result.errors:
             err_console.print(error)
-        raise typer.Exit(1)
+        raise typer.Exit(1) from err  # type: ignore[misc]
 
 
 @app.command()
-def auth(
-    token: str | None = typer.Option(None, "--token"),
-    refresh: bool = typer.Option(False, "--refresh"),
+def auth(  # type: ignore[no-untyped-def]
+    token: str | None = typer.Option(None, "--token"),  # noqa: B008
+    refresh: bool = typer.Option(False, "--refresh"),  # noqa: B008
 ):
     """Manage authentication tokens."""
-    manager = _get_auth_manager_cls()()
+    manager = _get_auth_manager_cls()()  # type: ignore[no-untyped-call]
     if token:
         manager.set_token(token)
         console.print("Token configurado")
@@ -207,9 +209,9 @@ def auth(
         try:
             manager.refresh_token()
             console.print("Token atualizado")
-        except Exception:
+        except Exception as err:
             err_console.print("Erro ao atualizar token")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from err
         return
     status = manager.get_auth_status()
     if isinstance(status, dict):
@@ -224,12 +226,15 @@ def auth(
         console.print("Não autenticado")
 
 
-def main():
+def main():  # type: ignore[no-untyped-def]
     """Compatibility entry point for tests."""
     import_module("mercadolivre_upload.cli").app()
 
 
-from .commands import cache_cmd, doctor, upload as upload_cmd, validate as validate_cmd  # noqa: E402
+from .commands import (  # noqa: E402
+    cache_cmd,
+    doctor,
+)
 
 # Register new commands under legacy names
 app.add_typer(cache_cmd.app, name="cache")
@@ -237,9 +242,13 @@ app.add_typer(doctor.app, name="doctor")
 
 
 @app.callback()
-def main_callback(
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
-    output: str = typer.Option("text", "--output", "-o", help="Output format: text or json"),
+def main_callback(  # type: ignore[no-untyped-def]
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v", help="Enable verbose logging"
+    ),  # noqa: B008
+    output: str = typer.Option(
+        "text", "--output", "-o", help="Output format: text or json"
+    ),  # noqa: B008
 ):
     """Mercado Livre Bulk Upload Tool."""
     state["verbose"] = verbose

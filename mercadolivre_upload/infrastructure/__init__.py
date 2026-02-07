@@ -41,12 +41,10 @@ from mercadolivre_upload.infrastructure.observability import (
 
 # Ensure the cache subpackage is importable even if it's a shim we added at runtime
 try:
-    from .cache.attribute_cache import AttributeCache  # type: ignore
-
-    __all__.append("AttributeCache")
-except Exception:
+    from .cache.attribute_cache import AttributeCache
+except Exception:  # noqa: BLE001
     # If the real cache package exists, it'll be imported; otherwise our shim handles it.
-    pass
+    AttributeCache = None  # type: ignore[assignment, misc]
 
 __all__ = [
     # Original
@@ -85,3 +83,6 @@ __all__ = [
     "business_metrics",
     "alert_manager",
 ]
+
+if AttributeCache is not None:
+    __all__.append("AttributeCache")

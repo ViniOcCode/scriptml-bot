@@ -22,7 +22,7 @@ from mercadolivre_upload.infrastructure.cache.attribute_cache import AttributeCa
 logger = logging.getLogger(__name__)
 
 
-def load_config():
+def load_config():  # type: ignore[no-untyped-def]
     """Load configuration from YAML file."""
     config_path = Path("config/generic_mappings.yaml")
     if config_path.exists():
@@ -41,19 +41,19 @@ app = typer.Typer(name="upload", help="Upload products from Excel")
 
 
 @app.callback(invoke_without_command=True)
-def upload(
-    excel: Path = typer.Option(..., "--excel", "-e", help="Excel file path"),
-    images: Path = typer.Option(..., "--images", "-i", help="Images directory"),
-    category: str = typer.Option(..., "--category", "-c", help="Category name"),
-    cache_dir: Path = typer.Option(Path("cache/categories"), "--cache-dir"),
-    dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Validate only"),
-    detailed: bool = typer.Option(False, "--detailed", "-d"),
+def upload(  # type: ignore[no-untyped-def]
+    excel: Path = typer.Option(..., "--excel", "-e", help="Excel file path"),  # noqa: B008
+    images: Path = typer.Option(..., "--images", "-i", help="Images directory"),  # noqa: B008
+    category: str = typer.Option(..., "--category", "-c", help="Category name"),  # noqa: B008
+    cache_dir: Path = typer.Option(Path("cache/categories"), "--cache-dir"),  # noqa: B008
+    dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Validate only"),  # noqa: B008
+    detailed: bool = typer.Option(False, "--detailed", "-d"),  # noqa: B008
 ):
     """Upload products from Excel to Mercado Livre."""
     console.print(Panel.fit("Mercado Livre Bulk Upload", style="cyan"))
 
     # Load configuration
-    config = load_config()
+    config = load_config()  # type: ignore[no-untyped-call]
 
     # Defensive: if cache_dir is OptionInfo, use default
     if isinstance(cache_dir, typer.models.OptionInfo):
@@ -85,7 +85,7 @@ def upload(
         category_adapter, attribute_cache=cache, prediction_cache=prediction_cache
     )
     shipping_resolver = ShippingResolver(api_client)
-    fiscal_service = FiscalService(api_client)
+    fiscal_service = FiscalService(api_client)  # type: ignore[arg-type]
 
     # Initialize use case
     use_case = PublishProductUseCase(
@@ -107,14 +107,14 @@ def upload(
         console.print(f"Found {len(products)} products")
     except Exception as e:
         err_console.print(f"[red]Error parsing Excel: {e}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
     if dry_run:
         console.print("[yellow]Dry run mode - validating only[/yellow]")
         return
 
     # Execute use case
-    results = use_case.execute(products, category)
+    results = use_case.execute(products, category)  # type: ignore[arg-type]
 
     # Report results
     console.print(f"\n[green]Published: {results['published']}[/green]")
@@ -142,6 +142,5 @@ def upload(
                 status_color = "green" if r.get("clip_uuid") else "red"
                 status = r.get("status", "unknown")
                 console.print(
-                    f"  • [{status_color}]{sku}/{r.get('file', '?')}: "
-                    f"{status}[/{status_color}]"
+                    f"  • [{status_color}]{sku}/{r.get('file', '?')}: " f"{status}[/{status_color}]"
                 )

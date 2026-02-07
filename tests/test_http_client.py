@@ -3,12 +3,10 @@
 import time
 from unittest.mock import MagicMock, patch
 
-import pytest
 import requests
 
 from mercadolivre_upload.infrastructure.http import (
     NO_RETRY,
-    SAFE_RETRY,
     UPLOAD_RETRY,
     ResilientHTTPClient,
     RetryPolicy,

@@ -149,6 +149,7 @@ def setup_logging(
     console_handler = logging.StreamHandler(console_output)
     console_handler.setLevel(log_level)
 
+    console_formatter: logging.Formatter
     if use_json:
         console_formatter = JSONFormatter()
     else:
@@ -161,10 +162,7 @@ def setup_logging(
     # Handler para arquivo (com rotação)
     if log_dir is not None or log_file is not None:
         # Determina o diretório de logs
-        if log_dir is None:
-            log_directory = DEFAULT_LOG_DIR
-        else:
-            log_directory = Path(log_dir)
+        log_directory = DEFAULT_LOG_DIR if log_dir is None else Path(log_dir)
 
         # Cria o diretório se não existir
         log_directory.mkdir(parents=True, exist_ok=True)
@@ -185,6 +183,7 @@ def setup_logging(
         file_handler.setLevel(log_level)
 
         # Formatação para arquivo
+        file_formatter: logging.Formatter
         if use_json:
             file_formatter = JSONFormatter()
         else:

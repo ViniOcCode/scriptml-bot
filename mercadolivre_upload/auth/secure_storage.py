@@ -7,6 +7,7 @@ import json
 import logging
 import os
 from pathlib import Path
+from typing import Any
 
 try:
     import keyring
@@ -98,7 +99,7 @@ class SecureTokenStorage:
             key = self._get_or_create_key()
             # Ensure key is valid for Fernet (32 bytes, base64 encoded)
             if len(key) == 44:  # Already Fernet key
-                self._cipher = Fernet(key)
+                self._cipher = Fernet(key)  # type: ignore[assignment]
             else:
                 # Derive Fernet key from password-like key
                 import base64
@@ -110,11 +111,11 @@ class SecureTokenStorage:
                     iterations=100000,
                 )
                 fernet_key = base64.urlsafe_b64encode(kdf.derive(key))
-                self._cipher = Fernet(fernet_key)
+                self._cipher = Fernet(fernet_key)  # type: ignore[assignment]
 
-        return self._cipher
+        return self._cipher  # type: ignore[return-value]
 
-    def save_tokens(self, tokens: dict) -> None:
+    def save_tokens(self, tokens: dict[str, Any]) -> None:
         """Encrypt and save tokens to file.
 
         Args:
@@ -135,7 +136,7 @@ class SecureTokenStorage:
             logger.error(f"Failed to save tokens: {e}")
             raise
 
-    def load_tokens(self) -> dict | None:
+    def load_tokens(self) -> dict[str, Any] | None:
         """Load and decrypt tokens from file.
 
         Returns:
@@ -150,7 +151,7 @@ class SecureTokenStorage:
             encrypted = self.token_path.read_bytes()
             decrypted = fernet.decrypt(encrypted)
 
-            return json.loads(decrypted.decode())
+            return json.loads(decrypted.decode())  # type: ignore[no-any-return]
 
         except Exception as e:
             logger.error(f"Failed to load tokens: {e}")

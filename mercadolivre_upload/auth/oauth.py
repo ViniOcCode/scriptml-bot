@@ -1,6 +1,7 @@
 """OAuth handler for Mercado Livre API authentication."""
 
 import os
+from typing import Any
 from urllib.parse import urlencode
 
 import requests
@@ -25,7 +26,7 @@ class OAuthHandler:
     """
 
     AUTH_URL = "https://auth.mercadolivre.com.br/authorization"
-    TOKEN_URL = "https://api.mercadolibre.com/oauth/token"
+    TOKEN_URL = "https://api.mercadolibre.com/oauth/token"  # noqa: S105  # noqa: S105
 
     def __init__(
         self,
@@ -36,9 +37,9 @@ class OAuthHandler:
         """Initialize the OAuth handler.
 
         Args:
-            client_id: Mercado Livre client ID. Defaults to MERCADO_LIVRE_CLIENT_ID env var
-            client_secret: Mercado Livre client secret. Defaults to MERCADO_LIVRE_CLIENT_SECRET env var
-            redirect_uri: OAuth redirect URI. Defaults to MERCADO_LIVRE_REDIRECT_URI env var or localhost
+            client_id: ML client ID. Defaults to env var.
+            client_secret: ML client secret. Defaults to env var.
+            redirect_uri: OAuth redirect URI. Defaults to env var.
         """
         self.client_id = client_id or os.getenv("MERCADO_LIVRE_CLIENT_ID")
         self.client_secret = client_secret or os.getenv("MERCADO_LIVRE_CLIENT_SECRET")
@@ -74,7 +75,7 @@ class OAuthHandler:
 
         return f"{self.AUTH_URL}?{urlencode(params)}"
 
-    def exchange_code(self, code: str) -> dict:
+    def exchange_code(self, code: str) -> dict[str, Any]:
         """Exchange authorization code for access and refresh tokens.
 
         Args:
@@ -99,7 +100,7 @@ class OAuthHandler:
 
         return self._make_token_request(payload)
 
-    def refresh_token(self, refresh_token: str) -> dict:
+    def refresh_token(self, refresh_token: str) -> dict[str, Any]:
         """Refresh the access token using a refresh token.
 
         Args:
@@ -123,7 +124,7 @@ class OAuthHandler:
 
         return self._make_token_request(payload)
 
-    def _make_token_request(self, payload: dict) -> dict:
+    def _make_token_request(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Make token request and process response.
 
         Args:
@@ -157,7 +158,9 @@ class OAuthHandler:
             "expires_at": expires_at,
         }
 
-    def add_auth_header(self, headers: dict | None = None, token: str | None = None) -> dict:
+    def add_auth_header(
+        self, headers: dict[str, Any] | None = None, token: str | None = None
+    ) -> dict[str, Any]:
         """Add Bearer token authorization header to request headers.
 
         Args:

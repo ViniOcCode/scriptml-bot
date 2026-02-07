@@ -1,7 +1,6 @@
 """Tests for CBT ID extractor."""
 
-import pytest
-from unittest.mock import Mock, MagicMock
+from unittest.mock import Mock
 
 from mercadolivre_upload.api.cbt_extractor import CbtIdExtractor
 
@@ -17,9 +16,9 @@ class TestCbtIdExtractor:
             "cbt_item_id": "CBT9876543210",
             "site_id": "MLB",
         }
-        
+
         cbt_id = extractor.extract_cbt_id(result)
-        
+
         assert cbt_id == "CBT9876543210"
 
     def test_extract_from_id_field_when_cbt(self):
@@ -29,9 +28,9 @@ class TestCbtIdExtractor:
             "id": "CBT1234567890",
             "site_id": "CBT",
         }
-        
+
         cbt_id = extractor.extract_cbt_id(result)
-        
+
         assert cbt_id == "CBT1234567890"
 
     def test_extract_from_marketplace_items_parent_id(self):
@@ -55,9 +54,9 @@ class TestCbtIdExtractor:
                 },
             ],
         }
-        
+
         cbt_id = extractor.extract_cbt_id(result)
-        
+
         assert cbt_id == "CBT9999999999"
 
     def test_extract_with_api_fallback(self):
@@ -68,15 +67,15 @@ class TestCbtIdExtractor:
             "cbt_item_id": "CBT7777777777",
             "parent_id": "CBT7777777777",
         }
-        
+
         extractor = CbtIdExtractor(api_client=mock_client)
         result = {
             "id": "MLB1234567890",
             "site_id": "MLB",
         }
-        
+
         cbt_id = extractor.extract_cbt_id(result)
-        
+
         assert cbt_id == "CBT7777777777"
         mock_client.get.assert_called_once_with("/items/MLB1234567890")
 
@@ -87,15 +86,15 @@ class TestCbtIdExtractor:
             "id": "MLB1234567890",
             "cbt_item_id": "CBT7777777777",
         }
-        
+
         extractor = CbtIdExtractor(api_client=mock_client)
         result = {"id": "MLB1234567890"}
-        
+
         # First call
         cbt_id_1 = extractor.extract_cbt_id(result)
         # Second call (should use cache)
         cbt_id_2 = extractor.extract_cbt_id(result)
-        
+
         assert cbt_id_1 == "CBT7777777777"
         assert cbt_id_2 == "CBT7777777777"
         # API should only be called once
@@ -108,21 +107,21 @@ class TestCbtIdExtractor:
             "id": "MLB1234567890",
             "site_id": "MLB",
         }
-        
+
         cbt_id = extractor.extract_cbt_id(result)
-        
+
         assert cbt_id is None
 
     def test_extract_api_fallback_handles_error(self):
         """Test that API fallback handles errors gracefully."""
         mock_client = Mock()
         mock_client.get.side_effect = Exception("API error")
-        
+
         extractor = CbtIdExtractor(api_client=mock_client)
         result = {"id": "MLB1234567890"}
-        
+
         cbt_id = extractor.extract_cbt_id(result)
-        
+
         assert cbt_id is None
 
     def test_extract_rejects_invalid_cbt_prefix(self):
@@ -131,24 +130,24 @@ class TestCbtIdExtractor:
         result = {
             "cbt_item_id": "MLB1234567890",  # Wrong prefix
         }
-        
+
         cbt_id = extractor.extract_cbt_id(result)
-        
+
         assert cbt_id is None
 
     def test_extract_handles_missing_fields(self):
         """Test extraction handles missing fields gracefully."""
         extractor = CbtIdExtractor()
         result = {}
-        
+
         cbt_id = extractor.extract_cbt_id(result)
-        
+
         assert cbt_id is None
 
     def test_is_valid_cbt_id(self):
         """Test CBT ID validation."""
         extractor = CbtIdExtractor()
-        
+
         assert extractor._is_valid_cbt_id("CBT1234567890") is True
         assert extractor._is_valid_cbt_id("MLB1234567890") is False
         assert extractor._is_valid_cbt_id("MLC1234567890") is False
@@ -160,14 +159,14 @@ class TestCbtIdExtractor:
         """Test cache clearing."""
         mock_client = Mock()
         mock_client.get.return_value = {"cbt_item_id": "CBT7777777777"}
-        
+
         extractor = CbtIdExtractor(api_client=mock_client)
         result = {"id": "MLB1234567890"}
-        
+
         # Populate cache
         extractor.extract_cbt_id(result)
         assert len(extractor._cache) == 1
-        
+
         # Clear cache
         extractor.clear_cache()
         assert len(extractor._cache) == 0
@@ -179,9 +178,9 @@ class TestCbtIdExtractor:
             "id": "CBT1111111111",
             "cbt_item_id": "CBT2222222222",
         }
-        
+
         cbt_id = extractor.extract_cbt_id(result)
-        
+
         # Should prefer cbt_item_id
         assert cbt_id == "CBT2222222222"
 
@@ -192,12 +191,12 @@ class TestCbtIdExtractor:
             "id": "MLB1234567890",
             "parent_id": "CBT8888888888",
         }
-        
+
         extractor = CbtIdExtractor(api_client=mock_client)
         result = {"id": "MLB1234567890"}
-        
+
         cbt_id = extractor.extract_cbt_id(result)
-        
+
         assert cbt_id == "CBT8888888888"
 
     def test_extract_skips_invalid_parent_ids_in_marketplace_items(self):
@@ -220,9 +219,9 @@ class TestCbtIdExtractor:
                 },
             ],
         }
-        
+
         cbt_id = extractor.extract_cbt_id(result)
-        
+
         assert cbt_id == "CBT3333333333"
 
     def test_extract_from_parent_item_id_field(self):

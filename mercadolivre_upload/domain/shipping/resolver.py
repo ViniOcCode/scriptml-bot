@@ -6,14 +6,14 @@ Uses configuration from config/generic_mappings.yaml as the single source of tru
 
 import logging
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 import yaml
 
 logger = logging.getLogger(__name__)
 
 
-def _load_shipping_config() -> dict:
+def _load_shipping_config() -> dict[str, Any]:
     """Load shipping configuration from config file.
 
     Returns:
@@ -41,7 +41,7 @@ def _load_shipping_config() -> dict:
 class ShippingModeProviderPort(Protocol):
     """Port for shipping mode retrieval."""
 
-    def get_users_me(self) -> dict:
+    def get_users_me(self) -> dict[str, Any]:
         """Get current user info with shipping modes."""
         ...
 
@@ -53,7 +53,7 @@ class ShippingResolver:
     Prioritizes me1 over me2 based on mode_priority configuration.
     """
 
-    def __init__(self, provider: ShippingModeProviderPort, config: dict | None = None):
+    def __init__(self, provider: ShippingModeProviderPort, config: dict[str, Any] | None = None):
         """Initialize resolver.
 
         Args:
@@ -85,13 +85,13 @@ class ShippingResolver:
 
         if not available_modes:
             logger.info(f"No shipping modes available, using {self.default_mode}")
-            return self.default_mode
+            return self.default_mode  # type: ignore[no-any-return]
 
         # Select best mode based on priority from config (me1 is prioritized over me2)
         for mode in self.mode_priority:
             if mode in available_modes:
                 logger.info(f"Selected shipping mode: {mode}")
-                return mode
+                return mode  # type: ignore[no-any-return]
 
         # Fallback: return first available mode
         logger.info(f"No priority modes available, using first available: {available_modes[0]}")

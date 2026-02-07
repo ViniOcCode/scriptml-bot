@@ -14,7 +14,7 @@ class AttributeCache:
 
     DEFAULT_TTL = 24 * 3600
 
-    def __init__(
+    def __init__(  # noqa: D107
         self,
         cache_dir: str | Path = "cache/categories",
         ttl_hours: int | None = None,
@@ -30,7 +30,7 @@ class AttributeCache:
         else:
             # Always inside cache_dir — never in repo root
             self.cache_file = self.cache_dir / ".attribute_cache.json"
-        self._cache: dict[str, dict] = {}
+        self._cache: dict[str, dict[str, Any]] = {}
         self._load()
 
     def _load(self) -> None:
@@ -67,9 +67,10 @@ class AttributeCache:
         expires_at = entry.get("_expires")
         if expires_at is None:
             return False
-        return time.time() >= expires_at
+        return time.time() >= expires_at  # type: ignore[no-any-return]
 
     def get(self, key: str, default: Any | None = None) -> Any | None:
+        """Return cached value for key, or default if missing/expired."""
         if self._is_expired(key):
             if key in self._cache:
                 del self._cache[key]
@@ -80,21 +81,21 @@ class AttributeCache:
         return payload if payload else default
 
     def get_many(self, keys: list[str]) -> dict[str, Any]:
+        """Return cached values for multiple keys."""
         return {key: self.get(key) for key in keys if self.get(key) is not None}
 
     def set(self, key: str, value: Any, ttl: int | None = None) -> None:
+        """Store a value in the cache with optional TTL."""
         expires = time.time() + (ttl if ttl is not None else self.ttl)
         entry: dict[str, Any]
-        if isinstance(value, dict):
-            entry = dict(value)
-        else:
-            entry = {"_value": value}
+        entry = dict(value) if isinstance(value, dict) else {"_value": value}
         entry["_expires"] = expires
         entry["_created"] = time.time()
         self._cache[key] = entry
         self._save()
 
     def delete(self, key: str) -> bool:
+        """Delete a key from the cache."""
         if key in self._cache:
             del self._cache[key]
             self._save()
@@ -102,20 +103,25 @@ class AttributeCache:
         return False
 
     def clear(self) -> None:
+        """Clear all entries from the cache."""
         self._cache = {}
         self._save()
         logger.info("Cache cleared")
 
     def clear_cache(self) -> None:
+        """Clear all entries (alias for clear)."""
         self.clear()
 
     def keys(self) -> list[str]:
-        return [key for key in self._cache.keys() if not self._is_expired(key)]
+        """Return list of non-expired cache keys."""
+        return [key for key in self._cache if not self._is_expired(key)]
 
     def exists(self, key: str) -> bool:
+        """Check if a non-expired key exists in the cache."""
         return key in self._cache and not self._is_expired(key)
 
     def get_stats(self) -> dict[str, int]:
+        """Return cache statistics."""
         total = len(self._cache)
         valid = sum(1 for key in self._cache if not self._is_expired(key))
         return {
@@ -126,6 +132,7 @@ class AttributeCache:
         }
 
     def cleanup_expired(self) -> int:
+        """Remove expired entries and return count removed."""
         expired_keys = [key for key in self._cache if self._is_expired(key)]
         for key in expired_keys:
             del self._cache[key]
@@ -134,6 +141,7 @@ class AttributeCache:
         return len(expired_keys)
 
     def touch(self, key: str, ttl: int | None = None) -> bool:
+        """Refresh TTL for an existing key."""
         if self._is_expired(key):
             if key in self._cache:
                 del self._cache[key]
@@ -147,11 +155,14 @@ class AttributeCache:
         self._save()
         return True
 
-    def get_attributes(self, category_id: str) -> list[dict] | None:
+    def get_attributes(self, category_id: str) -> list[dict[str, Any]] | None:
+        """Get cached attributes for a category."""
         return self.get(category_id)
 
-    def save_attributes(self, category_id: str, attributes: list[dict]) -> None:
+    def save_attributes(self, category_id: str, attributes: list[dict[str, Any]]) -> None:
+        """Save attributes for a category."""
         self.set(category_id, attributes)
 
     def get_cache_info(self) -> dict[str, Any]:
+        """Return summary info about the cache."""
         return {"cached_categories": len(self.keys())}

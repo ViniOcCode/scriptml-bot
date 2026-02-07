@@ -97,6 +97,7 @@ class RetryConfig:
         exponential_base: float = 2.0,
         retryable_status_codes: set[int] | None = None,
     ):
+        """Initialize retry configuration."""
         self.max_retries = max_retries
         self.base_delay = base_delay
         self.max_delay = max_delay
@@ -397,8 +398,8 @@ class FiscalService:
                 if hasattr(e, "response") and e.response is not None:
                     error_detail = e.response.json()
                     error_msg = f"{error_msg} - Response: {error_detail}"
-            except Exception:
-                pass
+            except Exception:  # noqa: S110
+                pass  # Best-effort response parsing; error is logged below
             logger.error(f"{error_msg} for SKU {sku} (item {item_id})")
             return FiscalSubmissionResult(
                 success=False,
@@ -506,8 +507,8 @@ class FiscalService:
                     first_cause = causes[0]
                     if isinstance(first_cause, dict):
                         return first_cause.get("code")
-        except Exception:
-            pass
+        except Exception:  # noqa: S110
+            pass  # Best-effort error code extraction
 
         return None
 

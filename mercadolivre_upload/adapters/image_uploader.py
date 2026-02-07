@@ -4,6 +4,7 @@ import base64
 import hashlib
 import logging
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from mercadolivre_upload.api.client import MLApiClient
@@ -17,7 +18,7 @@ class ImageUploader:
     def __init__(
         self,
         api_client: MLApiClient | None = None,
-        base_path: str | Path = "/tmp/uploads",
+        base_path: str | Path = "/tmp/uploads",  # noqa: S108
     ):
         """Initialize uploader.
 
@@ -28,8 +29,8 @@ class ImageUploader:
         self.api_client = api_client
         self.base_path = Path(base_path)
         self.base_path.mkdir(parents=True, exist_ok=True)
-        self._uploaded_images: list[dict] = []
-        self._hash_cache: dict[str, dict] = {}
+        self._uploaded_images: list[dict[str, Any]] = []
+        self._hash_cache: dict[str, dict[str, Any]] = {}
 
     def upload_images(self, sku: str) -> list[str]:
         """Upload all images for a SKU and return URLs."""
@@ -52,6 +53,7 @@ class ImageUploader:
         ]
 
     def validate_image(self, path: str) -> bool:
+        """Validate image file exists, type, and size."""
         file_path = Path(path)
         if not file_path.exists():
             logger.error("Image not found")
@@ -68,13 +70,16 @@ class ImageUploader:
         return True
 
     def calculate_hash(self, path: str) -> str:
+        """Return MD5 hash of file contents for dedup."""
         content = Path(path).read_bytes()
-        return hashlib.md5(content).hexdigest()
+        return hashlib.md5(content).hexdigest()  # noqa: S324
 
     def encode_base64(self, path: str) -> str:
+        """Encode image file as base64 string."""
         return base64.b64encode(Path(path).read_bytes()).decode()
 
-    def upload(self, path: str, product_id: str | None = None) -> dict:
+    def upload(self, path: str, product_id: str | None = None) -> dict[str, Any]:
+        """Upload a single image and return result payload."""
         if not self.validate_image(path):
             raise ValueError("Invalid image")
         image_hash = self.calculate_hash(path)
@@ -109,7 +114,8 @@ class ImageUploader:
         self._uploaded_images.append(payload)
         return payload
 
-    def upload_batch(self, paths: list[str], product_id: str | None = None) -> list[dict]:
+    def upload_batch(self, paths: list[str], product_id: str | None = None) -> list[dict[str, Any]]:
+        """Upload multiple images and return results."""
         results = []
         for path in paths:
             try:
@@ -119,14 +125,17 @@ class ImageUploader:
             results.append(result)
         return results
 
-    def get_uploaded_images(self) -> list[dict]:
+    def get_uploaded_images(self) -> list[dict[str, Any]]:
+        """Return list of uploaded image records."""
         return list(self._uploaded_images)
 
     def clear_upload_history(self) -> None:
+        """Clear uploaded images and hash cache."""
         self._uploaded_images = []
         self._hash_cache = {}
 
     def delete_local_copy(self, path: str) -> bool:
+        """Delete local image file after upload."""
         file_path = Path(path)
         if not file_path.exists():
             return False

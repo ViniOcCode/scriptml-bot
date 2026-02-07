@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 
@@ -54,18 +55,20 @@ class SpreadsheetParser:
         "imagens": "imagens",
     }
 
-    def __init__(self, column_mapping: dict | None = None):
+    def __init__(self, column_mapping: dict[str, Any] | None = None):
+        """Initialize parser with optional column mapping."""
         self._column_mapping = (
             dict(column_mapping) if column_mapping else self.DEFAULT_COLUMN_MAPPING.copy()
         )
-        self._data: list[dict] = []
+        self._data: list[dict[str, Any]] = []
 
     def parse(
         self,
         file_path: str | Path,
         sheet_name: str | int | None = None,
         header_row: int | None = None,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
+        """Parse spreadsheet file into normalized dictionaries."""
         file_path = Path(file_path)
         if not file_path.exists():
             raise FileNotFoundError("Arquivo não encontrado")
@@ -85,10 +88,7 @@ class SpreadsheetParser:
             raise ValueError("Erro ao ler arquivo Excel") from exc
 
         if isinstance(df, dict):
-            if df:
-                df = next(iter(df.values()))
-            else:
-                df = pd.DataFrame()
+            df = next(iter(df.values())) if df else pd.DataFrame()
 
         if df.empty:
             logger.warning("Planilha vazia")
@@ -102,10 +102,7 @@ class SpreadsheetParser:
             else:
                 df = pd.read_excel(file_path, sheet_name=sheet_name, header=header_row)
             if isinstance(df, dict):
-                if df:
-                    df = next(iter(df.values()))
-                else:
-                    df = pd.DataFrame()
+                df = next(iter(df.values())) if df else pd.DataFrame()
 
         if header_row is not None:
             df.columns = [str(col).strip() for col in df.columns]
@@ -128,8 +125,8 @@ class SpreadsheetParser:
             mapping[column] = target or column_str.lower()
         return df.rename(columns=mapping)
 
-    def _clean_record(self, record: dict) -> dict:
-        cleaned: dict = {}
+    def _clean_record(self, record: dict[str, Any]) -> dict[str, Any]:
+        cleaned: dict[str, Any] = {}
         for key, value in record.items():
             if value is None:
                 continue
@@ -144,16 +141,20 @@ class SpreadsheetParser:
                 cleaned[key] = value
         return cleaned
 
-    def get_column_mapping(self) -> dict:
+    def get_column_mapping(self) -> dict[str, Any]:
+        """Return current column mapping."""
         return dict(self._column_mapping)
 
-    def set_column_mapping(self, mapping: dict) -> None:
+    def set_column_mapping(self, mapping: dict[str, Any]) -> None:
+        """Set a new column mapping."""
         self._column_mapping = dict(mapping)
 
     def get_supported_columns(self) -> list[str]:
+        """Return list of supported canonical column names."""
         return list(set(self._column_mapping.values()))
 
     def validate_file(self, file_path: str | Path) -> tuple[bool, list[str]]:
+        """Validate that a file can be parsed successfully."""
         path = Path(file_path)
         errors: list[str] = []
         if not path.exists():

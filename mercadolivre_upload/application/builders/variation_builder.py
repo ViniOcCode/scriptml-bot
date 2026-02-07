@@ -1,12 +1,15 @@
 """Variation builder utilities."""
 
+from typing import Any
+
 
 class VariationBuilder:
     """Builds variation payloads with attribute combinations."""
 
     def __init__(self) -> None:
-        self._variations: list[dict] = []
-        self._current: dict | None = None
+        """Initialize with empty variations list."""
+        self._variations: list[dict[str, Any]] = []
+        self._current: dict[str, Any] | None = None
 
     def start_variation(
         self, price: float | None = None, qty: int | None = None
@@ -21,7 +24,7 @@ class VariationBuilder:
             self._current["available_quantity"] = qty
         return self
 
-    def _ensure_current(self) -> dict:
+    def _ensure_current(self) -> dict[str, Any]:
         if self._current is None:
             raise RuntimeError("Nenhuma variação iniciada")
         return self._current
@@ -53,7 +56,7 @@ class VariationBuilder:
         current["picture_ids"].append(picture_id)
         return self
 
-    def build(self) -> list[dict]:
+    def build(self) -> list[dict[str, Any]]:
         """Return the built variations."""
         if self._current is not None:
             self._variations.append(self._current)

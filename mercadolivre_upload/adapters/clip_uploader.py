@@ -8,13 +8,14 @@ import hashlib
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import requests
 
 from mercadolivre_upload.api.client import MLApiClient
 from mercadolivre_upload.domain.validation.clip_validator import (
-    ClipValidator,
     SUPPORTED_EXTENSIONS,
+    ClipValidator,
 )
 
 logger = logging.getLogger(__name__)
@@ -82,9 +83,7 @@ class ClipUploader:
             return []
 
         clips = sorted(
-            f
-            for f in sku_dir.iterdir()
-            if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS
+            f for f in sku_dir.iterdir() if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS
         )
         return clips
 
@@ -101,7 +100,7 @@ class ClipUploader:
         self,
         item_id: str,
         video_path: Path,
-        sites: list[dict] | None = None,
+        sites: list[dict[str, Any]] | None = None,
     ) -> ClipUploadResult:
         """Upload a single video clip for a published item.
 
@@ -140,8 +139,7 @@ class ClipUploader:
                 result.clip_uuid = clip_uuid
                 result.status = api_result.get("status", "accepted")
                 logger.info(
-                    f"Clip uploaded for {item_id}: {clip_uuid} "
-                    f"(status: {result.status})"
+                    f"Clip uploaded for {item_id}: {clip_uuid} " f"(status: {result.status})"
                 )
             else:
                 result.status = "error"
@@ -173,7 +171,7 @@ class ClipUploader:
         self,
         sku: str,
         item_id: str,
-        sites: list[dict] | None = None,
+        sites: list[dict[str, Any]] | None = None,
     ) -> ClipUploadSummary:
         """Discover, validate, and upload all clips for a SKU.
 
@@ -188,7 +186,7 @@ class ClipUploader:
             ClipUploadSummary with per-clip results
         """
         summary = ClipUploadSummary(item_id=item_id)
-        
+
         # Clips require CBT parent IDs (Global Selling)
         if not item_id.startswith("CBT"):
             logger.warning(
@@ -196,7 +194,7 @@ class ClipUploader:
                 f"Clips API requires CBT IDs from Global Selling items."
             )
             return summary
-        
+
         clips = self.find_clips_for_sku(sku)
         if not clips:
             return summary
@@ -234,4 +232,3 @@ class ClipUploader:
             f"{summary.clips_skipped} skipped"
         )
         return summary
-

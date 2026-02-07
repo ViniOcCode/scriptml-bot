@@ -42,7 +42,7 @@ class ValidationRule(Protocol):
 class BaseValidator(ABC):
     """Validador base abstrato."""
 
-    def __init__(self):
+    def __init__(self):  # type: ignore[no-untyped-def]
         """Inicializa o validador."""
         self._rules: list[ValidationRule] = []
         self._errors: list[ValidationResult] = []
@@ -280,4 +280,4 @@ def create_validator(rules: list[ValidationRule] | None = None) -> BaseValidator
         for rule in rules:
             validator.add_rule(rule)
 
-    return validator
+    return validator  # type: ignore[no-any-return]

@@ -16,7 +16,7 @@ app = typer.Typer(name="doctor", help="Run health checks")
 
 
 @app.callback(invoke_without_command=True)
-def check():
+def check():  # type: ignore[no-untyped-def]
     """Run health check on environment."""
     console.print(Panel.fit("Health Check", style="cyan"))
 

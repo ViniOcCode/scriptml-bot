@@ -20,12 +20,12 @@ app = typer.Typer(name="validate", help="Validate products without publishing")
 
 
 @app.callback(invoke_without_command=True)
-def validate(
-    excel: Path = typer.Option(..., "--excel", "-e", help="Excel file path"),
-    images: Path = typer.Option(..., "--images", "-i", help="Images directory"),
-    category: str = typer.Option(..., "--category", "-c", help="Category name"),
-    cache_dir: Path = typer.Option(Path("cache/categories"), "--cache-dir"),
-    detailed: bool = typer.Option(False, "--detailed", "-d"),
+def validate(  # type: ignore[no-untyped-def]
+    excel: Path = typer.Option(..., "--excel", "-e", help="Excel file path"),  # noqa: B008
+    images: Path = typer.Option(..., "--images", "-i", help="Images directory"),  # noqa: B008
+    category: str = typer.Option(..., "--category", "-c", help="Category name"),  # noqa: B008
+    cache_dir: Path = typer.Option(Path("cache/categories"), "--cache-dir"),  # noqa: B008
+    detailed: bool = typer.Option(False, "--detailed", "-d"),  # noqa: B008
 ):
     """Validate products without publishing (dry-run)."""
     console.print(Panel.fit("Pre-Validation", style="yellow"))
@@ -36,9 +36,9 @@ def validate(
         cache_dir = Path("cache/categories")
     elif not isinstance(cache_dir, Path):
         cache_dir = Path(cache_dir)
-    cache = AttributeCache(cache_dir=str(cache_dir))
+    AttributeCache(cache_dir=str(cache_dir))
     api_client = MLApiClient()
-    category_adapter = CategoryAdapter(api_client)
+    CategoryAdapter(api_client)
 
     parser = SpreadsheetParser()
 
@@ -48,18 +48,18 @@ def validate(
         console.print(f"Found {len(products)} products")
     except Exception as e:
         err_console.print(f"[red]Error parsing Excel: {e}[/red]")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from e
 
     # Validate products
     errors = []
     for product in products:
         # Basic validation
-        if not product.title:
-            errors.append(f"{product.sku}: Missing title")
-        if not product.price or product.price <= 0:
-            errors.append(f"{product.sku}: Invalid price")
-        if not product.sku:
-            errors.append(f"Product {product.title[:30]}: Missing SKU")
+        if not product.title:  # type: ignore[attr-defined]
+            errors.append(f"{product.sku}: Missing title")  # type: ignore[attr-defined]
+        if not product.price or product.price <= 0:  # type: ignore[attr-defined]
+            errors.append(f"{product.sku}: Invalid price")  # type: ignore[attr-defined]
+        if not product.sku:  # type: ignore[attr-defined]
+            errors.append(f"Product {product.title[:30]}: Missing SKU")  # type: ignore[attr-defined]
 
     if errors:
         console.print(f"[red]✗ Validation failed: {len(errors)} errors[/red]")

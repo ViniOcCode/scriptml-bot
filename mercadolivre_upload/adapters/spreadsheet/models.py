@@ -1,6 +1,7 @@
 """Data models for Excel parser."""
 
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -19,7 +20,7 @@ class FiscalData:
     origin: str
     cest: str | None = None
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for API payload."""
         result = {
             "ncm": self.ncm,
@@ -55,7 +56,7 @@ class Product:
     fiscal: FiscalData
     attributes: dict[str, str] = field(default_factory=dict)
 
-    def __post_init__(self):
+    def __post_init__(self):  # type: ignore[no-untyped-def]
         """Validate product data after initialization."""
         # Validate condition
         if self.condition not in ("new", "used"):
@@ -69,7 +70,7 @@ class Product:
         if self.available_quantity < 0:
             raise ValueError(f"Quantity cannot be negative: {self.available_quantity}")
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for API payload."""
         return {
             "sku": self.sku,

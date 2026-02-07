@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import os
-from enum import Enum
+from enum import Enum, StrEnum
 from pathlib import Path
 from typing import Any, Literal, Self
 
@@ -20,7 +20,7 @@ from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class LogLevel(str, Enum):
+class LogLevel(StrEnum):
     """Níveis de log suportados."""
 
     DEBUG = "DEBUG"
@@ -30,7 +30,7 @@ class LogLevel(str, Enum):
     CRITICAL = "CRITICAL"
 
 
-class Environment(str, Enum):
+class Environment(StrEnum):
     """Ambientes de execução."""
 
     DEVELOPMENT = "development"
@@ -39,7 +39,7 @@ class Environment(str, Enum):
     PRODUCTION = "production"
 
 
-class CacheBackend(str, Enum):
+class CacheBackend(StrEnum):
     """Backends de cache suportados."""
 
     MEMORY = "memory"
@@ -208,7 +208,7 @@ class Settings(BaseSettings):
                 try:
                     path.mkdir(parents=True, exist_ok=True)
                 except OSError as e:
-                    raise ValueError(f"Não foi possível criar diretório {path}: {e}")
+                    raise ValueError(f"Não foi possível criar diretório {path}: {e}") from e
         return self
 
     @model_validator(mode="after")
@@ -238,9 +238,10 @@ class Settings(BaseSettings):
             for key, value in data.items():
                 if isinstance(value, SecretStr):
                     data[key] = "***" if value.get_secret_value() else None
-                elif "secret" in key.lower() or "password" in key.lower() or "token" in key.lower():
-                    if value:
-                        data[key] = "***"
+                elif (
+                    "secret" in key.lower() or "password" in key.lower() or "token" in key.lower()
+                ) and value:
+                    data[key] = "***"
 
         return data
 

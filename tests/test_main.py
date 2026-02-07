@@ -18,7 +18,7 @@ class TestMainEntry:
         """Test that main_entry calls main function."""
         from mercadolivre_upload.main import main_entry
 
-        result = main_entry()
+        main_entry()
 
         mock_app.assert_called_once()
 

@@ -4,6 +4,7 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from .scoring import ScoredAttribute
 
@@ -14,15 +15,16 @@ class ValidationFeedback:
     """Records validation outcomes for pattern analysis and scoring adjustment."""
 
     def __init__(self, feedback_file: str = "feedback_log.json"):
+        """Initialize with optional feedback file path."""
         self.feedback_file = Path(feedback_file)
         self.feedback = self._load_feedback()
 
-    def _load_feedback(self) -> list[dict]:
+    def _load_feedback(self) -> list[dict[str, Any]]:
         """Load existing feedback from file."""
         if self.feedback_file.exists():
             try:
                 with open(self.feedback_file, encoding="utf-8") as f:
-                    return json.load(f)
+                    return json.load(f)  # type: ignore[no-any-return]
             except (OSError, json.JSONDecodeError) as e:
                 logger.error(f"Failed to load feedback: {e}")
                 return []
@@ -39,8 +41,8 @@ class ValidationFeedback:
     def record_validation_result(
         self,
         sku: str,
-        attributes: list[dict],
-        validation_response: dict,
+        attributes: list[dict[str, Any]],
+        validation_response: dict[str, Any],
     ) -> None:
         """Record validation outcome for pattern analysis.
 
@@ -104,7 +106,7 @@ class ValidationFeedback:
         Returns:
             Dictionary mapping attribute IDs to error counts
         """
-        error_counts = {}
+        error_counts = {}  # type: ignore[var-annotated]
         for entry in self.feedback:
             if entry.get("cause_type") in ("error", "warning"):
                 attr_id = entry.get("attribute_id")
@@ -149,7 +151,7 @@ class ValidationFeedback:
 
         return result
 
-    def get_feedback_summary(self) -> dict:
+    def get_feedback_summary(self) -> dict[str, Any]:
         """Get summary statistics from feedback."""
         total = len(self.feedback)
         errors = sum(1 for e in self.feedback if e.get("cause_type") == "error")

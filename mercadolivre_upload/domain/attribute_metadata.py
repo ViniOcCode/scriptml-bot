@@ -1,6 +1,8 @@
 """Attribute metadata models for normalized ML API representation."""
 
+import contextlib
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -20,7 +22,7 @@ class AttributeMeta:
     tooltip: str | None = None  # Help text from ML
 
     @classmethod
-    def from_ml_api(cls, api_data: dict) -> "AttributeMeta":
+    def from_ml_api(cls, api_data: dict[str, Any]) -> "AttributeMeta":
         """Create AttributeMeta from ML API attribute response."""
         tags = set(api_data.get("tags", {}).keys())
 
@@ -37,10 +39,8 @@ class AttributeMeta:
         # Extract relevance if available
         relevance = None
         if "relevance" in api_data:
-            try:
+            with contextlib.suppress(ValueError, TypeError):
                 relevance = float(api_data["relevance"])
-            except (ValueError, TypeError):
-                pass
 
         # Extract validation rules
         validation_pattern = None
@@ -50,10 +50,8 @@ class AttributeMeta:
             if "pattern" in rules:
                 validation_pattern = rules["pattern"]
             if "max_length" in rules:
-                try:
+                with contextlib.suppress(ValueError, TypeError):
                     max_length = int(rules["max_length"])
-                except (ValueError, TypeError):
-                    pass
 
         return cls(
             id=api_data.get("id", ""),
@@ -91,9 +89,11 @@ class AttributeMeta:
         return True  # String type accepts anything
 
     def __hash__(self) -> int:
+        """Return hash based on attribute id."""
         return hash(self.id)
 
     def __eq__(self, other: object) -> bool:
+        """Check equality based on attribute id."""
         if not isinstance(other, AttributeMeta):
             return False
         return self.id == other.id

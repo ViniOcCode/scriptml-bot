@@ -15,8 +15,8 @@ app = typer.Typer(name="cache", help="Manage attribute cache")
 
 
 @app.command()
-def clear(
-    cache_dir: Path = typer.Option(Path("cache/categories"), "--cache-dir"),
+def clear(  # type: ignore[no-untyped-def]
+    cache_dir: Path = typer.Option(Path("cache/categories"), "--cache-dir"),  # noqa: B008
 ):
     """Clear attribute cache."""
     cache = AttributeCache(cache_dir=str(cache_dir))
@@ -25,8 +25,8 @@ def clear(
 
 
 @app.command()
-def status(
-    cache_dir: Path = typer.Option(Path("cache/categories"), "--cache-dir"),
+def status(  # type: ignore[no-untyped-def]
+    cache_dir: Path = typer.Option(Path("cache/categories"), "--cache-dir"),  # noqa: B008
 ):
     """Show cache status."""
     # Create cache instance for status checks (no assignment needed)

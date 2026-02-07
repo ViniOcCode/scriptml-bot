@@ -1,11 +1,14 @@
 """Attribute builder utilities."""
 
+from typing import Any
+
 
 class AttributeBuilder:
     """Builds Mercado Livre attribute payloads for tests and compatibility."""
 
     def __init__(self) -> None:
-        self._attributes: list[dict] = []
+        """Initialize with empty attributes list."""
+        self._attributes: list[dict[str, Any]] = []
 
     def add_attribute(
         self, attr_id: str, value: object, name: str | None = None
@@ -29,7 +32,7 @@ class AttributeBuilder:
         """Add GTIN attribute."""
         return self.add_attribute("GTIN", value, "Código de barras")
 
-    def add_from_dict(self, attributes: dict) -> "AttributeBuilder":
+    def add_from_dict(self, attributes: dict[str, Any]) -> "AttributeBuilder":
         """Add multiple attributes from a dictionary."""
         for key, value in attributes.items():
             if value is None:
@@ -39,7 +42,7 @@ class AttributeBuilder:
             self.add_attribute(str(key).upper(), value)
         return self
 
-    def build(self) -> list[dict]:
+    def build(self) -> list[dict[str, Any]]:
         """Return a copy of built attributes."""
         return [attr.copy() for attr in self._attributes]
 

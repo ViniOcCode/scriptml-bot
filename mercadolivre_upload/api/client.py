@@ -4,15 +4,16 @@ Uses ResilientHTTPClient for automatic retry, backoff, jitter and rate limiting.
 All HTTP config is read from infrastructure.config.Settings or sensible defaults.
 """
 
+import contextlib
 import logging
 import re
+from typing import Any, cast
 
 import requests
 
 from mercadolivre_upload.auth import AuthManager
 from mercadolivre_upload.infrastructure.http import (
     NON_IDEMPOTENT,
-    SAFE_RETRY,
     UPLOAD_RETRY,
     ResilientHTTPClient,
     RetryPolicy,
@@ -78,7 +79,7 @@ def _build_http_client() -> ResilientHTTPClient:
 class MLApiClient:
     """Client for Mercado Livre API."""
 
-    def __init__(
+    def __init__(  # noqa: D107
         self,
         auth_manager: AuthManager | None = None,
         http_client: ResilientHTTPClient | None = None,
@@ -87,7 +88,7 @@ class MLApiClient:
         self.http = http_client or _build_http_client()
         self.base_url = BASE_URL
 
-    def _get_headers(self, content_type: str = "application/json") -> dict:
+    def _get_headers(self, content_type: str = "application/json") -> dict[str, str]:
         headers: dict[str, str] = {}
         if content_type:
             headers["Content-Type"] = content_type
@@ -97,26 +98,26 @@ class MLApiClient:
                 headers["Authorization"] = f"Bearer {token}"
         return headers
 
-    def _auth_headers_only(self) -> dict:
+    def _auth_headers_only(self) -> dict[str, str]:
         """Headers without Content-Type (for multipart uploads)."""
         return self._get_headers(content_type="")
 
-    def get(self, endpoint: str, params: dict | None = None) -> dict:
+    def get(self, endpoint: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         """GET request with automatic retry on transient errors."""
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
         logger.debug("GET %s", url)
         resp = self.http.get(url, headers=self._get_headers(), params=params)
         resp.raise_for_status()
-        return resp.json()
+        return cast(dict[str, Any], resp.json())
 
     def post(
         self,
         endpoint: str,
-        data: dict | None = None,
-        json: dict | None = None,
+        data: dict[str, Any] | None = None,
+        json: dict[str, Any] | None = None,
         *,
         policy: RetryPolicy | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """POST request. Uses NON_IDEMPOTENT policy by default for safety."""
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
         logger.debug("POST %s", url)
@@ -131,18 +132,18 @@ class MLApiClient:
         # Validation endpoint returns 400 with useful error body
         if endpoint.strip("/") == "items/validate" and resp.status_code == 400:
             try:
-                return resp.json()
-            except Exception:
+                return cast(dict[str, Any], resp.json())
+            except Exception:  # noqa: S110
                 pass
 
         resp.raise_for_status()
-        return resp.json()
+        return cast(dict[str, Any], resp.json())
 
-    def get_sites(self) -> list[dict]:
+    def get_sites(self) -> list[dict[str, Any]]:
         """Get available sites."""
-        return self.get("/sites")
+        return cast(list[dict[str, Any]], self.get("/sites"))
 
-    def get_site_categories(self, site_id: str = "MLB") -> list[dict]:
+    def get_site_categories(self, site_id: str = "MLB") -> list[dict[str, Any]]:
         """Get categories for a site.
 
         Args:
@@ -151,9 +152,9 @@ class MLApiClient:
         Returns:
             List of category objects
         """
-        return self.get(f"/sites/{site_id}/categories")
+        return cast(list[dict[str, Any]], self.get(f"/sites/{site_id}/categories"))
 
-    def predict_category(self, title: str, site_id: str = "MLB") -> list[dict]:
+    def predict_category(self, title: str, site_id: str = "MLB") -> list[dict[str, Any]]:
         """Predict category based on product title.
 
         Uses ML domain discovery to predict the best category for a title.
@@ -166,19 +167,19 @@ class MLApiClient:
             List of predicted categories with confidence scores
         """
         endpoint = f"/sites/{site_id}/domain_discovery/search"
-        return self.get(endpoint, params={"q": title})
+        return cast(list[dict[str, Any]], self.get(endpoint, params={"q": title}))
 
-    def get_category(self, category_id: str) -> dict:
+    def get_category(self, category_id: str) -> dict[str, Any]:
         """Get category details."""
         return self.get(f"/categories/{category_id}")
 
-    def get_category_attributes(self, category_id: str) -> list[dict]:
+    def get_category_attributes(self, category_id: str) -> list[dict[str, Any]]:
         """Get category attributes."""
-        return self.get(f"/categories/{category_id}/attributes")
+        return cast(list[dict[str, Any]], self.get(f"/categories/{category_id}/attributes"))
 
     def get_category_conditional_attributes(
-        self, category_id: str, current_attributes: dict
-    ) -> list[dict]:
+        self, category_id: str, current_attributes: dict[str, Any]
+    ) -> list[dict[str, Any]]:
         """Get conditional attributes for a category.
 
         Args:
@@ -189,13 +190,13 @@ class MLApiClient:
             List of conditional attributes
         """
         endpoint = f"/categories/{category_id}/attributes/conditional"
-        return self.post(endpoint, json=current_attributes)
+        return cast(list[dict[str, Any]], self.post(endpoint, json=current_attributes))
 
-    def get_category_technical_specs(self, category_id: str) -> dict:
+    def get_category_technical_specs(self, category_id: str) -> dict[str, Any]:
         """Get category technical specs (input structure)."""
         return self.get(f"/categories/{category_id}/technical_specs/input")
 
-    def validate_item(self, item: dict) -> dict:
+    def validate_item(self, item: dict[str, Any]) -> dict[str, Any]:
         """Validate item before publishing.
 
         Args:
@@ -206,7 +207,7 @@ class MLApiClient:
         """
         return self.post("/items/validate", json=item)
 
-    def create_item(self, item: dict) -> dict:
+    def create_item(self, item: dict[str, Any]) -> dict[str, Any]:
         """Create/publish an item.
 
         Args:
@@ -217,7 +218,7 @@ class MLApiClient:
         """
         return self.post("/items", json=item)
 
-    def get_users_me(self) -> dict:
+    def get_users_me(self) -> dict[str, Any]:
         """Get current authenticated user info.
 
         Returns:
@@ -225,7 +226,7 @@ class MLApiClient:
         """
         return self.get("/users/me")
 
-    def upload_image(self, image_path: str) -> dict:
+    def upload_image(self, image_path: str) -> dict[str, Any]:
         """Upload an image with retry on transient errors."""
         from pathlib import Path
 
@@ -258,9 +259,9 @@ class MLApiClient:
             if top_url and "secure_url" not in data:
                 data["secure_url"] = top_url
 
-        return data
+        return cast(dict[str, Any], data)
 
-    def submit_fiscal_info(self, item_id: str, fiscal_data: dict) -> dict:
+    def submit_fiscal_info(self, item_id: str, fiscal_data: dict[str, Any]) -> dict[str, Any]:
         """Submit fiscal information for an item.
 
         Args:
@@ -277,7 +278,7 @@ class MLApiClient:
         endpoint = f"/items/{item_id}/fiscal_info"
         return self.post(endpoint, json=fiscal_data)
 
-    def check_fiscal_data_exists(self, sku: str) -> tuple[bool, dict | None]:
+    def check_fiscal_data_exists(self, sku: str) -> tuple[bool, dict[str, Any] | None]:
         """Check if fiscal data exists for a SKU.
 
         Args:
@@ -300,7 +301,7 @@ class MLApiClient:
                 return False, None
             raise
 
-    def register_fiscal_data(self, fiscal_data: dict) -> dict:
+    def register_fiscal_data(self, fiscal_data: dict[str, Any]) -> dict[str, Any]:
         """Register new fiscal data for a product.
 
         Args:
@@ -316,7 +317,7 @@ class MLApiClient:
         endpoint = "/items/fiscal_information"
         return self.post(endpoint, json=fiscal_data)
 
-    def verify_invoice_readiness(self, item_id: str) -> tuple[bool, dict | None]:
+    def verify_invoice_readiness(self, item_id: str) -> tuple[bool, dict[str, Any] | None]:
         """Verify if an item is ready for invoice generation.
 
         Args:
@@ -340,8 +341,8 @@ class MLApiClient:
         self,
         item_id: str,
         file_path: str,
-        sites: list[dict] | None = None,
-    ) -> dict:
+        sites: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         """Upload a video clip for an item (CBT parent ID required)."""
         import mimetypes
         from pathlib import Path
@@ -355,7 +356,7 @@ class MLApiClient:
 
         with open(path, "rb") as f:
             files = {"file": (path.name, f, mime_type)}
-            data: dict = {}
+            data: dict[str, Any] = {}
             if sites is not None and sites:
                 import json as json_mod
 
@@ -376,12 +377,10 @@ class MLApiClient:
             except Exception as e:
                 error_resp = getattr(e, "response", None)
                 status_code = getattr(error_resp, "status_code", "unknown")
-                error_body: dict = {}
+                error_body: dict[str, Any] = {}
                 if error_resp is not None:
-                    try:
+                    with contextlib.suppress(Exception):
                         error_body = error_resp.json()
-                    except Exception:
-                        pass
                 logger.error(
                     "Clip upload failed for %s: [%s] %s: %s",
                     item_id,
@@ -391,4 +390,4 @@ class MLApiClient:
                 )
                 raise
 
-        return resp.json()
+        return cast(dict[str, Any], resp.json())

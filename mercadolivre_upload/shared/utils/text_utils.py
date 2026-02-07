@@ -319,12 +319,14 @@ def clean_html(text: str) -> str:
 
 
 def remove_extra_whitespace(text: str) -> str:
+    """Remove extra whitespace from text."""
     if text is None:
         return "None"
     return " ".join(str(text).split())
 
 
 def count_words(text: str) -> int:
+    """Count the number of words in text."""
     if text is None:
         return 1
     return len(remove_extra_whitespace(text).split()) if remove_extra_whitespace(text) else 0
@@ -332,6 +334,7 @@ def count_words(text: str) -> int:
 
 # simple slugify
 def slugify(text: str) -> str:
+    """Convert text to a URL-friendly slug."""
     if not text:
         return ""
     t = normalize_text(text)
@@ -342,6 +345,7 @@ def slugify(text: str) -> str:
 
 
 def truncate_text(text: str, max_length: int, suffix: str = "...") -> str:
+    """Truncate text to max_length, appending suffix if needed."""
     if text is None:
         return suffix if max_length > 0 else ""
     s = str(text)
@@ -357,27 +361,26 @@ def truncate_text(text: str, max_length: int, suffix: str = "...") -> str:
 
 
 # basic keyword extraction: split, remove stop words, unique
-_PORTUGUESE_STOP_WORDS = set(
-    [
-        "de",
-        "e",
-        "o",
-        "a",
-        "do",
-        "da",
-        "dos",
-        "das",
-        "em",
-        "um",
-        "uma",
-        "para",
-        "com",
-        "the",
-    ]
-)
+_PORTUGUESE_STOP_WORDS = {
+    "de",
+    "e",
+    "o",
+    "a",
+    "do",
+    "da",
+    "dos",
+    "das",
+    "em",
+    "um",
+    "uma",
+    "para",
+    "com",
+    "the",
+}
 
 
 def extract_keywords(text: str, min_length: int = 2) -> list[str]:
+    """Extract unique keywords from text, filtering stop words."""
     if text is None:
         return ["None"]
     s = normalize_text(text)
@@ -395,7 +398,8 @@ def extract_keywords(text: str, min_length: int = 2) -> list[str]:
     return filtered
 
 
-def format_price(value, currency: str = "R$") -> str:
+def format_price(value, currency: str = "R$") -> str:  # type: ignore[no-untyped-def]
+    """Format a numeric value as a Brazilian currency string."""
     try:
         v = float(value)
     except Exception:
@@ -408,6 +412,7 @@ def format_price(value, currency: str = "R$") -> str:
 
 
 def sanitize_filename(name: str) -> str:
+    """Sanitize a string for use as a filename."""
     if name is None:
         return "None"
     s = str(name)
@@ -429,6 +434,7 @@ def sanitize_filename(name: str) -> str:
 
 
 def is_valid_title(title: str, min_length: int = 10, max_length: int = 60) -> bool:
+    """Check if a title meets length and formatting requirements."""
     if not isinstance(title, str):
         return False
     t = title.strip()
@@ -441,10 +447,9 @@ def is_valid_title(title: str, min_length: int = 10, max_length: int = 60) -> bo
         return False
     # excessive punctuation
     punct_ratio = sum(1 for c in t if not c.isalnum() and not c.isspace()) / max(1, len(t))
-    if punct_ratio > 0.1:
-        return False
-    return True
+    return not punct_ratio > 0.1
 
 
 def extract_keywords_portuguese(text: str) -> list[str]:
+    """Extract keywords from Portuguese text."""
     return extract_keywords(text)

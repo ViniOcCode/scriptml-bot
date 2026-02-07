@@ -3,6 +3,7 @@
 import logging
 import re
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import yaml
@@ -10,7 +11,7 @@ import yaml
 logger = logging.getLogger(__name__)
 
 
-def _load_header_config() -> dict:
+def _load_header_config() -> dict[str, Any]:
     """Load header detection config from config file.
 
     Returns:
@@ -55,7 +56,7 @@ class HeaderDetector:
     Uses configuration from config/generic_mappings.yaml as the single source of truth.
     """
 
-    def __init__(self, config: dict | None = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         """Initialize the header detector.
 
         Args:

@@ -456,5 +456,5 @@ class TestAsyncImageUploader:
     async def test_context_manager_with_exception(self):
         """Test context manager with exception."""
         with pytest.raises(ValueError):
-            async with AsyncImageUploader() as uploader:
+            async with AsyncImageUploader():
                 raise ValueError("Test")

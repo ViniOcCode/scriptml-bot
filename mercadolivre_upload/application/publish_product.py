@@ -36,7 +36,7 @@ class PublishProductUseCase:
         shipping_resolver: ShippingResolverPort | None = None,
         fiscal_service: FiscalService | None = None,
         clip_uploader: ClipUploaderPort | None = None,
-        config: dict | None = None,
+        config: dict[str, Any] | None = None,
         dry_run: bool = False,
         min_attribute_score: int = 50,
         enable_feedback: bool = True,
@@ -74,17 +74,17 @@ class PublishProductUseCase:
         self.failed = 0
         self.errors: list[str] = []
         self.fiscal_results: list[FiscalSubmissionResult] = []
-        self.clip_results: list[dict] = []  # ClipUploadSummary dicts
+        self.clip_results: list[dict[str, Any]] = []  # ClipUploadSummary dicts
 
         # Initialize CBT ID extractor (attempt to find an API client to perform fallback GETs)
         api_client = None
-        if hasattr(publisher, "get") and callable(getattr(publisher, "get")):
+        if hasattr(publisher, "get") and callable(publisher.get):
             # publisher is already an API client (e.g., MLApiClient)
             api_client = publisher
         elif hasattr(publisher, "client"):
             # publisher may be an adapter exposing an underlying client
             api_client = getattr(publisher, "client", None)
-        self.cbt_extractor = CbtIdExtractor(api_client=api_client)
+        self.cbt_extractor = CbtIdExtractor(api_client=api_client)  # type: ignore[arg-type]
 
         # Initialize feedback system
         self.feedback = ValidationFeedback() if enable_feedback else None
@@ -104,7 +104,9 @@ class PublishProductUseCase:
         # Pending fiscal data for batch submission
         self._pending_fiscal: list[tuple[str, FiscalData]] = []
 
-    def execute(self, products: list[Product | dict], category_name: str) -> dict:
+    def execute(
+        self, products: list[Product | dict[str, Any]], category_name: str
+    ) -> dict[str, Any]:
         """Execute publishing use case.
 
         Args:
@@ -137,7 +139,7 @@ class PublishProductUseCase:
 
                     # If not found, try keys that start with these patterns
                     if not title:
-                        for key in product.keys():
+                        for key in product:
                             key_lower = str(key).lower().strip()
                             if any(
                                 key_lower.startswith(pattern)
@@ -169,7 +171,7 @@ class PublishProductUseCase:
                             break
 
                     if not title:
-                        for key in product.keys():
+                        for key in product:
                             key_lower = str(key).lower().strip()
                             if any(
                                 key_lower.startswith(pattern)
@@ -240,7 +242,7 @@ class PublishProductUseCase:
             "clips_details": self.clip_results,
         }
 
-    def _build_product_from_dict(self, data: dict) -> Product:
+    def _build_product_from_dict(self, data: dict[str, Any]) -> Product:
         def find_key(candidates: list[str], exclude: list[str] | None = None) -> str | None:
             for key in data:
                 normalized = PortugueseTextNormalizer.normalize(str(key))
@@ -274,7 +276,7 @@ class PublishProductUseCase:
             raise ValueError(f"Campos obrigatórios faltando: {', '.join(missing)}")
 
         title = builder._normalize_text(str(data.get(title_key, "")))
-        description_raw = str(data.get(description_key, "") or "")
+        description_raw = str(data.get(description_key, "") or "")  # type: ignore[arg-type]
         description = builder._normalize_description(description_raw) if description_raw else ""
 
         price = builder._parse_price(data.get(price_key))
@@ -305,9 +307,7 @@ class PublishProductUseCase:
             cost=float(price or 0.0),
             ncm=str(data.get(ncm_key, "") if ncm_key else "").strip(),
             origin_type=str(data.get(origin_type_key, "") if origin_type_key else "").strip(),
-            origin_detail=str(
-                data.get(origin_detail_key, "") if origin_detail_key else ""
-            ).strip(),
+            origin_detail=str(data.get(origin_detail_key, "") if origin_detail_key else "").strip(),
             cest=str(data.get(cest_key, "") if cest_key else "").strip() or None,
             cfop=str(data.get(cfop_key, "") if cfop_key else "").strip() or None,
             ean=str(data.get(ean_key, "") if ean_key else "").strip() or None,
@@ -549,14 +549,14 @@ class PublishProductUseCase:
         try:
             result = self.publisher.create_item(item)
             published_item_id = result.get("id")
-            
+
             # Extract CBT parent item ID using robust extraction strategy
             cbt_item_id = self.cbt_extractor.extract_cbt_id(result)
-            
+
             logger.info(f"Published {product.sku}: {published_item_id}")
             if cbt_item_id and cbt_item_id != published_item_id:
                 logger.debug(f"CBT parent item ID for {product.sku}: {cbt_item_id}")
-            
+
             self.published += 1
 
             # Record successful validation feedback
@@ -586,22 +586,24 @@ class PublishProductUseCase:
                         sku=sku,
                         item_id=cbt_item_id,
                     )
-                    self.clip_results.append({
-                        "sku": sku,
-                        "item_id": cbt_item_id,
-                        "clips_uploaded": clip_summary.clips_uploaded,
-                        "clips_failed": clip_summary.clips_failed,
-                        "clips_skipped": clip_summary.clips_skipped,
-                        "results": [
-                            {
-                                "file": r.file,
-                                "clip_uuid": r.clip_uuid,
-                                "status": r.status,
-                                "error": r.error,
-                            }
-                            for r in clip_summary.results
-                        ],
-                    })
+                    self.clip_results.append(
+                        {
+                            "sku": sku,
+                            "item_id": cbt_item_id,
+                            "clips_uploaded": clip_summary.clips_uploaded,
+                            "clips_failed": clip_summary.clips_failed,
+                            "clips_skipped": clip_summary.clips_skipped,
+                            "results": [
+                                {
+                                    "file": r.file,
+                                    "clip_uuid": r.clip_uuid,
+                                    "status": r.status,
+                                    "error": r.error,
+                                }
+                                for r in clip_summary.results
+                            ],
+                        }
+                    )
                     if clip_summary.clips_uploaded > 0:
                         logger.info(
                             f"Clips uploaded for {sku}: {clip_summary.clips_uploaded} success"
@@ -640,7 +642,7 @@ class PublishProductUseCase:
             self.failed += 1
             return False
 
-    def get_stats(self) -> dict:
+    def get_stats(self) -> dict[str, Any]:
         """Get publishing statistics."""
         stats: dict[str, Any] = {
             "published": self.published,
@@ -686,7 +688,7 @@ class PublishProductUseCase:
             return self.feedback.get_problematic_attributes()
         return {}
 
-    def _build_shipping_config(self) -> dict:
+    def _build_shipping_config(self) -> dict[str, Any]:
         """Build shipping configuration from config.
 
         Uses shipping configuration from config file as the single source of truth.
@@ -719,7 +721,7 @@ class PublishProductUseCase:
         mode_config = modes_config.get(shipping_mode, {})
 
         # Build complete shipping config matching ML API format
-        config_shipping: dict[str, any] = {
+        config_shipping: dict[str, any] = {  # type: ignore[valid-type]
             "mode": shipping_mode,
             "methods": mode_config.get("methods", []),
             "tags": mode_config.get("tags", []),
@@ -736,7 +738,7 @@ class PublishProductUseCase:
         logger.info(f"Shipping config for {shipping_mode} mode: {config_shipping}")
         return config_shipping
 
-    def _normalize_item_attributes(self, item: dict) -> None:
+    def _normalize_item_attributes(self, item: dict[str, Any]) -> None:
         """Ensure numeric dimensions have units.
 
         Appends default unit to pure-numeric dimension attributes.
@@ -781,11 +783,12 @@ class PublishProductUseCase:
                 val = attr.get("value_name")
                 if isinstance(val, (int, float)):
                     attr["value_name"] = f"{val} {default_unit}"
-                elif isinstance(val, str):
-                    if numeric_only.match(val) and not unit_marker.search(val):
-                        # Convert comma decimals to dot (ML accepts dot) then append default unit
-                        normalized = val.strip().replace(",", ".")
-                        attr["value_name"] = f"{normalized} {default_unit}"
+                elif (
+                    isinstance(val, str) and numeric_only.match(val) and not unit_marker.search(val)
+                ):
+                    # Convert comma decimals to dot (ML accepts dot) then append default unit
+                    normalized = val.strip().replace(",", ".")
+                    attr["value_name"] = f"{normalized} {default_unit}"
 
     def _submit_fiscal_batch(self, pending_fiscal: list[tuple[str, FiscalData]]) -> None:
         """Submit fiscal data for multiple items using the fiscal service.
@@ -811,20 +814,24 @@ class PublishProductUseCase:
 
 
 # Backwards-compatible dataclasses and service expected by tests
-from dataclasses import dataclass
-from pathlib import Path
+from dataclasses import dataclass  # noqa: E402
+from pathlib import Path  # noqa: E402
 
 
 @dataclass
 class PublishResult:
+    """Result of a product publish operation."""
+
     success_count: int
     failure_count: int
     published_ids: list[str]
-    errors: list[dict]
+    errors: list[dict[str, Any]]
 
 
 @dataclass
 class ValidationResult:
+    """Result of a file validation operation."""
+
     is_valid: bool
     errors: list[str]
     warnings: list[str]
@@ -833,7 +840,8 @@ class ValidationResult:
 class PublishProductService:
     """Compatibility wrapper providing a simplified API expected by tests.
 
-    This class delegates to test-mocked dependencies (SpreadsheetParser, ProductBuilder, AuthManager, api_client)
+    This class delegates to test-mocked dependencies
+    (SpreadsheetParser, ProductBuilder, AuthManager, api_client)
     and implements enough logic for unit tests to exercise behavior.
     """
 
@@ -843,28 +851,31 @@ class PublishProductService:
         dry_run: bool = False,
         api_client: Any | None = None,
     ):
+        """Initialize with optional config, dry-run flag, and API client."""
         self.config_path = config_path
         self.dry_run = dry_run
         self._api = api_client
         self._auth = None
 
     @property
-    def api(self):
+    def api(self):  # type: ignore[no-untyped-def]
+        """Return or lazily initialize the API client."""
         if self._api is None:
             # Instantiate AuthManager (tests mock it)
             from auth.authenticator import AuthManager
 
-            self._auth = AuthManager()
+            self._auth = AuthManager()  # type: ignore[assignment]
 
             # Create a simple api object that tests will mock methods on
             class _API:
-                def publish_product(self, payload):
+                def publish_product(self, payload):  # type: ignore[no-untyped-def]
                     return None
 
             self._api = _API()
         return self._api
 
     def publish_from_file(self, path: Path) -> PublishResult:
+        """Publish all products from a spreadsheet file."""
         parser = SpreadsheetParser()
         rows = parser.parse(path)
         published_ids = []
@@ -881,7 +892,7 @@ class PublishProductService:
                     continue
                 res = self.api.publish_product(payload)
                 if getattr(res, "success", False):
-                    published_ids.append(getattr(res, "product_id", None))
+                    published_ids.append(getattr(res, "product_id", None))  # type: ignore[arg-type]
                     success += 1
                 else:
                     failure += 1
@@ -899,6 +910,7 @@ class PublishProductService:
         )
 
     def validate_file(self, path: Path) -> ValidationResult:
+        """Validate all products in a spreadsheet file."""
         try:
             parser = SpreadsheetParser()
             rows = parser.parse(path)
@@ -908,7 +920,7 @@ class PublishProductService:
                 )
             builder = ProductBuilder()
             errors = []
-            warnings = []
+            warnings = []  # type: ignore[var-annotated]
             for i, row in enumerate(rows, start=1):
                 try:
                     errs = builder.validate(row)
@@ -924,7 +936,8 @@ class PublishProductService:
                 is_valid=False, errors=[f"Erro ao processar arquivo: {e}"], warnings=[]
             )
 
-    def publish_single(self, data: dict) -> PublishResult:
+    def publish_single(self, data: dict[str, Any]) -> PublishResult:
+        """Publish a single product from a data dict."""
         builder = ProductBuilder()
         try:
             payload = builder.build(data)
@@ -937,7 +950,7 @@ class PublishProductService:
                 return PublishResult(
                     success_count=1,
                     failure_count=0,
-                    published_ids=[getattr(res, "product_id", None)],
+                    published_ids=[getattr(res, "product_id", None)],  # type: ignore[list-item]
                     errors=[],
                 )
             else:
@@ -953,6 +966,7 @@ class PublishProductService:
             )
 
     def check_credentials(self) -> bool:
+        """Check if the user is authenticated."""
         manager = AuthManager()
         return manager.is_authenticated()
 

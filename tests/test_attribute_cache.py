@@ -5,7 +5,6 @@ Tests for attribute_cache.py - 100% coverage.
 import json
 import logging
 import time
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -36,10 +35,10 @@ class TestAttributeCache:
 
     # ==================== Initialization ====================
 
-    def test_init_default(self):
+    def test_init_default(self, tmp_path):
         """Test default initialization."""
-        cache = AttributeCache()
-        assert cache.cache_file == Path("cache/categories/.attribute_cache.json")
+        cache = AttributeCache(cache_dir=tmp_path)
+        assert cache.cache_file == tmp_path / ".attribute_cache.json"
         assert cache.ttl == AttributeCache.DEFAULT_TTL
         assert cache._cache == {}
 
