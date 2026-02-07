@@ -453,3 +453,7 @@ def is_valid_title(title: str, min_length: int = 10, max_length: int = 60) -> bo
 def extract_keywords_portuguese(text: str) -> list[str]:
     """Extract keywords from Portuguese text."""
     return extract_keywords(text)
+
+
+# Alias for backward compatibility with domain layer
+PortugueseTextNormalizer = TextNormalizer
