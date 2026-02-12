@@ -1,15 +1,10 @@
 """Fiscal service for managing tax information submission.
 
-This service handles the post-publication submission of fiscal data
-to Mercado Livre's fiscal information endpoint following the workflow:
-1. Check if item is ready for fiscal data (GET /items/fiscal_information/{SKU})
-2. Wait and retry if not ready (1 minute delay)
-3. Check if fiscal data exists (GET /items/fiscal_information/{SKU})
-4. Register new fiscal data if not exists (POST /items/fiscal_information)
-5. Verify invoice readiness (GET /can_invoice/items/{ITEM_ID})
-
-The fiscal_information check must return 200 before sending fiscal data.
-If 404, wait 1 minute and retry.
+This service handles post-publication fiscal workflow:
+1. Check fiscal data by SKU
+2. Register new fiscal data by SKU when missing
+3. Link fiscal SKU to the published item
+4. Verify invoice readiness for the item
 """
 
 import logging
@@ -30,6 +25,7 @@ class FiscalSubmissionStatus(Enum):
     ALREADY_EXISTS = "already_exists"
     REGISTERED = "registered"
     VERIFIED = "verified"
+    PENDING_VERIFICATION = "pending_verification"
     FAILED = "failed"
     SKIPPED = "skipped"
 
@@ -74,6 +70,12 @@ class FiscalApiPort(Protocol):
         """
         ...
 
+    def link_fiscal_sku_to_item(
+        self, sku: str, item_id: str, variation_id: str | None = None
+    ) -> dict[str, Any]:
+        """Link a registered fiscal SKU to a published item."""
+        ...
+
     def verify_invoice_readiness(self, item_id: str) -> tuple[bool, dict[str, Any]]:
         """Verify if item is ready for invoice generation.
 
@@ -114,11 +116,10 @@ class FiscalService:
     """Service for managing fiscal data submission.
 
     This service orchestrates the complete workflow for fiscal information:
-    1. Check if item is ready for fiscal data via can_invoice endpoint
-    2. Wait and retry if not ready (1 minute delay)
-    3. Check if fiscal data already exists
-    4. Register new fiscal data if needed
-    5. Verify invoice readiness
+    1. Check if fiscal data already exists by SKU
+    2. Register fiscal data by SKU when missing
+    3. Link SKU to the published item
+    4. Poll invoice readiness for verification
 
     Includes retry logic for transient failures and comprehensive logging.
     """
@@ -202,6 +203,18 @@ class FiscalService:
             return getattr(response, "status_code", 0)
         return 0
 
+    @staticmethod
+    def _extract_response_detail(exception: Exception) -> dict[str, Any] | None:
+        """Extract JSON response body from API exception when available."""
+        response = getattr(exception, "response", None)
+        if response is None:
+            return None
+        try:
+            payload = response.json()
+            return payload if isinstance(payload, dict) else None
+        except Exception:  # noqa: S110
+            return None
+
     def _wait_for_fiscal_data_ready(
         self, item_id: str, sku: str
     ) -> tuple[bool, dict[str, Any] | None, int]:
@@ -255,18 +268,104 @@ class FiscalService:
 
         return False, None, self.can_invoice_max_retries
 
+    def _wait_for_sku_link(self, item_id: str, sku: str) -> tuple[dict[str, Any] | None, int]:
+        """Wait until SKU can be linked to the published item."""
+        retryable_statuses = self.retry_config.retryable_status_codes | {404}
+        for attempt in range(self.can_invoice_max_retries + 1):
+            try:
+                response = self.api_client.link_fiscal_sku_to_item(sku=sku, item_id=item_id)
+                if attempt > 0:
+                    logger.info(f"SKU {sku} linked to item {item_id} after {attempt} wait cycles")
+                return response, attempt
+            except Exception as e:
+                status_code = self._extract_status_code(e)
+                response_detail = self._extract_response_detail(e)
+
+                if status_code == 409:
+                    logger.info(f"SKU {sku} is already linked to item {item_id}")
+                    return response_detail, attempt
+
+                if status_code and status_code not in retryable_statuses:
+                    raise
+
+                if attempt < self.can_invoice_max_retries:
+                    logger.warning(
+                        f"Link SKU {sku} to item {item_id} failed (status={status_code}). "
+                        f"Waiting {self.can_invoice_wait_delay}s before retry "
+                        f"{attempt + 1}/{self.can_invoice_max_retries}"
+                    )
+                    time.sleep(self.can_invoice_wait_delay)
+                    continue
+
+                raise
+
+        return None, self.can_invoice_max_retries
+
+    def _wait_for_invoice_readiness(
+        self, item_id: str, sku: str
+    ) -> tuple[bool, dict[str, Any] | None, int]:
+        """Poll can_invoice endpoint until ready or timeout."""
+        total_retry_count = 0
+        last_response: dict[str, Any] | None = None
+
+        for attempt in range(self.can_invoice_max_retries + 1):
+            try:
+                (is_ready, response), retry_count = self._execute_with_retry(
+                    lambda: self.api_client.verify_invoice_readiness(item_id),
+                    "Verify invoice readiness",
+                    sku,
+                    item_id,
+                )
+                total_retry_count += retry_count
+                last_response = response
+
+                if is_ready:
+                    if attempt > 0:
+                        logger.info(
+                            f"Invoice readiness confirmed for {item_id} "
+                            f"after {attempt} wait cycles"
+                        )
+                    return True, response, total_retry_count + attempt
+
+                if attempt < self.can_invoice_max_retries:
+                    logger.info(
+                        f"Invoice readiness pending for {item_id} (SKU: {sku}). "
+                        f"Waiting {self.can_invoice_wait_delay}s before retry "
+                        f"{attempt + 1}/{self.can_invoice_max_retries}"
+                    )
+                    time.sleep(self.can_invoice_wait_delay)
+                    continue
+
+                return False, response, total_retry_count + attempt
+
+            except Exception as e:
+                status_code = self._extract_status_code(e)
+                is_retryable = (
+                    status_code in self.retry_config.retryable_status_codes
+                    or status_code == 404
+                    or status_code == 0
+                )
+                if not is_retryable or attempt >= self.can_invoice_max_retries:
+                    raise
+                logger.warning(
+                    f"Error verifying invoice readiness for {item_id} (SKU: {sku}): {e}. "
+                    f"Waiting {self.can_invoice_wait_delay}s before retry "
+                    f"{attempt + 1}/{self.can_invoice_max_retries}"
+                )
+                time.sleep(self.can_invoice_wait_delay)
+
+        return False, last_response, total_retry_count + self.can_invoice_max_retries
+
     def submit_fiscal_data_workflow(
         self, item_id: str, fiscal_data: FiscalData
     ) -> FiscalSubmissionResult:
         """Execute complete fiscal data submission workflow.
 
         Workflow:
-        1. Check if item is ready for fiscal data (GET /can_invoice/items/{ITEM_ID})
-        2. If status is false: wait 1 minute and retry (up to max_retries)
-        3. Check if fiscal data exists (GET /items/fiscal_information/{SKU})
-        4. If 200: log exists, skip to verification
-        5. If 404: register new fiscal data (POST /items/fiscal_information)
-        6. Verify invoice readiness (GET /can_invoice/items/{ITEM_ID})
+        1. Check fiscal data existence (GET /items/fiscal_information/{SKU})
+        2. Register fiscal data when missing (POST /items/fiscal_information)
+        3. Link SKU to item (POST /items/fiscal_information/items)
+        4. Poll invoice readiness (GET /can_invoice/items/{ITEM_ID})
 
         Args:
             item_id: Mercado Livre item ID (e.g., MLB1234567890)
@@ -317,10 +416,7 @@ class FiscalService:
                     retry_count=wait_retries,
                 )
 
-            logger.info(
-                f"Item {item_id} (SKU: {sku}) is ready for fiscal data submission "
-                f"(fiscal_information returned data)"
-            )
+            logger.info(f"Fiscal pre-check completed for item {item_id} (SKU: {sku})")
 
         except Exception as e:
             error_msg = f"Failed to verify item readiness for fiscal data: {str(e)}"
@@ -337,6 +433,9 @@ class FiscalService:
 
         # Step 2: Check if fiscal data exists
         check_exists_retry_count = 0
+        registration_retry_count = 0
+        fiscal_status = FiscalSubmissionStatus.ALREADY_EXISTS
+
         try:
             (exists, _), check_exists_retry_count = self._execute_with_retry(
                 lambda: self.api_client.check_fiscal_data_exists(sku),
@@ -344,21 +443,6 @@ class FiscalService:
                 sku,
                 item_id,
             )
-
-            if exists:
-                logger.info(
-                    f"Fiscal data already exists for SKU {sku} (item {item_id}), "
-                    f"skipping registration"
-                )
-                # Skip to verification
-                return self._verify_invoice_readiness(
-                    item_id,
-                    sku,
-                    fiscal_data,
-                    FiscalSubmissionStatus.ALREADY_EXISTS,
-                    wait_retries + check_exists_retry_count,
-                )
-
         except Exception as e:
             error_msg = f"Failed to check fiscal data existence: {str(e)}"
             logger.error(f"{error_msg} for SKU {sku} (item {item_id})")
@@ -373,33 +457,56 @@ class FiscalService:
                 retry_count=wait_retries + check_exists_retry_count,
             )
 
-        # Step 3: Register new fiscal data
-        registration_retry_count = 0
-        try:
-            payload = fiscal_data.to_api_payload()
-            logger.info(f"Registering fiscal data for SKU {sku} (item {item_id})")
-            logger.debug(f"Fiscal payload: {payload}")
-
-            _, registration_retry_count = self._execute_with_retry(
-                lambda: self.api_client.register_fiscal_data(payload),
-                "Register fiscal data",
-                sku,
-                item_id,
-            )
-
-            logger.info(f"Successfully registered fiscal data for SKU {sku} (item {item_id})")
-
-        except Exception as e:
-            error_msg = f"Failed to register fiscal data: {str(e)}"
-            error_code = self._extract_error_code(e)
-            # Try to extract response body for more details on 400 errors
-            error_detail = None
+        # Step 3: Register fiscal data when not found
+        if not exists:
+            fiscal_status = FiscalSubmissionStatus.REGISTERED
             try:
-                if hasattr(e, "response") and e.response is not None:
-                    error_detail = e.response.json()
+                payload = fiscal_data.to_api_payload()
+                logger.info(f"Registering fiscal data for SKU {sku} (item {item_id})")
+                logger.debug(f"Fiscal payload: {payload}")
+
+                _, registration_retry_count = self._execute_with_retry(
+                    lambda: self.api_client.register_fiscal_data(payload),
+                    "Register fiscal data",
+                    sku,
+                    item_id,
+                )
+
+                logger.info(f"Successfully registered fiscal data for SKU {sku} (item {item_id})")
+
+            except Exception as e:
+                error_msg = f"Failed to register fiscal data: {str(e)}"
+                error_code = self._extract_error_code(e)
+                error_detail = self._extract_response_detail(e)
+                if error_detail is not None:
                     error_msg = f"{error_msg} - Response: {error_detail}"
-            except Exception:  # noqa: S110
-                pass  # Best-effort response parsing; error is logged below
+                logger.error(f"{error_msg} for SKU {sku} (item {item_id})")
+                return FiscalSubmissionResult(
+                    success=False,
+                    item_id=item_id,
+                    sku=sku,
+                    status=FiscalSubmissionStatus.FAILED,
+                    fiscal_data=fiscal_data,
+                    response=error_detail,
+                    error_message=error_msg,
+                    error_code=error_code or "REGISTER_ERROR",
+                    retry_count=wait_retries + check_exists_retry_count + registration_retry_count,
+                )
+        else:
+            logger.info(f"Fiscal data already exists for SKU {sku} (item {item_id})")
+
+        total_retry_count = wait_retries + check_exists_retry_count + registration_retry_count
+
+        # Step 4: Link fiscal SKU to published item
+        link_retry_count = 0
+        try:
+            _, link_retry_count = self._wait_for_sku_link(item_id=item_id, sku=sku)
+            total_retry_count += link_retry_count
+        except Exception as e:
+            error_msg = f"Failed to link SKU to item: {str(e)}"
+            error_detail = self._extract_response_detail(e)
+            if error_detail is not None:
+                error_msg = f"{error_msg} - Response: {error_detail}"
             logger.error(f"{error_msg} for SKU {sku} (item {item_id})")
             return FiscalSubmissionResult(
                 success=False,
@@ -409,17 +516,17 @@ class FiscalService:
                 fiscal_data=fiscal_data,
                 response=error_detail,
                 error_message=error_msg,
-                error_code=error_code or "REGISTER_ERROR",
-                retry_count=wait_retries + check_exists_retry_count + registration_retry_count,
+                error_code="SKU_ITEM_LINK_ERROR",
+                retry_count=total_retry_count,
             )
 
-        # Step 4: Verify invoice readiness
+        # Step 5: Verify invoice readiness
         return self._verify_invoice_readiness(
             item_id,
             sku,
             fiscal_data,
-            FiscalSubmissionStatus.REGISTERED,
-            wait_retries + check_exists_retry_count + registration_retry_count,
+            fiscal_status,
+            total_retry_count,
         )
 
     def _verify_invoice_readiness(
@@ -443,12 +550,7 @@ class FiscalService:
             FiscalSubmissionResult
         """
         try:
-            (is_ready, response), retry_count = self._execute_with_retry(
-                lambda: self.api_client.verify_invoice_readiness(item_id),
-                "Verify invoice readiness",
-                sku,
-                item_id,
-            )
+            is_ready, response, retry_count = self._wait_for_invoice_readiness(item_id, sku)
 
             total_retry_count = previous_retry_count + retry_count
 
@@ -463,21 +565,21 @@ class FiscalService:
                     response=response,
                     retry_count=total_retry_count,
                 )
-            else:
-                logger.warning(
-                    f"Item {item_id} (SKU: {sku}) is not ready for invoicing: {response}"
-                )
-                return FiscalSubmissionResult(
-                    success=False,
-                    item_id=item_id,
-                    sku=sku,
-                    status=FiscalSubmissionStatus.FAILED,
-                    fiscal_data=fiscal_data,
-                    response=response,
-                    error_message="Item not ready for invoice generation",
-                    error_code="NOT_INVOICE_READY",
-                    retry_count=total_retry_count,
-                )
+
+            logger.warning(
+                f"Invoice readiness still pending for item {item_id} (SKU: {sku}): {response}"
+            )
+            return FiscalSubmissionResult(
+                success=True,
+                item_id=item_id,
+                sku=sku,
+                status=FiscalSubmissionStatus.PENDING_VERIFICATION,
+                fiscal_data=fiscal_data,
+                response=response,
+                error_message="Invoice readiness pending verification",
+                error_code="INVOICE_PENDING",
+                retry_count=total_retry_count,
+            )
 
         except Exception as e:
             error_msg = f"Failed to verify invoice readiness: {str(e)}"
