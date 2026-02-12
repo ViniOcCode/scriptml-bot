@@ -481,13 +481,19 @@ dimension_patterns:
     - "comprimento"
     - "depth"
     - "profundidade"
+  # Keywords that indicate weight attributes
+  weight_keywords:
+    - "weight"
+    - "peso"
   
   # Regex patterns for dimension values
   numeric_only: '^\\s*\\d+(?:[\\.,]\\d+)?\\s*$'
-  unit_marker: '\\b(cm|mm|m|in|pouce|polegadas)\\b'
+  unit_marker: '\\b(cm|mm|m|in|pouce|polegadas|g|kg)\\b'
   
   # Default unit to append when none specified
   default_unit: "cm"
+  weight_default_unit: "kg"
+  package_weight_default_unit: "g"
 
 # =============================================================================
 # HEADER DETECTION PATTERNS

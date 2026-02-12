@@ -233,6 +233,10 @@ class MLApiClient:
         """
         return self.get("/users/me")
 
+    def get_user_shipping_preferences(self, user_id: str) -> dict[str, Any]:
+        """Get shipping preferences for a specific seller."""
+        return self.get(f"/users/{user_id}/shipping_preferences")
+
     def upload_image(self, image_path: str) -> dict[str, Any]:
         """Upload an image with retry on transient errors."""
         from pathlib import Path
@@ -323,6 +327,29 @@ class MLApiClient:
         """
         endpoint = "/items/fiscal_information"
         return self.post(endpoint, json=fiscal_data)
+
+    def link_fiscal_sku_to_item(
+        self,
+        sku: str,
+        item_id: str,
+        variation_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Link a fiscal SKU to a published item.
+
+        Args:
+            sku: Registered fiscal SKU
+            item_id: Mercado Livre item ID (e.g., MLB1234567890)
+            variation_id: Optional variation ID
+
+        Returns:
+            API response
+        """
+        validate_item_id(item_id)
+        payload: dict[str, Any] = {"sku": sku, "item_id": item_id}
+        if variation_id is not None:
+            payload["variation_id"] = variation_id
+        endpoint = "/items/fiscal_information/items"
+        return self.post(endpoint, json=payload)
 
     def verify_invoice_readiness(self, item_id: str) -> tuple[bool, dict[str, Any] | None]:
         """Verify if an item is ready for invoice generation.

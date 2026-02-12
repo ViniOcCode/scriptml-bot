@@ -5,11 +5,17 @@ to Mercado Livre API attribute definitions.
 """
 
 import logging
+import re
 from typing import Any
 
 from mercadolivre_upload.shared.utils.text_utils import TextNormalizer
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_column_name(column_name: str) -> str:
+    """Normalize column names to a canonical form used by explicit mappings."""
+    return re.sub(r"[^a-zA-Z0-9_\s]", "", str(column_name)).strip().lower()
 
 
 class AttributeMapper:
@@ -115,19 +121,18 @@ class AttributeMapper:
         # 1. First, apply explicit mappings (bypass fuzzy matching)
         # Normalize explicit mapping keys to match parser's column cleaning
         # Parser uses: re.sub(r"[^a-zA-Z0-9_\s]", "", col_str).strip()
-        import re
 
         normalized_explicit_mappings = {}
         if explicit_mappings:
             for col, mapping_config in explicit_mappings.items():
                 # Apply same cleaning as parser: remove non-alphanumeric chars (except spaces)
-                normalized_col = re.sub(r"[^a-zA-Z0-9_\s]", "", col).strip().lower()
+                normalized_col = _normalize_column_name(col)
                 normalized_explicit_mappings[normalized_col] = mapping_config
 
         if normalized_explicit_mappings:
             for col, value in product_attributes.items():
                 # Apply same cleaning as parser
-                normalized_col = re.sub(r"[^a-zA-Z0-9_\s]", "", col).strip().lower()
+                normalized_col = _normalize_column_name(col)
                 if normalized_col in normalized_explicit_mappings:
                     mapping_config = normalized_explicit_mappings[normalized_col]
                     target = mapping_config.get("target", "attribute")
@@ -243,3 +248,25 @@ class AttributeMapper:
                 )
 
         return ml_attributes_list, sale_terms_list
+
+    def get_explicitly_mapped_columns(
+        self,
+        product_attributes: dict[str, str],
+        explicit_mappings: dict[str, dict[str, Any]] | None = None,
+    ) -> set[str]:
+        """Return spreadsheet columns that are covered by explicit mappings."""
+        if not explicit_mappings:
+            return set()
+
+        normalized_explicit = {
+            _normalize_column_name(column): mapping
+            for column, mapping in explicit_mappings.items()
+            if mapping
+        }
+
+        mapped_columns = set()
+        for column in product_attributes:
+            if _normalize_column_name(column) in normalized_explicit:
+                mapped_columns.add(column)
+
+        return mapped_columns

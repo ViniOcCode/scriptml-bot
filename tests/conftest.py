@@ -51,6 +51,30 @@ def mock_credentials():
         del os.environ["ML_REDIRECT_URI"]
 
 
+@pytest.fixture(autouse=True)
+def isolate_token_path_for_tests():
+    """
+    Redireciona tokens de teste para tests/tokens.test.json para evitar
+    sobrescrever tokens.json real do projeto.
+    """
+    token_path = project_root / "tests" / "tokens.test.json"
+    original_token_path = os.environ.get("MERCADO_LIVRE_TOKEN_PATH")
+    os.environ["MERCADO_LIVRE_TOKEN_PATH"] = str(token_path)
+
+    if token_path.exists():
+        token_path.unlink()
+
+    yield
+
+    if token_path.exists():
+        token_path.unlink()
+
+    if original_token_path is not None:
+        os.environ["MERCADO_LIVRE_TOKEN_PATH"] = original_token_path
+    elif "MERCADO_LIVRE_TOKEN_PATH" in os.environ:
+        del os.environ["MERCADO_LIVRE_TOKEN_PATH"]
+
+
 @pytest.fixture
 def mock_auth_manager():
     """

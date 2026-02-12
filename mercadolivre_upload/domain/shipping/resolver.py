@@ -45,6 +45,10 @@ class ShippingModeProviderPort(Protocol):
         """Get current user info with shipping modes."""
         ...
 
+    def get_user_shipping_preferences(self, user_id: str) -> dict[str, Any]:
+        """Get seller shipping preferences including enabled modes."""
+        ...
+
 
 class ShippingResolver:
     """Resolver for determining best shipping mode.
@@ -100,8 +104,8 @@ class ShippingResolver:
     def _get_available_modes(self) -> list[str]:
         """Fetch and cache user's available shipping modes from ML API.
 
-        Calls /users/me endpoint to determine which shipping modes the user
-        has access to based on their Mercado Envios status and shipping settings.
+        Uses /users/{id}/shipping_preferences as the source of truth.
+        Falls back to /users/me shipping_modes when preferences are unavailable.
 
         Returns:
             List of available shipping mode IDs (me1, me2, or empty if none)
@@ -112,50 +116,42 @@ class ShippingResolver:
         try:
             user_info = self.provider.get_users_me()
             logger.debug(f"User info from ML API: {user_info}")
+            user_id = user_info.get("id")
 
             available_modes: list[str] = []
+            if user_id:
+                try:
+                    shipping_preferences = self.provider.get_user_shipping_preferences(str(user_id))
+                    pref_modes = shipping_preferences.get("modes", [])
+                    if isinstance(pref_modes, list):
+                        available_modes = [mode for mode in pref_modes if mode in ["me1", "me2"]]
+                    logger.info(
+                        "Available shipping modes from shipping_preferences: " f"{available_modes}"
+                    )
+                except Exception as e:
+                    logger.warning(f"Could not fetch shipping_preferences for user {user_id}: {e}")
 
-            # Check if user has accepted Mercado Envios terms
-            mercadoenvios_status = user_info.get("status", {}).get("mercadoenvios")
-            logger.info(f"Mercado Envios status: {mercadoenvios_status}")
+            if not available_modes:
+                user_shipping_modes = user_info.get("shipping_modes", [])
+                if isinstance(user_shipping_modes, list):
+                    available_modes = [
+                        mode for mode in user_shipping_modes if mode in ["me1", "me2"]
+                    ]
+                logger.info(f"Available shipping modes from /users/me: {available_modes}")
 
-            # Get user's shipping modes from the API response
-            # The user can have multiple shipping modes available
-            user_shipping_modes = user_info.get("shipping_modes", [])
-
-            if user_shipping_modes:
-                # Use the shipping modes returned by the API
-                available_modes = [mode for mode in user_shipping_modes if mode in ["me1", "me2"]]
-                logger.info(f"Available shipping modes from API: {available_modes}")
-            elif mercadoenvios_status == "accepted":
-                # User has accepted Mercado Envios but no explicit modes listed
-                # Default to both me1 and me2 being available
-                available_modes = ["me1", "me2"]
-                logger.info("Mercado Envios accepted, defaulting to me1 and me2")
+            # Cache only real discovered modes to avoid pinning transient empty results.
+            if available_modes:
+                self._cached_modes = available_modes
             else:
-                # Check if user has any shipping configuration that indicates mode availability
-                seller_reputation = user_info.get("seller_reputation", {})
-                power_seller_status = seller_reputation.get("power_seller_status")
-
-                # Power sellers typically have access to me2
-                if power_seller_status:
-                    available_modes = ["me2"]
-                    logger.info(f"Power seller status: {power_seller_status}, enabling me2")
-                else:
-                    # For non-power sellers, try me1 first
-                    available_modes = ["me1"]
-                    logger.info("Non-power seller, defaulting to me1")
-
-            self._cached_modes = available_modes if available_modes else ["me1", "me2"]
-            logger.info(f"Final available shipping modes: {self._cached_modes}")
-            return self._cached_modes
+                self._cached_modes = None
+            logger.info(f"Final available shipping modes: {available_modes}")
+            return available_modes
 
         except Exception as e:
             logger.warning(f"Could not fetch user shipping status: {e}")
-            # Default to trying me1 first, then me2
-            self._cached_modes = ["me1", "me2"]
-            logger.info(f"Using default shipping modes due to API error: {self._cached_modes}")
-            return self._cached_modes
+            self._cached_modes = None
+            logger.info("Using empty available modes due to API error")
+            return []
 
     def clear_cache(self) -> None:
         """Clear cached shipping modes."""

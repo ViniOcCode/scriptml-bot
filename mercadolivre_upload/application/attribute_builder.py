@@ -73,26 +73,28 @@ class AttributeBuilderService:
         # 2. Map product attributes using cache-first strategy
         ml_attributes: list[dict[str, Any]] = []
         sale_terms: list[dict[str, Any]] = []
-        cache_attributes: list[dict[str, Any]] = []
+        cache_mapped_keys: set[str] = set()
+        explicit_mappings = self.config.get("explicit_mappings", {})
+        attribute_mapper = AttributeMapper(similarity_threshold=0.7)
 
-        # Try cache mapper first if available
+        explicit_mapped_keys = attribute_mapper.get_explicitly_mapped_columns(
+            product.attributes,
+            explicit_mappings=explicit_mappings,
+        )
+        cache_candidates = {
+            key: value
+            for key, value in product.attributes.items()
+            if key not in explicit_mapped_keys
+        }
+
+        # Try cache mapper first for non-explicit mappings
         if self._cache_mapper is not None:
-            cache_attributes = self._map_attributes_with_cache(product.attributes)
+            cache_attributes, cache_mapped_keys = self._map_attributes_with_cache(cache_candidates)
             if cache_attributes:
                 ml_attributes.extend(cache_attributes)
                 logger.info(f"Mapped {len(cache_attributes)} attributes via cache mapper")
 
         # Apply explicit mappings and fuzzy matching for remaining attributes
-        cache_mapped_keys: set[str] = set()
-        if self._cache_mapper is not None and cache_attributes:
-            # Track which Excel headers were successfully mapped via cache
-            for excel_header, excel_value in product.attributes.items():
-                if not excel_value:
-                    continue
-                attr = self._cache_mapper.find_attribute_by_name(excel_header)
-                if attr and attr.get("id"):
-                    cache_mapped_keys.add(excel_header)
-
         # Filter out cache-mapped attributes for fuzzy processing
         remaining_attributes = {
             k: v for k, v in product.attributes.items() if k not in cache_mapped_keys
@@ -100,8 +102,6 @@ class AttributeBuilderService:
 
         if remaining_attributes:
             logger.info(f"Falling back to fuzzy mapper for {len(remaining_attributes)} attributes")
-            attribute_mapper = AttributeMapper(similarity_threshold=0.7)
-            explicit_mappings = self.config.get("explicit_mappings", {})
             fuzzy_attributes, fuzzy_sale_terms = attribute_mapper.map_product_attributes(
                 remaining_attributes,
                 [meta.__dict__ for meta in attr_metadata],
@@ -167,12 +167,16 @@ class AttributeBuilderService:
             )
 
             conditional_ids = {
-                attr.get("id")
+                attr_id
                 for attr in conditional_attrs
-                if isinstance(attr, dict) and attr.get("id")
+                if isinstance(attr, dict)
+                for attr_id in [attr.get("id")]
+                if isinstance(attr_id, str) and attr_id
             }
             existing_ids = {a["id"] for a in final_attr_dicts if "id" in a}
-            missing = sorted([attr_id for attr_id in conditional_ids if attr_id not in existing_ids])
+            missing = sorted(
+                [attr_id for attr_id in conditional_ids if attr_id not in existing_ids]
+            )
 
             if missing:
                 message = f"Missing conditional attributes: {', '.join(missing)}"
@@ -183,31 +187,31 @@ class AttributeBuilderService:
 
         return final_attr_dicts, sale_terms, warnings, errors
 
-    def _map_attributes_with_cache(self, attributes: dict[str, Any]) -> list[dict[str, Any]]:
+    def _map_attributes_with_cache(
+        self, attributes: dict[str, Any]
+    ) -> tuple[list[dict[str, Any]], set[str]]:
         """Map attributes using cache mapper.
 
         Args:
             attributes: Product attributes from Excel
 
         Returns:
-            List of mapped ML attributes
+            Tuple of mapped ML attributes and mapped spreadsheet headers
         """
         if not self._cache_mapper:
-            return []
+            return [], set()
 
         mapped = []
+        mapped_headers: set[str] = set()
         for header, value in attributes.items():
             if not value:
                 continue
 
             attr = self._cache_mapper.find_attribute_by_name(header)
             if attr and attr.get("id"):
-                mapped.append(
-                    {
-                        "id": attr["id"],
-                        "value_name": str(value),
-                    }
-                )
+                payload = self._cache_mapper.map_value(str(attr["id"]), str(value))
+                mapped.append(payload)
+                mapped_headers.add(header)
                 logger.debug(f"Cache mapped: {header} -> {attr['id']}")
 
-        return mapped
+        return mapped, mapped_headers

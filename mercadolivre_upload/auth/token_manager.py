@@ -104,16 +104,30 @@ class TokenManager:
         if self.is_token_expired():
             if not auto_refresh:
                 raise TokenExpiredError("Access token is expired")
-
-            refresh_token = tokens.get("refresh_token")
-            if not refresh_token:
-                raise TokenExpiredError("No refresh token available")
-
-            new_tokens = self.oauth_handler.refresh_token(refresh_token)
-            self.save_tokens(new_tokens)
-            tokens = new_tokens
+            tokens = self.refresh_token()
 
         return tokens["access_token"]  # type: ignore[no-any-return]
+
+    def refresh_token(self) -> dict[str, Any]:
+        """Refresh and persist tokens using the current refresh token.
+
+        Returns:
+            Updated token payload.
+
+        Raises:
+            TokenExpiredError: If no refresh token is available.
+            OAuthError: If the OAuth provider rejects the refresh.
+        """
+        tokens = self.load_tokens()
+        refresh_token_value = tokens.get("refresh_token")
+        if not refresh_token_value:
+            raise TokenExpiredError("No refresh token available")
+
+        new_tokens = self.oauth_handler.refresh_token(refresh_token_value)
+        if "user_id" not in new_tokens and tokens.get("user_id") is not None:
+            new_tokens["user_id"] = tokens["user_id"]
+        self.save_tokens(new_tokens)
+        return new_tokens
 
     def get_refresh_token(self) -> str:
         """Get the current refresh token.
@@ -203,8 +217,10 @@ class TokenManager:
             TokenExpiredError: If token is expired and refresh fails
             AuthError: If not authenticated
         """
-        if not self.is_authenticated():
-            raise AuthError("Not authenticated")
+        try:
+            self.load_tokens()
+        except FileNotFoundError as err:
+            raise AuthError("Not authenticated") from err
         return self.get_access_token(auto_refresh=True)
 
     def logout(self) -> None:
