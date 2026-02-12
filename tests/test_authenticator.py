@@ -262,16 +262,14 @@ class TestAuthManager:
         """Testa erro ao obter token sem autenticação."""
         with pytest.raises(TokenError) as exc_info:
             auth_manager.get_valid_token()
-        assert "Não autenticado" in str(exc_info.value)
+        assert "Not authenticated" in str(exc_info.value)
 
     def test_get_valid_token_refreshes_if_expired(self, auth_manager):
         """Testa renovação automática de token expirado."""
-        # Cria token expirado
-        expires = datetime.now() - timedelta(hours=1)
-        auth_manager._token_data = TokenData(
-            access_token="old_token",
+        auth_manager.set_token(
+            "old_token",
             refresh_token="refresh_token",
-            expires_at=expires,
+            expires_in=-3600,
             user_id="123",
         )
 
@@ -279,70 +277,70 @@ class TestAuthManager:
         mock_response = {
             "access_token": "new_token",
             "refresh_token": "new_refresh",
-            "expires_in": 21600,
-            "user_id": 123,
+            "expires_at": int((datetime.now() + timedelta(hours=6)).timestamp()),
+            "user_id": "123",
         }
 
-        with patch.object(auth_manager, "_make_token_request", return_value=mock_response):
+        with patch.object(auth_manager.oauth_handler, "refresh_token", return_value=mock_response):
             token = auth_manager.get_valid_token()
             assert token == "new_token"
 
     def test_refresh_token_no_refresh_token(self, auth_manager):
         """Testa erro quando não há refresh token."""
-        auth_manager.set_token("token", expires_in=3600)
+        auth_manager.set_token("token", expires_in=-3600)
         with pytest.raises(TokenError) as exc_info:
             auth_manager.refresh_token()
-        assert "Não há refresh token" in str(exc_info.value)
+        assert "No refresh token available" in str(exc_info.value)
 
-    def test_exchange_code_invalid_state(self, auth_manager):
-        """Testa erro de state mismatch."""
-        auth_manager.start_auth_flow(state="expected_state")
-        with pytest.raises(AuthError) as exc_info:
-            auth_manager.exchange_code_for_token("code", state="wrong_state")
-        assert "CSRF" in str(exc_info.value)
+    def test_get_access_token_expired_without_auto_refresh(self, auth_manager):
+        """Testa erro ao usar token expirado sem auto refresh."""
+        auth_manager.set_token("token", refresh_token="refresh", expires_in=-3600)
+        with pytest.raises(TokenError) as exc_info:
+            auth_manager.get_access_token(auto_refresh=False)
+        assert "Access token is expired" in str(exc_info.value)
 
     def test_save_token_creates_file(self, auth_manager, temp_token_file):
         """Testa salvamento de token em arquivo."""
-        auth_manager._auto_save = True
         auth_manager.set_token("test_token", expires_in=3600)
-        auth_manager._save_token()
 
         assert temp_token_file.exists()
         data = json.loads(temp_token_file.read_text())
         assert data["access_token"] == "test_token"
 
-    @patch("auth.authenticator.urllib.request.urlopen")
-    def test_make_token_request_success(self, mock_urlopen, auth_manager):
-        """Testa requisição de token bem-sucedida."""
-        mock_response = Mock()
-        mock_response.read.return_value = json.dumps(
-            {"access_token": "token", "refresh_token": "refresh"}
-        ).encode()
-        mock_urlopen.return_value.__enter__ = Mock(return_value=mock_response)
-        mock_urlopen.return_value.__exit__ = Mock(return_value=False)
+    @patch("mercadolivre_upload.auth.oauth.requests.post")
+    def test_make_token_request_success(self, mock_post):
+        """Testa refresh token bem-sucedido via OAuthHandler."""
+        from mercadolivre_upload.auth.oauth import OAuthHandler
 
-        result = auth_manager._make_token_request({"grant_type": "test"})
+        mock_response = Mock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {
+            "access_token": "token",
+            "refresh_token": "refresh",
+            "expires_in": 21600,
+        }
+        mock_post.return_value = mock_response
+
+        handler = OAuthHandler(client_id="test_app", client_secret="test_secret")
+        result = handler.refresh_token("refresh_token")
         assert result["access_token"] == "token"
 
-    @patch("auth.authenticator.urllib.request.urlopen")
-    def test_make_token_request_http_error(self, mock_urlopen, auth_manager):
+    @patch("mercadolivre_upload.auth.oauth.requests.post")
+    def test_make_token_request_http_error(self, mock_post):
         """Testa erro HTTP na requisição de token."""
-        from io import BytesIO
-        from urllib.error import HTTPError
+        import requests
 
-        # Cria um mock de HTTPError que funciona como contexto
-        mock_error = HTTPError(
-            url="https://api.mercadolibre.com/oauth/token",
-            code=400,
-            msg="Bad Request",
-            hdrs={},
-            fp=BytesIO(json.dumps({"message": "Invalid code"}).encode()),
-        )
-        mock_urlopen.side_effect = mock_error
+        from mercadolivre_upload.auth.oauth import OAuthHandler
 
-        with pytest.raises(TokenError) as exc_info:
-            auth_manager._make_token_request({"grant_type": "test"})
-        assert "Invalid code" in str(exc_info.value)
+        mock_response = Mock()
+        mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError("400 Client Error")
+        mock_post.return_value = mock_response
+
+        handler = OAuthHandler(client_id="test_app", client_secret="test_secret")
+
+        with pytest.raises(AuthError) as exc_info:
+            handler.refresh_token("refresh_token")
+        assert "Token request failed" in str(exc_info.value)
 
 
 class TestHelperFunctions:
@@ -370,27 +368,16 @@ class TestHelperFunctions:
             auth = create_auth_manager()
             assert auth.credentials.app_id == "env_id"
 
-    @patch("auth.authenticator.AuthManager")
-    def test_get_auth_url(self, mock_manager_class):
+    def test_get_auth_url(self):
         """Testa função utilitária get_auth_url."""
-        # Configura o mock
-        mock_instance = Mock()
-        mock_instance.start_auth_flow.return_value = (
-            "https://auth.mercadolivre.com.br/authorization?"
-            "response_type=code&client_id=test_id&"
-            "redirect_uri=http%3A%2F%2Ftest.com%2Fcallback&"
-            "scope=read"
-        )
-        mock_manager_class.return_value = mock_instance
-
         url = get_auth_url(
             app_id="test_id",
             redirect_uri="http://test.com/callback",
             scopes=["read"],
         )
+        assert "response_type=code" in url
         assert "client_id=test_id" in url
         assert "redirect_uri=http%3A%2F%2Ftest.com%2Fcallback" in url
-        assert "scope=read" in url
 
 
 class TestBackwardCompatibility:

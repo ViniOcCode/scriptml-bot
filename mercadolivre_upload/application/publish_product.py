@@ -34,9 +34,15 @@ DIMENSION_KEYWORDS = [
     "depth",
     "profundidade",
 ]
+WEIGHT_KEYWORDS = [
+    "weight",
+    "peso",
+]
 DIMENSION_NUMERIC_ONLY_PATTERN = r"^\s*\d+(?:[\.,]\d+)?\s*$"
-DIMENSION_UNIT_MARKER_PATTERN = r"\b(cm|mm|m|in|pouce|polegadas)\b"
+DIMENSION_UNIT_MARKER_PATTERN = r"\b(cm|mm|m|in|pouce|polegadas|g|kg)\b"
 DIMENSION_DEFAULT_UNIT = "cm"
+WEIGHT_DEFAULT_UNIT = "kg"
+PACKAGE_WEIGHT_DEFAULT_UNIT = "g"
 
 
 class PublishProductUseCase:
@@ -72,7 +78,8 @@ class PublishProductUseCase:
             min_attribute_score: Minimum score for attributes (0-100)
             enable_feedback: Enable validation feedback tracking
             enable_fiscal_submission: Whether to submit fiscal data after publishing
-            cache_dir: Directory containing category attribute cache files (deprecated, use attribute_cache)
+            cache_dir: Directory containing category attribute cache files
+                (deprecated, use attribute_cache)
             attribute_cache: AttributeCache instance for cached attribute mapping (optional)
         """
         self.category_resolver = category_resolver
@@ -366,7 +373,7 @@ class PublishProductUseCase:
             self._cache_mapper = CachedAttributeMapper(self.attribute_cache, category_id)
             self._current_category_id = category_id
             logger.info(f"Cache mapper initialized successfully for category {category_id}")
-            
+
             # Pass to attribute builder for use
             self._attribute_builder.set_cache_mapper(self._cache_mapper)
         except ValueError as e:
@@ -804,7 +811,12 @@ class PublishProductUseCase:
         # Get dimension patterns from config
         dim_config = self.config.get("dimension_patterns") or {}
         keywords = dim_config.get("keywords", DIMENSION_KEYWORDS)
+        weight_keywords = dim_config.get("weight_keywords", WEIGHT_KEYWORDS)
         default_unit = dim_config.get("default_unit", DIMENSION_DEFAULT_UNIT)
+        weight_default_unit = dim_config.get("weight_default_unit", WEIGHT_DEFAULT_UNIT)
+        package_weight_default_unit = dim_config.get(
+            "package_weight_default_unit", PACKAGE_WEIGHT_DEFAULT_UNIT
+        )
         numeric_pattern = dim_config.get("numeric_only", DIMENSION_NUMERIC_ONLY_PATTERN)
         unit_pattern = dim_config.get("unit_marker", DIMENSION_UNIT_MARKER_PATTERN)
 
@@ -817,18 +829,43 @@ class PublishProductUseCase:
                 name = str(attr.get("name", "")).lower()
             except Exception:
                 name = ""
+            try:
+                attr_id = str(attr.get("id", "")).upper()
+            except Exception:
+                attr_id = ""
+
+            source_text = f"{name} {attr_id.lower()}".strip()
+            is_weight = (
+                any(keyword in source_text for keyword in weight_keywords)
+                or attr_id == "WEIGHT"
+                or attr_id == "SELLER_PACKAGE_WEIGHT"
+            )
+            is_dimension = (
+                any(keyword in source_text for keyword in keywords)
+                or attr_id in {"WIDTH", "HEIGHT", "LENGTH", "DEPTH"}
+                or attr_id
+                in {"SELLER_PACKAGE_WIDTH", "SELLER_PACKAGE_HEIGHT", "SELLER_PACKAGE_LENGTH"}
+            )
+
+            if not (is_weight or is_dimension):
+                continue
+
+            target_unit = default_unit
+            if is_weight:
+                target_unit = (
+                    package_weight_default_unit
+                    if attr_id == "SELLER_PACKAGE_WEIGHT"
+                    else weight_default_unit
+                )
 
             # Normalize dimension-like attributes using config keywords
-            if name and any(k in name for k in keywords):
-                val = attr.get("value_name")
-                if isinstance(val, (int, float)):
-                    attr["value_name"] = f"{val} {default_unit}"
-                elif (
-                    isinstance(val, str) and numeric_only.match(val) and not unit_marker.search(val)
-                ):
-                    # Convert comma decimals to dot (ML accepts dot) then append default unit
-                    normalized = val.strip().replace(",", ".")
-                    attr["value_name"] = f"{normalized} {default_unit}"
+            val = attr.get("value_name")
+            if isinstance(val, (int, float)):
+                attr["value_name"] = f"{val} {target_unit}"
+            elif isinstance(val, str) and numeric_only.match(val) and not unit_marker.search(val):
+                # Convert comma decimals to dot (ML accepts dot) then append default unit
+                normalized = val.strip().replace(",", ".")
+                attr["value_name"] = f"{normalized} {target_unit}"
 
     def _submit_fiscal_batch(self, pending_fiscal: list[tuple[str, FiscalData]]) -> None:
         """Submit fiscal data for multiple items using the fiscal service.
