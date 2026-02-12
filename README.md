@@ -24,6 +24,13 @@ A CLI tool to prepare, validate and publish product listings to Mercado Libre fr
   ml-upload cache --help
   ```
 
+## Authentication flow
+
+- OAuth2 authorization/code exchange is done manually outside the CLI.
+- Store the returned tokens in `tokens.json` (or set `MERCADO_LIVRE_TOKEN_PATH`).
+- The app uses `TokenManager` to auto-refresh access tokens when expired.
+- After refresh, always persist the newest `refresh_token` returned by Mercado Libre.
+
 ## Build, test & lint
 
 - Full test suite:
