@@ -45,6 +45,8 @@ CLAUDE.md
 AGENTS/
 .github/*
 !.github/copilot-instructions.md
+!.github/agents/
+!.github/agents/*.md
 .claude/*
 .benchmarks/*
 .ruff_cache/
