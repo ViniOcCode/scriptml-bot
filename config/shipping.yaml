@@ -6,10 +6,10 @@ shipping:
   default_mode: "not_specified"
 
   # Mode priority for auto-selection (higher priority first)
-  # me1 is prioritized over me2 as requested
+  # ME2 should be preferred when both are available
   mode_priority:
-    - "me1"
     - "me2"
+    - "me1"
 
   # Configuration for each shipping mode
   # Full ML API format support:
@@ -36,7 +36,7 @@ shipping:
     me1:
       # Mercado Envios mode 1 - Seller ships, ML handles delivery
       local_pick_up: false
-      logistic_type: "drop_off"
+      logistic_type: "default"
       methods: []
       tags: []
       dimensions: null
@@ -50,5 +50,5 @@ shipping:
       methods: []
       tags: []
       dimensions: null
-      free_shipping: true
+      free_shipping: false
       store_pick_up: false

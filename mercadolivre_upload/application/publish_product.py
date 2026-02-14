@@ -43,6 +43,13 @@ DIMENSION_UNIT_MARKER_PATTERN = r"\b(cm|mm|m|in|pouce|polegadas|g|kg)\b"
 DIMENSION_DEFAULT_UNIT = "cm"
 WEIGHT_DEFAULT_UNIT = "kg"
 PACKAGE_WEIGHT_DEFAULT_UNIT = "g"
+DEFAULT_NA_SKIP_TAGS = {
+    "required",
+    "new_required",
+    "conditional_required",
+    "catalog_listing_required",
+    "allow_variations",
+}
 
 
 class PublishProductUseCase:
@@ -127,6 +134,8 @@ class PublishProductUseCase:
 
         # Pending fiscal data for batch submission
         self._pending_fiscal: list[tuple[str, FiscalData]] = []
+        self._available_listing_types_cache: dict[str, list[str]] = {}
+        self._category_sale_terms_cache: dict[str, dict[str, dict[str, Any]]] = {}
 
     def execute(
         self, products: list[Product | dict[str, Any]], category_name: str
@@ -435,30 +444,33 @@ class PublishProductUseCase:
         # Load defaults from config (config is the single source of truth)
         core_defaults = self.config.get("core_item_fields", {}).get("defaults", {})
 
-        # Build sale_terms: use explicit mappings if available, otherwise use config defaults
-        if sale_terms_from_mapping:
-            sale_terms = sale_terms_from_mapping
-            sale_term_ids = [st.get("id") for st in sale_terms]
-            logger.info(f"Using sale_terms from explicit column mappings: {sale_term_ids}")
-        else:
-            # Use config defaults only - no hardcoded fallbacks
-            sale_terms = core_defaults.get("sale_terms", [])
-            logger.info("Using default sale_terms from config")
-
         # Check if listing_type_id was explicitly mapped from spreadsheet
-        explicit_listing_type = None
+        explicit_listing_type: str | None = None
         for attr in ml_attributes:
             if "_listing_type_id" in attr:
-                explicit_listing_type = attr.pop("_listing_type_id")
+                mapped_listing_type = attr.pop("_listing_type_id")
+                if isinstance(mapped_listing_type, str) and mapped_listing_type:
+                    explicit_listing_type = mapped_listing_type
                 break
 
-        # Determine listing_type_id: explicit > has_pictures_default > free
-        if explicit_listing_type:
-            listing_type_id = explicit_listing_type
-        elif pictures:
-            listing_type_id = core_defaults.get("listing_type_id")
-        else:
-            listing_type_id = "free"
+        available_listing_types = self._get_available_listing_type_ids(category_id)
+        listing_type_id = self._resolve_listing_type_id(
+            category_id=category_id,
+            explicit_listing_type=explicit_listing_type,
+            default_listing_type=core_defaults.get("listing_type_id"),
+            has_pictures=bool(pictures),
+            available_listing_types=available_listing_types,
+        )
+
+        default_sale_terms = core_defaults.get("sale_terms", [])
+        if not isinstance(default_sale_terms, list):
+            default_sale_terms = []
+
+        sale_terms = self._resolve_sale_terms(
+            category_id=category_id,
+            sale_terms_from_mapping=sale_terms_from_mapping,
+            default_sale_terms=default_sale_terms,
+        )
 
         item_condition_config = core_defaults.get("item_condition", {})
         if isinstance(item_condition_config, dict):
@@ -496,7 +508,6 @@ class PublishProductUseCase:
             "buying_mode": core_defaults.get("buying_mode"),
             "condition": product.condition,
             "listing_type_id": listing_type_id,
-            "description": {"plain_text": product.description},
             "pictures": pictures if pictures else [],
             "attributes": ml_attributes,
             "shipping": shipping_config,
@@ -524,10 +535,27 @@ class PublishProductUseCase:
         # Normalize attributes before validation/publish (ensure units)
         self._normalize_item_attributes(item)
 
-        # DEBUG: Log full item payload (with sensitive data redacted if needed)
-        debug_item = item.copy()
-        debug_item.pop("description", None)  # Remove long description for cleaner logs
-        logger.debug(f"Full item payload for {product.sku}: {debug_item}")
+        conditional_required_ids = self._inject_optional_na_attributes(
+            category_id=category_id,
+            item=item,
+            sku=product.sku,
+            description=product.description,
+        )
+
+        missing_conditional_attributes = self._get_missing_conditional_attributes(
+            category_id=category_id,
+            item=item,
+            description=product.description,
+            conditional_required_ids=conditional_required_ids,
+        )
+        if missing_conditional_attributes:
+            message = f"Missing conditional attributes: {', '.join(missing_conditional_attributes)}"
+            logger.error(f"{product.sku}: {message}")
+            self.errors.append(f"{product.sku}: {message}")
+            self.failed += 1
+            return False
+
+        logger.debug(f"Full item payload for {product.sku}: {item}")
 
         # Validate
         validation_result = None
@@ -615,6 +643,14 @@ class PublishProductUseCase:
             logger.info(f"Published {product.sku}: {published_item_id}")
             if cbt_item_id and cbt_item_id != published_item_id:
                 logger.debug(f"CBT parent item ID for {product.sku}: {cbt_item_id}")
+
+            description_text = product.description.strip()
+            if published_item_id and description_text:
+                self._publish_item_description(
+                    item_id=published_item_id,
+                    description=description_text,
+                    sku=product.sku,
+                )
 
             self.published += 1
 
@@ -747,6 +783,353 @@ class PublishProductUseCase:
             return self.feedback.get_problematic_attributes()
         return {}
 
+    def _get_available_listing_type_ids(self, category_id: str) -> list[str]:
+        """Fetch available listing types for current seller and category."""
+        cached = self._available_listing_types_cache.get(category_id)
+        if cached is not None:
+            return cached
+
+        getter = getattr(self.publisher, "get_available_listing_types", None)
+        if not callable(getter):
+            return []
+
+        try:
+            listing_types = getter(category_id)
+        except Exception as e:
+            logger.warning(f"Could not fetch available listing types for {category_id}: {e}")
+            return []
+
+        listing_type_ids: list[str] = []
+        if isinstance(listing_types, list):
+            for listing_type in listing_types:
+                if not isinstance(listing_type, dict):
+                    continue
+                listing_type_id = listing_type.get("id")
+                if isinstance(listing_type_id, str) and listing_type_id:
+                    listing_type_ids.append(listing_type_id)
+
+        deduped_listing_type_ids = list(dict.fromkeys(listing_type_ids))
+        self._available_listing_types_cache[category_id] = deduped_listing_type_ids
+        return deduped_listing_type_ids
+
+    def _resolve_listing_type_id(
+        self,
+        category_id: str,
+        explicit_listing_type: str | None,
+        default_listing_type: Any,
+        has_pictures: bool,
+        available_listing_types: list[str],
+    ) -> str:
+        """Resolve listing_type_id constrained by the category available listing types."""
+        candidates: list[str] = []
+        if explicit_listing_type:
+            candidates.append(explicit_listing_type)
+
+        if has_pictures and isinstance(default_listing_type, str) and default_listing_type:
+            candidates.append(default_listing_type)
+        if not has_pictures:
+            candidates.append("free")
+        if isinstance(default_listing_type, str) and default_listing_type:
+            candidates.append(default_listing_type)
+
+        candidates.extend(["gold_special", "free"])
+        candidates = list(dict.fromkeys(candidates))
+
+        if available_listing_types:
+            if explicit_listing_type and explicit_listing_type not in available_listing_types:
+                logger.warning(
+                    "Explicit listing_type_id %s is not available for category %s. "
+                    "Falling back to allowed listing type.",
+                    explicit_listing_type,
+                    category_id,
+                )
+
+            for candidate in candidates:
+                if candidate in available_listing_types:
+                    return candidate
+
+            logger.warning(
+                "No preferred listing_type_id is available for category %s. "
+                "Using first allowed: %s",
+                category_id,
+                available_listing_types[0],
+            )
+            return available_listing_types[0]
+
+        return candidates[0] if candidates else "free"
+
+    def _get_category_sale_terms_map(self, category_id: str) -> dict[str, dict[str, Any]]:
+        """Fetch category sale terms and cache by id."""
+        cached = self._category_sale_terms_cache.get(category_id)
+        if cached is not None:
+            return cached
+
+        getter = getattr(self.publisher, "get_category_sale_terms", None)
+        if not callable(getter):
+            return {}
+
+        try:
+            sale_terms = getter(category_id)
+        except Exception as e:
+            logger.warning(f"Could not fetch category sale terms for {category_id}: {e}")
+            return {}
+
+        mapped_sale_terms: dict[str, dict[str, Any]] = {}
+        if isinstance(sale_terms, list):
+            for sale_term in sale_terms:
+                if not isinstance(sale_term, dict):
+                    continue
+                sale_term_id = sale_term.get("id")
+                if isinstance(sale_term_id, str) and sale_term_id:
+                    mapped_sale_terms[sale_term_id] = sale_term
+
+        self._category_sale_terms_cache[category_id] = mapped_sale_terms
+        return mapped_sale_terms
+
+    def _is_required_sale_term(self, sale_term: dict[str, Any]) -> bool:
+        """Return whether a sale term metadata entry is required."""
+        tags = sale_term.get("tags", {})
+        if isinstance(tags, dict):
+            return bool(tags.get("required") or tags.get("new_required"))
+        if isinstance(tags, list):
+            normalized_tags = {str(tag).lower() for tag in tags}
+            return "required" in normalized_tags or "new_required" in normalized_tags
+        return False
+
+    def _resolve_sale_terms(
+        self,
+        category_id: str,
+        sale_terms_from_mapping: list[dict[str, Any]],
+        default_sale_terms: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Resolve sale terms constrained to category-allowed definitions."""
+        candidate_sale_terms = sale_terms_from_mapping or default_sale_terms
+        candidate_sale_terms = [
+            sale_term
+            for sale_term in candidate_sale_terms
+            if isinstance(sale_term, dict) and isinstance(sale_term.get("id"), str)
+        ]
+
+        category_sale_terms = self._get_category_sale_terms_map(category_id)
+        if not category_sale_terms:
+            return candidate_sale_terms
+
+        filtered_sale_terms: list[dict[str, Any]] = []
+        dropped_sale_term_ids: list[str] = []
+        for sale_term in candidate_sale_terms:
+            sale_term_id = sale_term.get("id")
+            if sale_term_id in category_sale_terms:
+                filtered_sale_terms.append(sale_term)
+            else:
+                dropped_sale_term_ids.append(str(sale_term_id))
+
+        if dropped_sale_term_ids:
+            logger.warning(
+                "Ignoring unsupported sale_terms for category %s: %s",
+                category_id,
+                dropped_sale_term_ids,
+            )
+
+        required_sale_term_ids = [
+            sale_term_id
+            for sale_term_id, sale_term_meta in category_sale_terms.items()
+            if self._is_required_sale_term(sale_term_meta)
+        ]
+        if not required_sale_term_ids:
+            return filtered_sale_terms
+
+        default_by_id = {
+            sale_term["id"]: sale_term
+            for sale_term in default_sale_terms
+            if isinstance(sale_term, dict) and isinstance(sale_term.get("id"), str)
+        }
+        existing_ids = {
+            sale_term["id"]
+            for sale_term in filtered_sale_terms
+            if isinstance(sale_term.get("id"), str)
+        }
+
+        for required_sale_term_id in required_sale_term_ids:
+            if required_sale_term_id in existing_ids:
+                continue
+            fallback_sale_term = default_by_id.get(required_sale_term_id)
+            if fallback_sale_term:
+                filtered_sale_terms.append(fallback_sale_term)
+                existing_ids.add(required_sale_term_id)
+            else:
+                logger.warning(
+                    "Required sale term %s is missing for category %s and "
+                    "no default is configured.",
+                    required_sale_term_id,
+                    category_id,
+                )
+
+        return filtered_sale_terms
+
+    def _get_missing_conditional_attributes(
+        self,
+        category_id: str,
+        item: dict[str, Any],
+        description: str,
+        conditional_required_ids: set[str] | None = None,
+    ) -> list[str]:
+        """Validate conditional required attributes using full item context payload."""
+        required_ids = conditional_required_ids
+        if required_ids is None:
+            required_ids = self._get_conditional_required_attribute_ids(
+                category_id=category_id,
+                item=item,
+                description=description,
+            )
+
+        if not required_ids:
+            return []
+
+        existing_ids = {
+            attr.get("id")
+            for attr in item.get("attributes", [])
+            if isinstance(attr, dict) and isinstance(attr.get("id"), str)
+        }
+        return sorted(attr_id for attr_id in required_ids if attr_id not in existing_ids)
+
+    def _get_conditional_required_attribute_ids(
+        self,
+        category_id: str,
+        item: dict[str, Any],
+        description: str,
+    ) -> set[str]:
+        """Get conditional required attribute IDs for the current item context."""
+        conditional_payload = dict(item)
+        if description:
+            conditional_payload["description"] = {"plain_text": description}
+
+        try:
+            conditional_attrs = self.category_resolver.get_conditional_attributes(
+                category_id, conditional_payload
+            )
+        except Exception as e:
+            logger.warning(f"Could not get conditional attributes for {category_id}: {e}")
+            return set()
+
+        if isinstance(conditional_attrs, dict):
+            required_attributes = conditional_attrs.get("required_attributes", [])
+            conditional_attrs = required_attributes if isinstance(required_attributes, list) else []
+
+        if not isinstance(conditional_attrs, list):
+            return set()
+
+        return {
+            attr_id
+            for attr in conditional_attrs
+            if isinstance(attr, dict)
+            for attr_id in [attr.get("id")]
+            if isinstance(attr_id, str) and attr_id
+        }
+
+    def _inject_optional_na_attributes(
+        self,
+        category_id: str,
+        item: dict[str, Any],
+        sku: str,
+        description: str,
+    ) -> set[str] | None:
+        """Auto-fill missing optional attributes with N/A payload when enabled."""
+        na_policy = self.config.get("na_policy")
+        if not isinstance(na_policy, dict) or not na_policy.get("enabled", False):
+            return None
+
+        attrs = item.get("attributes")
+        if not isinstance(attrs, list):
+            return None
+
+        value_id = str(na_policy.get("value_id", "-1"))
+        value_name = na_policy.get("value_name")
+        configured_skip_tags = na_policy.get("skip_tags", [])
+        skip_tags = DEFAULT_NA_SKIP_TAGS.copy()
+        if isinstance(configured_skip_tags, list):
+            skip_tags = {
+                str(tag).strip().lower() for tag in configured_skip_tags if str(tag).strip()
+            } or skip_tags
+
+        conditional_required_ids = self._get_conditional_required_attribute_ids(
+            category_id=category_id,
+            item=item,
+            description=description,
+        )
+
+        try:
+            metadata = self.category_resolver.get_attribute_metadata(category_id)
+        except Exception as e:
+            logger.warning(
+                "Could not fetch attribute metadata for N/A policy in %s: %s",
+                category_id,
+                e,
+            )
+            return conditional_required_ids
+
+        existing_ids = {
+            attr.get("id")
+            for attr in attrs
+            if isinstance(attr, dict) and isinstance(attr.get("id"), str)
+        }
+        auto_filled_count = 0
+        skipped: list[str] = []
+
+        for meta in metadata:
+            attr_id = getattr(meta, "id", None)
+            if not isinstance(attr_id, str) or not attr_id or attr_id in existing_ids:
+                continue
+
+            tags = {
+                str(tag).strip().lower() for tag in getattr(meta, "tags", set()) if str(tag).strip()
+            }
+            if bool(getattr(meta, "required", False)):
+                tags.add("required")
+            if attr_id in conditional_required_ids:
+                tags.add("conditional_required")
+
+            if tags.intersection(skip_tags):
+                skipped.append(attr_id)
+                continue
+
+            attrs.append({"id": attr_id, "value_id": value_id, "value_name": value_name})
+            existing_ids.add(attr_id)
+            auto_filled_count += 1
+
+        if auto_filled_count:
+            logger.info(
+                "Auto-filled N/A for %s optional attributes on %s",
+                auto_filled_count,
+                sku,
+            )
+            conditional_required_ids = self._get_conditional_required_attribute_ids(
+                category_id=category_id,
+                item=item,
+                description=description,
+            )
+
+        if skipped:
+            logger.warning(
+                "Skipped N/A auto-fill for %s attributes on %s due non-eligible tags",
+                len(skipped),
+                sku,
+            )
+
+        return conditional_required_ids
+
+    def _publish_item_description(self, item_id: str, description: str, sku: str) -> None:
+        """Publish description using the dedicated description endpoint."""
+        setter = getattr(self.publisher, "create_item_description", None)
+        if not callable(setter):
+            logger.warning("Publisher does not support description endpoint for %s", sku)
+            return
+
+        try:
+            setter(item_id, description)
+            logger.info(f"Description published for {sku} ({item_id})")
+        except Exception as e:
+            logger.warning(f"Could not publish description for {sku} ({item_id}): {e}")
+
     def _build_shipping_config(self) -> dict[str, Any]:
         """Build shipping configuration from config.
 
@@ -755,10 +1138,10 @@ class PublishProductUseCase:
         {
             "mode": "me2",
             "methods": [],
-            "tags": ["mandatory_free_shipping"],
+            "tags": [],
             "dimensions": null,
             "local_pick_up": false,
-            "free_shipping": true,
+            "free_shipping": false,
             "logistic_type": "drop_off",
             "store_pick_up": false
         }

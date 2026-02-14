@@ -5,17 +5,71 @@ to Mercado Livre API attribute definitions.
 """
 
 import logging
-import re
 from typing import Any
 
-from mercadolivre_upload.shared.utils.text_utils import TextNormalizer
+from mercadolivre_upload.shared.utils.text_utils import PortugueseTextNormalizer, TextNormalizer
 
 logger = logging.getLogger(__name__)
 
 
 def _normalize_column_name(column_name: str) -> str:
-    """Normalize column names to a canonical form used by explicit mappings."""
-    return re.sub(r"[^a-zA-Z0-9_\s]", "", str(column_name)).strip().lower()
+    """Normalize column names to a canonical form used by mappings."""
+    return PortugueseTextNormalizer.normalize(str(column_name).replace("_", " "))
+
+
+def _normalize_keywords(raw_keywords: Any) -> list[str]:
+    """Normalize keyword rule entries into a list of comparable tokens."""
+    if raw_keywords is None:
+        return []
+    if isinstance(raw_keywords, str):
+        raw_keywords = [raw_keywords]
+
+    normalized = []
+    for keyword in raw_keywords:
+        token = _normalize_column_name(str(keyword))
+        if token:
+            normalized.append(token)
+    return normalized
+
+
+def _matches_auto_mapping_rule(column_name: str, rule: dict[str, Any]) -> bool:
+    """Return whether a column matches an auto explicit mapping rule."""
+    normalized = _normalize_column_name(column_name)
+    contains = _normalize_keywords(rule.get("contains"))
+    excludes = _normalize_keywords(rule.get("excludes"))
+
+    if not contains:
+        return False
+    if not all(token in normalized for token in contains):
+        return False
+    return not any(token in normalized for token in excludes)
+
+
+def _resolve_auto_explicit_mappings(
+    excel_columns: list[str],
+    auto_explicit_mappings: list[dict[str, Any]] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Build normalized auto explicit mappings for matching columns."""
+    normalized_mappings: dict[str, dict[str, Any]] = {}
+    if not auto_explicit_mappings:
+        return normalized_mappings
+
+    for column in excel_columns:
+        normalized_column = _normalize_column_name(column)
+        for rule in auto_explicit_mappings:
+            if not isinstance(rule, dict):
+                continue
+
+            match = rule.get("match", {})
+            mapping = rule.get("mapping", {})
+            if not isinstance(match, dict) or not isinstance(mapping, dict) or not mapping:
+                continue
+
+            if _matches_auto_mapping_rule(column, match):
+                normalized_mappings[normalized_column] = mapping
+                break
+
+    return normalized_mappings
 
 
 class AttributeMapper:
@@ -100,6 +154,7 @@ class AttributeMapper:
         product_attributes: dict[str, str],
         ml_attributes: list[dict[str, Any]],
         explicit_mappings: dict[str, dict[str, Any]] | None = None,
+        auto_explicit_mappings: list[dict[str, Any]] | None = None,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """Map product attributes to ML format using fuzzy matching.
 
@@ -107,6 +162,7 @@ class AttributeMapper:
             product_attributes: Dictionary of {column_name: value} from Excel
             ml_attributes: List of ML attribute definitions from API
             explicit_mappings: Optional dict of {excel_column: mapping_config} for direct mapping
+            auto_explicit_mappings: Optional rule list for contains-based explicit mapping
 
         Returns:
             Tuple of (ml_attributes_list, sale_terms_list)
@@ -128,6 +184,13 @@ class AttributeMapper:
                 # Apply same cleaning as parser: remove non-alphanumeric chars (except spaces)
                 normalized_col = _normalize_column_name(col)
                 normalized_explicit_mappings[normalized_col] = mapping_config
+
+        auto_normalized_mappings = _resolve_auto_explicit_mappings(
+            excel_columns,
+            auto_explicit_mappings=auto_explicit_mappings,
+        )
+        for normalized_col, mapping_config in auto_normalized_mappings.items():
+            normalized_explicit_mappings.setdefault(normalized_col, mapping_config)
 
         if normalized_explicit_mappings:
             for col, value in product_attributes.items():
@@ -253,20 +316,26 @@ class AttributeMapper:
         self,
         product_attributes: dict[str, str],
         explicit_mappings: dict[str, dict[str, Any]] | None = None,
+        auto_explicit_mappings: list[dict[str, Any]] | None = None,
     ) -> set[str]:
-        """Return spreadsheet columns that are covered by explicit mappings."""
-        if not explicit_mappings:
-            return set()
+        """Return columns covered by explicit mappings and configured auto-rules."""
+        normalized_explicit = {}
+        if explicit_mappings:
+            normalized_explicit = {
+                _normalize_column_name(column): mapping
+                for column, mapping in explicit_mappings.items()
+                if mapping
+            }
 
-        normalized_explicit = {
-            _normalize_column_name(column): mapping
-            for column, mapping in explicit_mappings.items()
-            if mapping
-        }
+        auto_mappings = _resolve_auto_explicit_mappings(
+            list(product_attributes.keys()),
+            auto_explicit_mappings=auto_explicit_mappings,
+        )
 
         mapped_columns = set()
         for column in product_attributes:
-            if _normalize_column_name(column) in normalized_explicit:
+            normalized_column = _normalize_column_name(column)
+            if normalized_column in normalized_explicit or normalized_column in auto_mappings:
                 mapped_columns.add(column)
 
         return mapped_columns

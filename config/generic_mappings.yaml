@@ -152,6 +152,19 @@ explicit_mappings:
     target: "attribute"
     id: "BOOK_COVER"
 
+# Rule-based explicit mappings for normalized header variants
+auto_explicit_mappings:
+  - match:
+      contains:
+        - "peso fisico"
+      excludes:
+        - "peso liquido"
+        - "peso bruto"
+    mapping:
+      target: "attribute"
+      id: "WEIGHT"
+      unit_suffix: " kg"
+
 # Standard product fields (same across all categories)
 standard_fields:
   sku:

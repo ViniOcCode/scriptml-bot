@@ -185,19 +185,54 @@ class MLApiClient:
         return cast(list[dict[str, Any]], self.get(f"/categories/{category_id}/attributes"))
 
     def get_category_conditional_attributes(
-        self, category_id: str, current_attributes: dict[str, Any]
+        self, category_id: str, item_context: dict[str, Any]
     ) -> list[dict[str, Any]]:
         """Get conditional attributes for a category.
 
         Args:
             category_id: Category ID
-            current_attributes: Current attribute values to check conditions against
+            item_context: Full item context payload used by ML conditional checks
 
         Returns:
             List of conditional attributes
         """
         endpoint = f"/categories/{category_id}/attributes/conditional"
-        return cast(list[dict[str, Any]], self.post(endpoint, json=current_attributes))
+        response = self.post(endpoint, json=item_context)
+        if isinstance(response, dict):
+            required_attributes = response.get("required_attributes", [])
+            if isinstance(required_attributes, list):
+                return cast(list[dict[str, Any]], required_attributes)
+            return []
+        if isinstance(response, list):
+            return cast(list[dict[str, Any]], response)
+        return []
+
+    def get_category_sale_terms(self, category_id: str) -> list[dict[str, Any]]:
+        """Get sale terms metadata for a category."""
+        result = self.get(f"/categories/{category_id}/sale_terms")
+        if isinstance(result, list):
+            return cast(list[dict[str, Any]], result)
+        return []
+
+    def get_available_listing_types(self, category_id: str) -> list[dict[str, Any]]:
+        """Get listing types available for current seller in category."""
+        user_info = self.get_users_me()
+        user_id = user_info.get("id")
+        if not user_id:
+            return []
+
+        result = self.get(
+            f"/users/{user_id}/available_listing_types",
+            params={"category_id": category_id},
+        )
+        if isinstance(result, dict):
+            available = result.get("available", [])
+            if isinstance(available, list):
+                return cast(list[dict[str, Any]], available)
+            return []
+        if isinstance(result, list):
+            return cast(list[dict[str, Any]], result)
+        return []
 
     def get_category_technical_specs(self, category_id: str) -> dict[str, Any]:
         """Get category technical specs (input structure)."""
@@ -224,6 +259,11 @@ class MLApiClient:
             Created item data
         """
         return self.post("/items", json=item)
+
+    def create_item_description(self, item_id: str, plain_text: str) -> dict[str, Any]:
+        """Create or update item description."""
+        validate_item_id(item_id)
+        return self.post(f"/items/{item_id}/description", json={"plain_text": plain_text})
 
     def get_users_me(self) -> dict[str, Any]:
         """Get current authenticated user info.
