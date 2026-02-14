@@ -27,13 +27,13 @@ def _load_shipping_config() -> dict[str, Any]:
         shipping_config = config.get("shipping", {})
 
         return {
-            "mode_priority": shipping_config.get("mode_priority", ["me1", "me2"]),
+            "mode_priority": shipping_config.get("mode_priority", ["me2", "me1"]),
             "default_mode": shipping_config.get("default_mode", "not_specified"),
         }
     except Exception as e:
         logger.warning(f"Could not load shipping config: {e}. Using defaults.")
         return {
-            "mode_priority": ["me1", "me2"],
+            "mode_priority": ["me2", "me1"],
             "default_mode": "not_specified",
         }
 
@@ -54,7 +54,7 @@ class ShippingResolver:
     """Resolver for determining best shipping mode.
 
     Uses configuration from config/shipping.yaml as the single source of truth.
-    Prioritizes me1 over me2 based on mode_priority configuration.
+    Prioritizes me2 over me1 based on mode_priority configuration.
     """
 
     def __init__(self, provider: ShippingModeProviderPort, config: dict[str, Any] | None = None):
@@ -69,7 +69,7 @@ class ShippingResolver:
 
         # Load shipping config from config file (single source of truth), allow override
         if config:
-            self.mode_priority = config.get("mode_priority", ["me1", "me2"])
+            self.mode_priority = config.get("mode_priority", ["me2", "me1"])
             self.default_mode = config.get("default_mode", "not_specified")
         else:
             shipping_config = _load_shipping_config()
@@ -91,7 +91,7 @@ class ShippingResolver:
             logger.info(f"No shipping modes available, using {self.default_mode}")
             return self.default_mode  # type: ignore[no-any-return]
 
-        # Select best mode based on priority from config (me1 is prioritized over me2)
+        # Select best mode based on priority from config
         for mode in self.mode_priority:
             if mode in available_modes:
                 logger.info(f"Selected shipping mode: {mode}")

@@ -74,21 +74,19 @@ class CategoryAdapter(CategoryApiPort):
             return {}
 
     def get_category_conditional_attributes(
-        self, category_id: str, current_attributes: dict[str, Any]
+        self, category_id: str, item_context: dict[str, Any]
     ) -> list[dict[str, Any]]:
         """Get conditional attributes for a category.
 
         Args:
             category_id: Category ID
-            current_attributes: Current attribute values
+            item_context: Full item context payload
 
         Returns:
             List of conditional attributes
         """
         try:
-            result = self.client.get_category_conditional_attributes(
-                category_id, current_attributes
-            )
+            result = self.client.get_category_conditional_attributes(category_id, item_context)
             # API returns dict with 'required_attributes' key, not a list
             if isinstance(result, dict) and "required_attributes" in result:
                 return result["required_attributes"]

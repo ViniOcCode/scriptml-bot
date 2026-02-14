@@ -37,13 +37,13 @@ class CategoryApiPort(Protocol):
         ...
 
     def get_category_conditional_attributes(
-        self, category_id: str, current_attributes: dict[str, Any]
+        self, category_id: str, item_context: dict[str, Any]
     ) -> list[dict[str, Any]]:
         """Get conditional attributes for a category.
 
         Args:
             category_id: Category ID
-            current_attributes: Current attribute values to check conditions against
+            item_context: Full item context payload used by conditional checks
 
         Returns:
             List of conditional attributes
@@ -58,6 +58,7 @@ class CategoryApiPort(Protocol):
         Args:
             title: Product title
             site_id: Site ID
+            limit: Maximum number of predictions to request
 
         Returns:
             List of predicted categories with confidence scores
@@ -534,19 +535,19 @@ class CategoryResolver:
         return mapping
 
     def get_conditional_attributes(
-        self, category_id: str, current_attributes: dict[str, Any]
+        self, category_id: str, item_context: dict[str, Any]
     ) -> list[dict[str, Any]]:
-        """Get conditional attributes based on current attribute values.
+        """Get conditional attributes based on full item context.
 
         Args:
             category_id: Category ID
-            current_attributes: Current attribute values (name -> value)
+            item_context: Full item context payload (same shape as item publish payload)
 
         Returns:
             List of conditional attributes
         """
         try:
-            result = self._api.get_category_conditional_attributes(category_id, current_attributes)
+            result = self._api.get_category_conditional_attributes(category_id, item_context)
             # Handle case where API returns error message or non-list
             if isinstance(result, dict) and "error" in result:
                 return []
@@ -560,29 +561,29 @@ class CategoryResolver:
             return []
 
     def get_all_attributes_with_conditionals(
-        self, category_id: str, product_attributes: dict[str, Any]
+        self, category_id: str, item_context: dict[str, Any]
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """Get all attributes including conditional ones.
 
         Args:
             category_id: Category ID
-            product_attributes: Current product attribute values
+            item_context: Full item context payload
 
         Returns:
             Tuple of (base_attributes, conditional_attributes)
         """
         base_attrs = self.get_all_attributes(category_id)
-        conditional = self.get_conditional_attributes(category_id, product_attributes)
+        conditional = self.get_conditional_attributes(category_id, item_context)
         return base_attrs, conditional
 
     def get_required_attributes(
-        self, category_id: str, product_attributes: dict[str, Any]
+        self, category_id: str, item_context: dict[str, Any]
     ) -> list[dict[str, Any]]:
         """Get all required attributes including conditionally required.
 
         Args:
             category_id: Category ID
-            product_attributes: Current product attribute values
+            item_context: Full item context payload
 
         Returns:
             List of required attribute definitions
@@ -592,7 +593,7 @@ class CategoryResolver:
         required = [attr for attr in all_base if attr.get("tags", {}).get("required")]
 
         # Get conditional attributes
-        conditional = self.get_conditional_attributes(category_id, product_attributes)
+        conditional = self.get_conditional_attributes(category_id, item_context)
 
         # Filter conditional required attributes
         required_conditional = [
@@ -634,13 +635,13 @@ class CategoryResolver:
             if isinstance(base_tags, dict):
                 merged_tags.update(base_tags)
             elif isinstance(base_tags, list):
-                merged_tags.update({tag: True for tag in base_tags})
+                merged_tags.update(dict.fromkeys(base_tags, True))
 
             spec_tags = spec.get("tags", [])
             if isinstance(spec_tags, dict):
                 merged_tags.update(spec_tags)
             elif isinstance(spec_tags, list):
-                merged_tags.update({tag: True for tag in spec_tags})
+                merged_tags.update(dict.fromkeys(spec_tags, True))
 
             if merged_tags:
                 attr["tags"] = merged_tags

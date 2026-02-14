@@ -57,6 +57,20 @@ protected_attributes:
   - "BOOK_SIZE"
 
 # =============================================================================
+# NA (NÃO SE APLICA) POLICY
+# =============================================================================
+na_policy:
+  enabled: true
+  value_id: "-1"
+  value_name: null
+  skip_tags:
+    - "required"
+    - "new_required"
+    - "conditional_required"
+    - "catalog_listing_required"
+    - "allow_variations"
+
+# =============================================================================
 # SCORING WEIGHTS
 # =============================================================================
 scoring:

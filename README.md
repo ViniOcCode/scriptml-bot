@@ -86,7 +86,7 @@ mercadolivre_upload/
 
 ### Data flow
 
-Excel → `DynamicExcelParser` → canonical `Product` model → `PublishProductUseCase` (orchestrates `CategoryResolver`, `AttributeBuilderService`, payload `builders/`, `ImageUploaderPort`, `ItemPublisherPort`) → Mercado Libre API.
+Excel → `SpreadsheetParser` → canonical `Product` model → `PublishProductUseCase` (orchestrates `CategoryResolver`, `AttributeBuilderService`, payload `builders/`, `ImageUploaderPort`, `ItemPublisherPort`) → Mercado Libre API.
 
 ### Ports & adapters
 

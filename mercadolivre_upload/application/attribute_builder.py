@@ -75,11 +75,13 @@ class AttributeBuilderService:
         sale_terms: list[dict[str, Any]] = []
         cache_mapped_keys: set[str] = set()
         explicit_mappings = self.config.get("explicit_mappings", {})
+        auto_explicit_mappings = self.config.get("auto_explicit_mappings", [])
         attribute_mapper = AttributeMapper(similarity_threshold=0.7)
 
         explicit_mapped_keys = attribute_mapper.get_explicitly_mapped_columns(
             product.attributes,
             explicit_mappings=explicit_mappings,
+            auto_explicit_mappings=auto_explicit_mappings,
         )
         cache_candidates = {
             key: value
@@ -106,6 +108,7 @@ class AttributeBuilderService:
                 remaining_attributes,
                 [meta.__dict__ for meta in attr_metadata],
                 explicit_mappings=explicit_mappings,
+                auto_explicit_mappings=auto_explicit_mappings,
             )
 
             # Merge attributes: cache results take precedence
@@ -158,32 +161,6 @@ class AttributeBuilderService:
 
         # Convert final attributes back to dict format
         final_attr_dicts = [{"id": a.id, "value_name": a.value} for a in final_attrs]
-
-        # 7. Validate conditional attributes (required based on current values)
-        attr_dict = {a.id: a.value for a in final_attrs}
-        try:
-            conditional_attrs = self.category_resolver.get_conditional_attributes(
-                category_id, attr_dict
-            )
-
-            conditional_ids = {
-                attr_id
-                for attr in conditional_attrs
-                if isinstance(attr, dict)
-                for attr_id in [attr.get("id")]
-                if isinstance(attr_id, str) and attr_id
-            }
-            existing_ids = {a["id"] for a in final_attr_dicts if "id" in a}
-            missing = sorted(
-                [attr_id for attr_id in conditional_ids if attr_id not in existing_ids]
-            )
-
-            if missing:
-                message = f"Missing conditional attributes: {', '.join(missing)}"
-                errors.append(message)
-                logger.warning(message)
-        except Exception as e:
-            logger.warning(f"Could not get conditional attributes: {e}")
 
         return final_attr_dicts, sale_terms, warnings, errors
 

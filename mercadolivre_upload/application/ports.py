@@ -26,6 +26,18 @@ class ItemPublisherPort(Protocol):
         """Create/publish item."""
         ...
 
+    def get_available_listing_types(self, category_id: str) -> list[dict[str, Any]]:
+        """Get listing types available for current user in a category."""
+        ...
+
+    def get_category_sale_terms(self, category_id: str) -> list[dict[str, Any]]:
+        """Get sale terms metadata for a category."""
+        ...
+
+    def create_item_description(self, item_id: str, plain_text: str) -> dict[str, Any]:
+        """Create/update item description using description endpoint."""
+        ...
+
 
 class ShippingResolverPort(Protocol):
     """Port for shipping mode resolution."""
