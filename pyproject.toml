@@ -127,13 +127,21 @@ warn_redundant_casts = true
 warn_unused_configs = true
 show_error_codes = true
 show_column_numbers = true
-ignore_missing_imports = true
+ignore_missing_imports = false
+disable_error_code = ["import-untyped"]
 
 # Per-module options
 [[tool.mypy.overrides]]
 module = "tests.*"
 strict = false
 disallow_untyped_defs = false
+
+[[tool.mypy.overrides]]
+module = [
+    "mercadolivre_upload.infrastructure.metrics",
+    "mercadolivre_upload.domain.validation.base",
+]
+disable_error_code = ["import-not-found"]
 
 # =============================================================================
 # PYTEST - Testing framework
