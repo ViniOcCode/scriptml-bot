@@ -101,3 +101,27 @@ def test_submit_workflow_retries_sku_link_when_item_not_ready():
     assert result.status == FiscalSubmissionStatus.VERIFIED
     assert api_client.link_fiscal_sku_to_item.call_count == 2
     assert sleep_mock.call_count >= 1
+
+
+def test_extract_error_code_returns_first_cause_code():
+    api_client = MagicMock()
+    service = FiscalService(api_client=api_client)
+
+    response = MagicMock()
+    response.json.return_value = {"cause": [{"code": "10095"}]}
+    exc = Exception("API error")
+    exc.response = response  # type: ignore[attr-defined]
+
+    assert service._extract_error_code(exc) == "10095"
+
+
+def test_extract_error_code_returns_none_for_invalid_json():
+    api_client = MagicMock()
+    service = FiscalService(api_client=api_client)
+
+    response = MagicMock()
+    response.json.side_effect = ValueError("not json")
+    exc = Exception("API error")
+    exc.response = response  # type: ignore[attr-defined]
+
+    assert service._extract_error_code(exc) is None

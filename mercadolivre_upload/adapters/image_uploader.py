@@ -3,6 +3,7 @@
 import base64
 import hashlib
 import logging
+import tempfile
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -18,16 +19,20 @@ class ImageUploader:
     def __init__(
         self,
         api_client: MLApiClient | None = None,
-        base_path: str | Path = "/tmp/uploads",  # noqa: S108
+        base_path: str | Path | None = None,
     ):
         """Initialize uploader.
 
         Args:
             api_client: Optional ML API client
-            base_path: Base directory for product images
+            base_path: Base directory for product images.
+                Defaults to a uploads folder in the system temporary directory.
         """
         self.api_client = api_client
-        self.base_path = Path(base_path)
+        resolved_base_path = (
+            Path(base_path) if base_path is not None else Path(tempfile.gettempdir()) / "uploads"
+        )
+        self.base_path = resolved_base_path
         self.base_path.mkdir(parents=True, exist_ok=True)
         self._uploaded_images: list[dict[str, Any]] = []
         self._hash_cache: dict[str, dict[str, Any]] = {}
@@ -70,9 +75,9 @@ class ImageUploader:
         return True
 
     def calculate_hash(self, path: str) -> str:
-        """Return MD5 hash of file contents for dedup."""
+        """Return SHA-256 hash of file contents for dedup."""
         content = Path(path).read_bytes()
-        return hashlib.md5(content).hexdigest()  # noqa: S324
+        return hashlib.sha256(content).hexdigest()
 
     def encode_base64(self, path: str) -> str:
         """Encode image file as base64 string."""
