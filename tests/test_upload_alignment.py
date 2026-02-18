@@ -303,6 +303,25 @@ def test_publish_attribute_normalization_uses_attribute_id_for_weights() -> None
     assert values["SELLER_PACKAGE_WEIGHT"] == "214 g"
 
 
+def test_publish_attribute_normalization_skips_non_dict_attributes() -> None:
+    use_case = object.__new__(PublishProductUseCase)
+    use_case.config = {}
+
+    item = {
+        "attributes": [
+            {"id": "WIDTH", "value_name": "23"},
+            "invalid-attribute",
+            None,
+        ]
+    }
+
+    PublishProductUseCase._normalize_item_attributes(use_case, item)
+
+    assert item["attributes"][0]["value_name"] == "23 cm"
+    assert item["attributes"][1] == "invalid-attribute"
+    assert item["attributes"][2] is None
+
+
 def test_publish_flow_uses_available_listing_type_and_description_endpoint() -> None:
     resolver = _FakeCategoryResolver(
         [
