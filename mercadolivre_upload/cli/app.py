@@ -39,10 +39,6 @@ app = typer.Typer(
 state = {"verbose": False, "output_format": "text"}
 
 
-def _get_publish_service_cls():  # type: ignore[no-untyped-def]
-    return import_module("mercadolivre_upload.cli").PublishProductService
-
-
 def _get_auth_manager_cls():  # type: ignore[no-untyped-def]
     return import_module("mercadolivre_upload.cli").AuthManager
 
@@ -88,110 +84,53 @@ def upload(  # type: ignore[no-untyped-def]
     category: str | None = typer.Option(None, "--category", "-c"),  # noqa: B008
     verbose: bool = typer.Option(False, "--verbose", "-v"),  # noqa: B008
     dry_run: bool = typer.Option(False, "--dry-run", "-n"),  # noqa: B008
-    config: Path | None = typer.Option(None, "--config"),  # noqa: B008
 ):
-    """Upload products using new CLI implementation when possible.
-
-    Behavior:
-    - If --images and --category are provided, delegate to the new implementation
-      in mercadolivre_upload.cli.commands.upload
-    - Otherwise, fall back to the legacy PublishProductService compatibility path
-      for positional usage (existing workflows and tests).
-    """
+    """Upload products using the new CLI implementation only."""
     setup_logging(verbose)
     selected_excel = excel_option or excel
-    if excel_option or images or category:
-        if selected_excel is None:
-            err_console.print("Arquivo não encontrado")
-            raise typer.Exit(1)
-        if images is None or category is None:
-            err_console.print("Parametros obrigatorios: --images e --category")
-            raise typer.Exit(1)
-        from importlib import import_module
-
-        upload_cmd = import_module("mercadolivre_upload.cli.commands.upload")
-        # Call with explicit cache_dir since it's required
-        return upload_cmd.upload(
-            excel=selected_excel,
-            images=images,
-            category=category,
-            cache_dir=Path("cache/categories"),  # Use default
-            dry_run=dry_run,
-            detailed=False,
-        )
     if selected_excel is None or not selected_excel.exists():
         err_console.print("Arquivo não encontrado")
         raise typer.Exit(1)
-    if verbose:
-        console.print("Processando arquivo")
-    service = _get_publish_service_cls()(config_path=config, dry_run=dry_run)  # type: ignore[no-untyped-call]
-    try:
-        result = service.publish_from_file(selected_excel)
-    except Exception as err:
-        err_console.print("Erro durante publicação")
-        raise typer.Exit(1) from err
-    if result.failure_count > 0:
+    if images is None or category is None:
+        err_console.print("Parametros obrigatorios: --images e --category")
         raise typer.Exit(1)
-    console.print("Publicação concluída")
+
+    upload_cmd = import_module("mercadolivre_upload.cli.commands.upload")
+    return upload_cmd.upload(
+        excel=selected_excel,
+        images=images,
+        category=category,
+        cache_dir=Path("cache/categories"),
+        dry_run=dry_run,
+        detailed=False,
+    )
 
 
 @app.command()
 def validate(  # type: ignore[no-untyped-def]
-    excel: Path = typer.Argument(..., help="Path to Excel file"),  # noqa: B008
-    output: Path | None = typer.Option(None, "--output"),  # noqa: B008
+    excel: Path | None = typer.Argument(None, help="Path to Excel file"),  # noqa: B008
+    excel_option: Path | None = typer.Option(None, "--excel", "-e"),  # noqa: B008
+    images: Path | None = typer.Option(None, "--images", "-i"),  # noqa: B008
+    category: str | None = typer.Option(None, "--category", "-c"),  # noqa: B008
+    detailed: bool = typer.Option(False, "--detailed", "-d"),  # noqa: B008
 ):
-    """Validate file using new CLI implementation when possible.
-
-    Behavior:
-    - Delegate to new validation command if appropriate; otherwise use legacy
-      PublishProductService.validate_file for backward compatibility.
-    """
-    # If the new validate command is available, prefer it
-    try:
-        from importlib import import_module
-
-        import_module("mercadolivre_upload.cli.commands.validate")
-        # The new validate expects options --excel, --images, --category; keep
-        # compatibility by falling back to legacy when those options are not present.
-        # Here we call legacy path by default to match existing behaviour in tests.
-        if not excel.exists():
-            err_console.print("Arquivo não encontrado")
-            raise typer.Exit(1)
-        service = _get_publish_service_cls()()  # type: ignore[no-untyped-call]
-        try:
-            result = service.validate_file(excel)
-        except Exception as err:
-            err_console.print("Erro na validação")
-            raise typer.Exit(1) from err
-        if result.is_valid:
-            console.print("Arquivo válido")
-            return
-        if output:
-            output.write_text("\n".join(result.errors), encoding="utf-8")
-        err_console.print(f"{len(result.errors)} erros")
-        for error in result.errors:
-            err_console.print(error)
+    """Validate products using the new CLI implementation only."""
+    selected_excel = excel_option or excel
+    if selected_excel is None or not selected_excel.exists():
+        err_console.print("Arquivo não encontrado")
         raise typer.Exit(1)
-    except Exception as err:
-        # Fallback to legacy behavior if anything unexpected occurs
-        if not excel.exists():
-            err_console.print("Arquivo não encontrado")
-            raise typer.Exit(1) from err
-        service = _get_publish_service_cls()()  # type: ignore[no-untyped-call]
-        try:
-            result = service.validate_file(excel)
-        except Exception as err:
-            err_console.print("Erro na validação")
-            raise typer.Exit(1) from err
-        if result.is_valid:
-            console.print("Arquivo válido")
-            return
-        if output:
-            output.write_text("\n".join(result.errors), encoding="utf-8")
-        err_console.print(f"{len(result.errors)} erros")
-        for error in result.errors:
-            err_console.print(error)
-        raise typer.Exit(1) from err  # type: ignore[misc]
+    if images is None or category is None:
+        err_console.print("Parametros obrigatorios: --images e --category")
+        raise typer.Exit(1)
+
+    validate_cmd = import_module("mercadolivre_upload.cli.commands.validate")
+    return validate_cmd.validate(
+        excel=selected_excel,
+        images=images,
+        category=category,
+        cache_dir=Path("cache/categories"),
+        detailed=detailed,
+    )
 
 
 @app.command()
@@ -236,7 +175,7 @@ from .commands import (  # noqa: E402
     doctor,
 )
 
-# Register new commands under legacy names
+# Register command groups
 app.add_typer(cache_cmd.app, name="cache")
 app.add_typer(doctor.app, name="doctor")
 
