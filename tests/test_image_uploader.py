@@ -189,7 +189,7 @@ class TestImageUploader:
     def test_upload_with_api_failure(self, uploader_with_api, temp_image, caplog):
         """Test upload with failed API call."""
         caplog.set_level(logging.ERROR)
-        uploader_with_api.api_client.upload_image.side_effect = Exception("API Error")
+        uploader_with_api.api_client.upload_image.side_effect = RuntimeError("API Error")
 
         result = uploader_with_api.upload(temp_image)
 

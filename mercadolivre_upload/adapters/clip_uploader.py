@@ -164,7 +164,13 @@ class ClipUploader:
             result.error = f"[{status_code}] {error_msg}"
             logger.error(f"HTTP error uploading clip for {item_id}: {result.error}")
 
-        except Exception as e:
+        except (
+            requests.RequestException,
+            RuntimeError,
+            ValueError,
+            TypeError,
+            OSError,
+        ) as e:
             result.status = "error"
             result.error = f"{type(e).__name__}: {e}"
             logger.error(

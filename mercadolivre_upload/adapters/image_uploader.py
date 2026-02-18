@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+import requests
+
 from mercadolivre_upload.api.client import MLApiClient
 
 logger = logging.getLogger(__name__)
@@ -101,7 +103,13 @@ class ImageUploader:
                     "hash": image_hash,
                     "filename": Path(path).name,
                 }
-            except Exception as exc:
+            except (
+                requests.RequestException,
+                RuntimeError,
+                ValueError,
+                TypeError,
+                OSError,
+            ) as exc:
                 logger.error("API upload failed", exc_info=exc)
                 return {"success": False, "error": str(exc)}
         else:

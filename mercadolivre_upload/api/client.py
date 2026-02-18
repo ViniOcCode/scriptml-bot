@@ -73,7 +73,8 @@ def _build_http_client() -> ResilientHTTPClient:
             default_policy=default_policy,
             limiter=limiter,
         )
-    except Exception:
+    except (ImportError, OSError, RuntimeError, ValueError) as exc:
+        logger.debug("Falling back to default HTTP client settings: %s", exc)
         return ResilientHTTPClient()
 
 
@@ -448,12 +449,12 @@ class MLApiClient:
                     timeout=120,
                 )
                 resp.raise_for_status()
-            except Exception as e:
+            except requests.RequestException as e:
                 error_resp = getattr(e, "response", None)
                 status_code = getattr(error_resp, "status_code", "unknown")
                 error_body: dict[str, Any] = {}
                 if error_resp is not None:
-                    with contextlib.suppress(Exception):
+                    with contextlib.suppress(ValueError):
                         error_body = error_resp.json()
                 logger.error(
                     "Clip upload failed for %s: [%s] %s: %s",
