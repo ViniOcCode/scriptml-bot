@@ -599,47 +599,52 @@ class AlertManager:
         if not self.slack_webhook:
             return True
 
-        try:
-            async with (
-                aiohttp.ClientSession() as session,
-                session.post(
-                    self.slack_webhook,
-                    json=alert.to_slack(),
-                    timeout=aiohttp.ClientTimeout(total=10),
-                ) as response,
-            ):
-                if response.status == 200:
-                    self._logger.info(f"Alerta enviado ao Slack: {alert.title}")
-                    return True
-                else:
-                    self._logger.error(f"Falha ao enviar alerta Slack: {response.status}")
-                    return False
-        except Exception as e:
-            self._logger.error(f"Erro ao enviar alerta Slack: {e}")
-            return False
+        return await self._send_webhook(
+            webhook=self.slack_webhook,
+            payload=alert.to_slack(),
+            provider_name="Slack",
+            success_statuses=(200,),
+            alert_title=alert.title,
+        )
 
     async def _send_discord(self, alert: Alert) -> bool:
         """Envia alerta para Discord."""
         if not self.discord_webhook:
             return True
 
+        return await self._send_webhook(
+            webhook=self.discord_webhook,
+            payload=alert.to_discord(),
+            provider_name="Discord",
+            success_statuses=(200, 204),
+            alert_title=alert.title,
+        )
+
+    async def _send_webhook(
+        self,
+        webhook: str,
+        payload: dict[str, Any],
+        provider_name: str,
+        success_statuses: tuple[int, ...],
+        alert_title: str,
+    ) -> bool:
+        """Envia payload para webhook com tratamento padrão."""
         try:
             async with (
                 aiohttp.ClientSession() as session,
                 session.post(
-                    self.discord_webhook,
-                    json=alert.to_discord(),
+                    webhook,
+                    json=payload,
                     timeout=aiohttp.ClientTimeout(total=10),
                 ) as response,
             ):
-                if response.status in (200, 204):
-                    self._logger.info(f"Alerta enviado ao Discord: {alert.title}")
+                if response.status in success_statuses:
+                    self._logger.info(f"Alerta enviado ao {provider_name}: {alert_title}")
                     return True
-                else:
-                    self._logger.error(f"Falha ao enviar alerta Discord: {response.status}")
-                    return False
+                self._logger.error(f"Falha ao enviar alerta {provider_name}: {response.status}")
+                return False
         except Exception as e:
-            self._logger.error(f"Erro ao enviar alerta Discord: {e}")
+            self._logger.error(f"Erro ao enviar alerta {provider_name}: {e}")
             return False
 
     async def alert(
