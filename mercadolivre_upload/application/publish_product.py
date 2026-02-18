@@ -104,6 +104,7 @@ class PublishProductUseCase:
         self.errors: list[str] = []
         self.fiscal_results: list[FiscalSubmissionResult] = []
         self.clip_results: list[dict[str, Any]] = []  # ClipUploadSummary dicts
+        self.item_results: list[dict[str, Any]] = []
 
         # Initialize CBT ID extractor (attempt to find an API client to perform fallback GETs)
         api_client = None
@@ -135,6 +136,46 @@ class PublishProductUseCase:
         self._available_listing_types_cache: dict[str, list[str]] = {}
         self._category_sale_terms_cache: dict[str, dict[str, dict[str, Any]]] = {}
 
+    def _reset_execution_state(self) -> None:
+        """Reset per-run counters and artifacts."""
+        self.published = 0
+        self.failed = 0
+        self.errors = []
+        self.fiscal_results = []
+        self.clip_results = []
+        self.item_results = []
+        self._pending_fiscal = []
+
+    @staticmethod
+    def _extract_item_identity(product: Product | dict[str, Any]) -> tuple[str | None, str | None]:
+        """Extract SKU/title from either input row or Product."""
+        if isinstance(product, Product):
+            sku = str(product.sku).strip() if product.sku else None
+            title = str(product.title).strip() if product.title else None
+            return sku, title
+
+        sku = None
+        for key in ("sku", "codigo", "código", "code"):
+            value = product.get(key)
+            if value is None:
+                continue
+            text = str(value).strip()
+            if text:
+                sku = text
+                break
+
+        title = None
+        for key in ("titulo", "título", "title", "nome"):
+            value = product.get(key)
+            if value is None:
+                continue
+            text = str(value).strip()
+            if text:
+                title = text
+                break
+
+        return sku, title
+
     def execute(
         self, products: list[Product | dict[str, Any]], category_name: str
     ) -> dict[str, Any]:
@@ -147,6 +188,8 @@ class PublishProductUseCase:
         Returns:
             Execution results
         """
+        self._reset_execution_state()
+
         # Strategy 1: Find category by name (fast root match)
         category_id = self.category_resolver.find_category(category_name)
 
@@ -224,11 +267,24 @@ class PublishProductUseCase:
         if not category_id:
             error_msg = f"Category not found: {category_name}"
             logger.error(error_msg)
+            item_results = []
+            for index, product in enumerate(products):
+                sku, title = self._extract_item_identity(product)
+                item_results.append(
+                    {
+                        "index": index,
+                        "sku": sku,
+                        "title": title,
+                        "status": "failed",
+                        "error": error_msg,
+                    }
+                )
             return {
                 "success": False,
                 "published": 0,
                 "failed": len(products),
                 "errors": [error_msg],
+                "item_results": item_results,
             }
 
         # Ensure we have a leaf category (no children)
@@ -242,16 +298,40 @@ class PublishProductUseCase:
         # Initialize cache mapper for this category
         self._initialize_cache_mapper(category_id)
 
-        for product in products:
+        for index, product in enumerate(products):
             if isinstance(product, dict):
+                source_sku, source_title = self._extract_item_identity(product)
                 try:
                     product = self._build_product_from_dict(product)
                 except Exception as exc:
                     logger.error(f"Failed to build product from row: {exc}")
-                    self.errors.append(str(exc))
+                    error_message = str(exc)
+                    self.errors.append(error_message)
                     self.failed += 1
+                    self.item_results.append(
+                        {
+                            "index": index,
+                            "sku": source_sku,
+                            "title": source_title,
+                            "status": "failed",
+                            "error": error_message,
+                        }
+                    )
                     continue
-            self._publish_one(product, category_id)
+            previous_error_count = len(self.errors)
+            success = self._publish_one(product, category_id)
+            item_result: dict[str, Any] = {
+                "index": index,
+                "sku": product.sku,
+                "title": product.title,
+                "status": "success" if success else "failed",
+            }
+            new_errors = self.errors[previous_error_count:]
+            if new_errors:
+                item_result["error"] = "; ".join(new_errors)
+            elif not success:
+                item_result["error"] = f"{product.sku}: publish failed"
+            self.item_results.append(item_result)
 
         # Batch submit fiscal information for all published products
         if not self.dry_run and self._pending_fiscal:
@@ -271,6 +351,7 @@ class PublishProductUseCase:
             "clips_uploaded": clip_success,
             "clips_failed": clip_failed,
             "clips_details": self.clip_results,
+            "item_results": self.item_results,
         }
 
     def _build_product_from_dict(self, data: dict[str, Any]) -> Product:
