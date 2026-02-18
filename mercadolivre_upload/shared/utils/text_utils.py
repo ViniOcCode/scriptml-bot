@@ -402,7 +402,7 @@ def format_price(value, currency: str = "R$") -> str:  # type: ignore[no-untyped
     """Format a numeric value as a Brazilian currency string."""
     try:
         v = float(value)
-    except Exception:
+    except (TypeError, ValueError):
         return f"{currency} 0,00"
     # Format with thousands separator and comma decimals
     int_part = int(v)

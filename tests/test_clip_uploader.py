@@ -117,7 +117,7 @@ class TestClipUploader:
         video_file.write_bytes(b"fake video")
 
         mock_client = Mock()
-        mock_client.upload_clip.side_effect = Exception("API Error")
+        mock_client.upload_clip.side_effect = RuntimeError("API Error")
 
         uploader = ClipUploader(mock_client)
 

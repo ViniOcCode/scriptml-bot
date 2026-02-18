@@ -7,6 +7,8 @@ from Mercado Livre API responses, with multiple fallback strategies.
 import logging
 from typing import TYPE_CHECKING, Any, cast
 
+import requests
+
 if TYPE_CHECKING:
     from mercadolivre_upload.api.client import MLApiClient
 
@@ -195,7 +197,13 @@ class CbtIdExtractor:
             logger.warning(f"GET /items/{marketplace_item_id} did not return a valid CBT parent ID")
             return None
 
-        except Exception as e:
+        except (
+            requests.RequestException,
+            RuntimeError,
+            ValueError,
+            TypeError,
+            OSError,
+        ) as e:
             logger.error(
                 f"Failed to fetch CBT ID for {marketplace_item_id}: {e}",
                 exc_info=True,

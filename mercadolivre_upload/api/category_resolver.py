@@ -3,6 +3,8 @@
 import logging
 from typing import Any, cast
 
+import requests
+
 from mercadolivre_upload.api.client import MLApiClient
 
 logger = logging.getLogger(__name__)
@@ -47,7 +49,13 @@ class CategoryResolver:
             try:
                 children = self.client.get_category(category_id).get("children_categories", [])
                 self._children_cache[category_id] = children
-            except Exception as e:
+            except (
+                requests.RequestException,
+                RuntimeError,
+                ValueError,
+                TypeError,
+                KeyError,
+            ) as e:
                 logger.warning(f"Could not get children for {category_id}: {e}")
                 self._children_cache[category_id] = []
         return self._children_cache[category_id]
