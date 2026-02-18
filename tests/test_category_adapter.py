@@ -34,6 +34,15 @@ def test_get_category_conditionals_accepts_required_attributes_dict() -> None:
     assert result == [{"id": "BRAND"}]
 
 
+def test_get_category_conditionals_rejects_non_list_required_attributes() -> None:
+    client = MagicMock()
+    client.get_category_conditional_attributes.return_value = {"required_attributes": "invalid"}
+    adapter = CategoryAdapter(client)  # type: ignore[arg-type]
+
+    result = adapter.get_category_conditional_attributes("MLB123", {"title": "x"})
+    assert result == []
+
+
 def test_validate_item_returns_invalid_payload_on_recoverable_error() -> None:
     client = MagicMock()
     client.validate_item.side_effect = ValueError("invalid payload")

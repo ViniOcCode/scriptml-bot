@@ -4,7 +4,8 @@ Infrastructure layer - depends on external API.
 """
 
 import logging
-from typing import Any
+from collections.abc import Callable
+from typing import Any, cast
 
 import requests
 
@@ -30,51 +31,72 @@ class CategoryAdapter(CategoryApiPort):
         """
         self.client = client
 
+    def _call_list(
+        self,
+        operation: Callable[[], Any],
+        *,
+        context: str,
+        error_level: str = "error",
+    ) -> list[dict[str, Any]]:
+        """Execute client operation and normalize list responses."""
+        try:
+            result = operation()
+        except RECOVERABLE_API_ERRORS as e:
+            getattr(logger, error_level)(f"{context}: {e}")
+            return []
+
+        if not isinstance(result, list):
+            getattr(logger, error_level)(f"{context}: invalid response type {type(result)}")
+            return []
+        return cast(list[dict[str, Any]], result)
+
+    def _call_dict(
+        self,
+        operation: Callable[[], Any],
+        *,
+        context: str,
+        error_level: str = "error",
+    ) -> dict[str, Any]:
+        """Execute client operation and normalize dict responses."""
+        try:
+            result = operation()
+        except RECOVERABLE_API_ERRORS as e:
+            getattr(logger, error_level)(f"{context}: {e}")
+            return {}
+
+        if not isinstance(result, dict):
+            getattr(logger, error_level)(f"{context}: invalid response type {type(result)}")
+            return {}
+        return cast(dict[str, Any], result)
+
     def get_site_categories(self, site_id: str) -> list[dict[str, Any]]:
         """Get all categories for a site."""
-        try:
-            return self.client.get_site_categories(site_id)
-        except RECOVERABLE_API_ERRORS as e:
-            logger.error(f"Failed to get site categories: {e}")
-            return []
+        return self._call_list(
+            lambda: self.client.get_site_categories(site_id),
+            context=f"Failed to get site categories for site {site_id}",
+        )
 
     def get_category(self, category_id: str) -> dict[str, Any]:
         """Get category details including children_categories."""
-        try:
-            result = self.client.get_category(category_id)
-            # Ensure we return a dict, not a string error
-            if not isinstance(result, dict):
-                logger.error(f"Invalid response for {category_id}: {result}")
-                return {}
-            return result
-        except RECOVERABLE_API_ERRORS as e:
-            logger.error(f"Failed to get category {category_id}: {e}")
-            return {}
+        return self._call_dict(
+            lambda: self.client.get_category(category_id),
+            context=f"Failed to get category {category_id}",
+        )
 
     def get_category_attributes(self, category_id: str) -> list[dict[str, Any]]:
         """Get attributes for a category."""
-        try:
-            result = self.client.get_category_attributes(category_id)
-            # Ensure we return a list
-            if not isinstance(result, list):
-                logger.error(f"Invalid attributes response for {category_id}: {result}")
-                return []
-            return result
-        except RECOVERABLE_API_ERRORS as e:
-            logger.error(f"Failed to get attributes for {category_id}: {e}")
-            return []
+        return self._call_list(
+            lambda: self.client.get_category_attributes(category_id),
+            context=f"Failed to get attributes for {category_id}",
+        )
 
     def get_category_technical_specs(self, category_id: str) -> dict[str, Any]:
         """Get technical specs input for a category."""
-        try:
-            result = self.client.get_category_technical_specs(category_id)
-            if not isinstance(result, dict):
-                logger.error(f"Invalid technical specs response for {category_id}: {result}")
-                return {}
-            return result
-        except RECOVERABLE_API_ERRORS as e:
-            logger.debug(f"Failed to get technical specs for {category_id}: {e}")
-            return {}
+        return self._call_dict(
+            lambda: self.client.get_category_technical_specs(category_id),
+            context=f"Failed to get technical specs for {category_id}",
+            error_level="debug",
+        )
 
     def get_category_conditional_attributes(
         self, category_id: str, item_context: dict[str, Any]
@@ -92,7 +114,8 @@ class CategoryAdapter(CategoryApiPort):
             result = self.client.get_category_conditional_attributes(category_id, item_context)
             # API returns dict with 'required_attributes' key, not a list
             if isinstance(result, dict) and "required_attributes" in result:
-                return result["required_attributes"]
+                required = result["required_attributes"]
+                return required if isinstance(required, list) else []
             # Ensure we return a list
             if not isinstance(result, list):
                 logger.debug(f"Expected list or dict for conditionals, got {type(result)}")
@@ -106,16 +129,11 @@ class CategoryAdapter(CategoryApiPort):
         self, title: str, site_id: str = "MLB", limit: int | None = None
     ) -> list[dict[str, Any]]:
         """Predict category based on product title."""
-        try:
-            result = self.client.predict_category(title, site_id, limit=limit)
-            # Ensure we return a list
-            if not isinstance(result, list):
-                logger.warning(f"Expected list for predictions, got {type(result)}")
-                return []
-            return result
-        except RECOVERABLE_API_ERRORS as e:
-            logger.warning(f"Failed to predict category for '{title}': {e}")
-            return []
+        return self._call_list(
+            lambda: self.client.predict_category(title, site_id, limit=limit),
+            context=f"Failed to predict category for '{title}'",
+            error_level="warning",
+        )
 
     def validate_item(self, item: dict[str, Any]) -> dict[str, Any]:
         """Validate item before publishing."""
