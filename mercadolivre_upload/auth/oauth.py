@@ -26,7 +26,7 @@ class OAuthHandler:
     """
 
     AUTH_URL = "https://auth.mercadolivre.com.br/authorization"
-    TOKEN_URL = "https://api.mercadolibre.com/oauth/token"  # noqa: S105  # noqa: S105
+    TOKEN_URL = "https://api.mercadolibre.com/oauth/token"  # noqa: S105  # nosec B105
 
     def __init__(
         self,

@@ -134,8 +134,8 @@ class MLApiClient:
         if endpoint.strip("/") == "items/validate" and resp.status_code == 400:
             try:
                 return cast(dict[str, Any], resp.json())
-            except Exception:  # noqa: S110
-                pass
+            except ValueError as exc:
+                logger.warning("Validation endpoint returned non-JSON response: %s", exc)
 
         resp.raise_for_status()
         return cast(dict[str, Any], resp.json())

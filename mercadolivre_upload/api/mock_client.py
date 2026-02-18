@@ -1,5 +1,6 @@
 """Mock API client for testing without real auth."""
 
+from secrets import randbelow
 from typing import Any
 
 
@@ -23,10 +24,8 @@ class MockMLApiClient:
 
     def publish_item(self, item_data: dict[str, Any]) -> dict[str, Any]:
         """Simulate publishing."""
-        import random
-
         return {
-            "id": f"MLB{random.randint(1000000000, 9999999999)}",  # noqa: S311  # noqa: S311
+            "id": f"MLB{1000000000 + randbelow(9000000000)}",
             "status": "active",
             "permalink": "https://mercadolivre.com.br/...",
         }

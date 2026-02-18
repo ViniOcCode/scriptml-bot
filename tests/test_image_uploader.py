@@ -5,6 +5,7 @@ Tests for image_uploader.py - 100% coverage.
 import base64
 import hashlib
 import logging
+import tempfile
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -49,7 +50,7 @@ class TestImageUploader:
         """Test default initialization."""
         uploader = ImageUploader()
         assert uploader.api_client is None
-        assert uploader.base_path == Path("/tmp/uploads")
+        assert uploader.base_path == Path(tempfile.gettempdir()) / "uploads"
         assert uploader._uploaded_images == []
 
     def test_init_with_api_client(self):
@@ -115,8 +116,8 @@ class TestImageUploader:
         """Test hash calculation."""
         hash_result = uploader.calculate_hash(temp_image)
 
-        # Verify it's a valid MD5 hash (32 hex chars)
-        assert len(hash_result) == 32
+        # Verify it's a valid SHA-256 hash (64 hex chars)
+        assert len(hash_result) == 64
         assert all(c in "0123456789abcdef" for c in hash_result)
 
         # Verify consistency
@@ -129,7 +130,7 @@ class TestImageUploader:
         content = b"test content"
         img_path.write_bytes(content)
 
-        expected_hash = hashlib.md5(content).hexdigest()
+        expected_hash = hashlib.sha256(content).hexdigest()
         assert uploader.calculate_hash(str(img_path)) == expected_hash
 
     # ==================== encode_base64 ====================

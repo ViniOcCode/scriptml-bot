@@ -609,8 +609,8 @@ class FiscalService:
                     first_cause = causes[0]
                     if isinstance(first_cause, dict):
                         return first_cause.get("code")
-        except Exception:  # noqa: S110
-            pass  # Best-effort error code extraction
+        except ValueError as exc:
+            logger.debug("Unable to decode fiscal error payload: %s", exc)
 
         return None
 
