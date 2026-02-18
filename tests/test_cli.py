@@ -56,6 +56,8 @@ class TestUploadCommand:
         assert kwargs["cache_dir"] == Path("cache/categories")
         assert kwargs["dry_run"] is False
         assert kwargs["detailed"] is False
+        assert kwargs["batch_size"] == 5
+        assert kwargs["report_dir"] == Path("cache/reports")
 
     @patch("mercadolivre_upload.cli.app.import_module")
     def test_upload_accepts_excel_option(self, mock_import_module):
@@ -76,12 +78,18 @@ class TestUploadCommand:
                     "--category",
                     "test-category",
                     "--dry-run",
+                    "--batch-size",
+                    "3",
+                    "--report-dir",
+                    "batch-reports",
                 ],
             )
 
         assert result.exit_code == 0
         kwargs = mock_upload_module.upload.call_args.kwargs
         assert kwargs["dry_run"] is True
+        assert kwargs["batch_size"] == 3
+        assert kwargs["report_dir"] == Path("batch-reports")
 
     def test_upload_requires_new_flow_params(self):
         """Test upload requires --images and --category."""
