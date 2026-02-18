@@ -212,7 +212,7 @@ class FiscalService:
         try:
             payload = response.json()
             return payload if isinstance(payload, dict) else None
-        except Exception:  # noqa: S110
+        except ValueError:
             return None
 
     def _wait_for_fiscal_data_ready(
