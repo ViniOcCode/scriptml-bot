@@ -51,20 +51,32 @@ def validate(  # type: ignore[no-untyped-def]
         raise typer.Exit(1) from e
 
     # Validate products
-    errors = []
-    for product in products:
-        # Basic validation
-        if not product.title:  # type: ignore[attr-defined]
-            errors.append(f"{product.sku}: Missing title")  # type: ignore[attr-defined]
-        if not product.price or product.price <= 0:  # type: ignore[attr-defined]
-            errors.append(f"{product.sku}: Invalid price")  # type: ignore[attr-defined]
-        if not product.sku:  # type: ignore[attr-defined]
-            errors.append(f"Product {product.title[:30]}: Missing SKU")  # type: ignore[attr-defined]
+    errors: list[str] = []
+    for index, product in enumerate(products, start=1):
+        title = str(
+            product.get("titulo") or product.get("title") or product.get("nome") or ""
+        ).strip()
+        sku = str(product.get("sku") or "").strip()
+        price_raw = product.get("preco", product.get("price"))
+
+        try:
+            price = float(str(price_raw).replace(",", ".")) if price_raw not in (None, "") else None
+        except (TypeError, ValueError):
+            price = None
+
+        row_label = sku or f"Linha {index}"
+        if not title:
+            errors.append(f"{row_label}: Missing title")
+        if price is None or price <= 0:
+            errors.append(f"{row_label}: Invalid price")
+        if not sku:
+            errors.append(f"Linha {index}: Missing SKU")
 
     if errors:
         console.print(f"[red]✗ Validation failed: {len(errors)} errors[/red]")
         if detailed:
             for error in errors[:10]:
                 console.print(f"  • {error}")
+        raise typer.Exit(1)
     else:
         console.print(f"[green]✓ All {len(products)} products valid![/green]")

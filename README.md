@@ -19,10 +19,12 @@ A CLI tool to prepare, validate and publish product listings to Mercado Libre fr
   ```bash
   ml-upload --help
   ml-upload upload <SPREADSHEET.xlsx> --images <dir> --category "<Cat>" [--dry-run]
-  ml-upload validate <SPREADSHEET.xlsx>
+  ml-upload validate <SPREADSHEET.xlsx> --images <dir> --category "<Cat>"
   ml-upload doctor
   ml-upload cache --help
   ```
+
+- Legacy fallback paths were removed: both `upload` and `validate` now run only through the new flow.
 
 ## Authentication flow
 
