@@ -6,10 +6,13 @@ Infrastructure layer - depends on external API.
 import logging
 from typing import Any
 
+import requests
+
 from mercadolivre_upload.api.client import MLApiClient
 from mercadolivre_upload.domain.category.resolver import CategoryApiPort
 
 logger = logging.getLogger(__name__)
+RECOVERABLE_API_ERRORS = (requests.RequestException, ValueError, TypeError, RuntimeError)
 
 
 class CategoryAdapter(CategoryApiPort):
@@ -31,7 +34,7 @@ class CategoryAdapter(CategoryApiPort):
         """Get all categories for a site."""
         try:
             return self.client.get_site_categories(site_id)
-        except Exception as e:
+        except RECOVERABLE_API_ERRORS as e:
             logger.error(f"Failed to get site categories: {e}")
             return []
 
@@ -44,7 +47,7 @@ class CategoryAdapter(CategoryApiPort):
                 logger.error(f"Invalid response for {category_id}: {result}")
                 return {}
             return result
-        except Exception as e:
+        except RECOVERABLE_API_ERRORS as e:
             logger.error(f"Failed to get category {category_id}: {e}")
             return {}
 
@@ -57,7 +60,7 @@ class CategoryAdapter(CategoryApiPort):
                 logger.error(f"Invalid attributes response for {category_id}: {result}")
                 return []
             return result
-        except Exception as e:
+        except RECOVERABLE_API_ERRORS as e:
             logger.error(f"Failed to get attributes for {category_id}: {e}")
             return []
 
@@ -69,7 +72,7 @@ class CategoryAdapter(CategoryApiPort):
                 logger.error(f"Invalid technical specs response for {category_id}: {result}")
                 return {}
             return result
-        except Exception as e:
+        except RECOVERABLE_API_ERRORS as e:
             logger.debug(f"Failed to get technical specs for {category_id}: {e}")
             return {}
 
@@ -95,7 +98,7 @@ class CategoryAdapter(CategoryApiPort):
                 logger.debug(f"Expected list or dict for conditionals, got {type(result)}")
                 return []
             return result
-        except Exception as e:
+        except RECOVERABLE_API_ERRORS as e:
             logger.debug(f"Failed to get conditional attributes for {category_id}: {e}")
             return []
 
@@ -110,7 +113,7 @@ class CategoryAdapter(CategoryApiPort):
                 logger.warning(f"Expected list for predictions, got {type(result)}")
                 return []
             return result
-        except Exception as e:
+        except RECOVERABLE_API_ERRORS as e:
             logger.warning(f"Failed to predict category for '{title}': {e}")
             return []
 
@@ -118,7 +121,7 @@ class CategoryAdapter(CategoryApiPort):
         """Validate item before publishing."""
         try:
             return self.client.validate_item(item)
-        except Exception as e:
+        except RECOVERABLE_API_ERRORS as e:
             logger.error(f"Failed to validate item: {e}")
             return {"valid": False, "error": str(e)}
 

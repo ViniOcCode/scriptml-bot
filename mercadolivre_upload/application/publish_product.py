@@ -1287,14 +1287,14 @@ class PublishProductUseCase:
         unit_marker = re.compile(unit_pattern, re.IGNORECASE)
 
         for attr in attrs:
-            try:
-                name = str(attr.get("name", "")).lower()
-            except Exception:
-                name = ""
-            try:
-                attr_id = str(attr.get("id", "")).upper()
-            except Exception:
-                attr_id = ""
+            if not isinstance(attr, dict):
+                logger.debug("Skipping non-dict attribute during normalization: %r", attr)
+                continue
+
+            name_raw = attr.get("name")
+            attr_id_raw = attr.get("id")
+            name = str(name_raw).lower() if name_raw is not None else ""
+            attr_id = str(attr_id_raw).upper() if attr_id_raw is not None else ""
 
             source_text = f"{name} {attr_id.lower()}".strip()
             is_weight = (
