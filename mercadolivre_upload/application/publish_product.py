@@ -176,6 +176,34 @@ class PublishProductUseCase:
 
         return sku, title
 
+    @staticmethod
+    def _extract_product_title(product: Product | dict[str, Any]) -> str | None:
+        """Extract a normalized title from Product/dict with compatibility key lookup."""
+        title: Any | None = None
+        if isinstance(product, dict):
+            # Try exact key matches first.
+            for key in ["título", "titulo", "title", "nome"]:
+                if key in product:
+                    title = product[key]
+                    break
+
+            # Backward-compatible fallback: keys that start with title patterns.
+            if title is None:
+                for key in product:
+                    key_lower = str(key).lower().strip()
+                    if any(
+                        key_lower.startswith(pattern) for pattern in ["título", "titulo", "title"]
+                    ):
+                        title = product[key]
+                        break
+        else:
+            title = getattr(product, "title", None)
+
+        if not isinstance(title, str):
+            return None
+        title_str = title.strip()
+        return title_str or None
+
     def execute(
         self, products: list[Product | dict[str, Any]], category_name: str
     ) -> dict[str, Any]:
@@ -190,8 +218,15 @@ class PublishProductUseCase:
         """
         self._reset_execution_state()
 
-        # Strategy 1: Find category by name (fast root match)
-        category_id = self.category_resolver.find_category(category_name)
+        category_input = str(category_name).strip()
+        category_id = None
+
+        # Strategy 0: Accept direct category IDs (e.g. MLB1234)
+        if re.fullmatch(r"[A-Z]{3}\d+", category_input):
+            category_id = category_input
+        else:
+            # Strategy 1: Find category by name (fast root match)
+            category_id = self.category_resolver.find_category(category_input)
 
         # Strategy 2: Use domain discovery with product titles
         if not category_id and products:
@@ -202,70 +237,29 @@ class PublishProductUseCase:
             # Extract titles from products
             titles = []
             for product in products:
-                title = None
-                if isinstance(product, dict):
-                    # Try multiple key variations (with/without accents)
-                    # First try exact matches
-                    for key in ["título", "titulo", "title", "nome"]:
-                        if key in product:
-                            title = product[key]
-                            break
-
-                    # If not found, try keys that start with these patterns
-                    if not title:
-                        for key in product:
-                            key_lower = str(key).lower().strip()
-                            if any(
-                                key_lower.startswith(pattern)
-                                for pattern in ["título", "titulo", "title"]
-                            ):
-                                title = product[key]
-                                break
-                else:
-                    title = getattr(product, "title", None)
-
-                if title and isinstance(title, str) and len(title.strip()) > 0:
-                    titles.append(str(title).strip())
+                title = self._extract_product_title(product)
+                if title:
+                    titles.append(title)
 
             if titles:
                 logger.info(f"Extracted {len(titles)} titles for prediction")
                 category_id = self.category_resolver.find_category_with_predictor(
-                    category_name, titles
+                    category_input, titles
                 )
 
         # Strategy 3: Fallback to simple title prediction (for backwards compatibility)
         if not category_id and products:
             logger.info("Trying simple domain discovery fallback...")
             for product in products:
-                title = None
-                if isinstance(product, dict):
-                    for key in ["título", "titulo", "title", "nome"]:
-                        if key in product:
-                            title = product[key]
-                            break
-
-                    if not title:
-                        for key in product:
-                            key_lower = str(key).lower().strip()
-                            if any(
-                                key_lower.startswith(pattern)
-                                for pattern in ["título", "titulo", "title"]
-                            ):
-                                title = product[key]
-                                break
-                else:
-                    title = getattr(product, "title", None)
-
-                if title and isinstance(title, str):
-                    title_str = str(title).strip()
-
+                title_str = self._extract_product_title(product)
+                if title_str:
                     category_id = self.category_resolver.predict_category_from_title(title_str)
                     if category_id:
                         logger.info(f"Found category from title '{title_str[:30]}...'")
                         break
 
         if not category_id:
-            error_msg = f"Category not found: {category_name}"
+            error_msg = f"Category not found: {category_input}"
             logger.error(error_msg)
             item_results = []
             for index, product in enumerate(products):
@@ -292,6 +286,30 @@ class PublishProductUseCase:
         if leaf_category_id != category_id:
             logger.info(f"Resolved to leaf category: {leaf_category_id}")
             category_id = leaf_category_id
+
+        is_listing_allowed = getattr(self.category_resolver, "is_listing_allowed", None)
+        if callable(is_listing_allowed) and not is_listing_allowed(category_id):
+            error_msg = f"Category not available for listing: {category_id}"
+            logger.error(error_msg)
+            item_results = []
+            for index, product in enumerate(products):
+                sku, title = self._extract_item_identity(product)
+                item_results.append(
+                    {
+                        "index": index,
+                        "sku": sku,
+                        "title": title,
+                        "status": "failed",
+                        "error": error_msg,
+                    }
+                )
+            return {
+                "success": False,
+                "published": 0,
+                "failed": len(products),
+                "errors": [error_msg],
+                "item_results": item_results,
+            }
 
         logger.info(f"Publishing {len(products)} products to category {category_id}")
 

@@ -136,7 +136,7 @@ class CategoryResolver:
         name: str,
         parent_id: str,
         parent_name: str = "",
-        visited: set | None = None,  # type: ignore[type-arg]
+        visited: set[str] | None = None,
         depth: int = 0,
         max_depth: int = 5,
         min_similarity: float = 0.8,
@@ -469,6 +469,27 @@ class CategoryResolver:
 
         return {}
 
+    def is_listing_allowed(self, category_id: str) -> bool:
+        """Check whether category is enabled for listing.
+
+        Uses category settings fields documented by Mercado Livre:
+        - settings.listing_allowed should be true
+        - settings.status should be enabled
+        """
+        data = self._get_category_cached(category_id)
+        if not data:
+            return False
+
+        settings = data.get("settings", {})
+        if not isinstance(settings, dict):
+            return True
+
+        if settings.get("listing_allowed") is False:
+            return False
+
+        status = settings.get("status")
+        return not (isinstance(status, str) and status and status != "enabled")
+
     def find_category_by_name_or_title(
         self, name: str | None = None, title: str | None = None, site_id: str = "MLB"
     ) -> str | None:
@@ -682,7 +703,10 @@ class CategoryResolver:
             spec_map = self._extract_technical_spec_attributes(technical_specs)
             if spec_map:
                 for attr in raw_attributes:
-                    spec = spec_map.get(attr.get("id"))
+                    attr_id = attr.get("id")
+                    if not isinstance(attr_id, str):
+                        continue
+                    spec = spec_map.get(attr_id)
                     if spec:
                         self._merge_technical_spec(attr, spec)
 
