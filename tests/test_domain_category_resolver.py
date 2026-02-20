@@ -150,6 +150,41 @@ def test_resolve_to_leaf_returns_original_for_non_dict_category() -> None:
     assert resolver.resolve_to_leaf("MLB1") == "MLB1"
 
 
+def test_resolve_to_leaf_selects_most_populated_child() -> None:
+    api = _FakeApi()
+    api.categories["MLB1"] = {
+        "children_categories": [
+            {"id": "MLB11", "name": "Child A", "total_items_in_this_category": 2},
+            {"id": "MLB12", "name": "Child B", "total_items_in_this_category": 8},
+        ]
+    }
+    api.categories["MLB12"] = {"children_categories": []}
+    resolver = CategoryResolver(api)
+
+    assert resolver.resolve_to_leaf("MLB1") == "MLB12"
+
+
+def test_is_listing_allowed_uses_category_settings() -> None:
+    api = _FakeApi()
+    api.categories["ENABLED"] = {
+        "settings": {"listing_allowed": True, "status": "enabled"},
+        "children_categories": [],
+    }
+    api.categories["NOT_ALLOWED"] = {
+        "settings": {"listing_allowed": False, "status": "enabled"},
+        "children_categories": [],
+    }
+    api.categories["PAUSED"] = {
+        "settings": {"listing_allowed": True, "status": "disabled"},
+        "children_categories": [],
+    }
+    resolver = CategoryResolver(api)
+
+    assert resolver.is_listing_allowed("ENABLED") is True
+    assert resolver.is_listing_allowed("NOT_ALLOWED") is False
+    assert resolver.is_listing_allowed("PAUSED") is False
+
+
 def test_get_attribute_metadata_handles_technical_specs_failure() -> None:
     api = _FakeApi()
     api.attributes = [{"id": "BRAND", "name": "Marca", "value_type": "string"}]

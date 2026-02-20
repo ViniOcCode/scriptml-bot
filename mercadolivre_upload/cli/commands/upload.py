@@ -26,9 +26,9 @@ from mercadolivre_upload.shared.utils.config_loader import load_yaml_config as _
 logger = logging.getLogger(__name__)
 
 
-def load_config():  # type: ignore[no-untyped-def]
+def load_config() -> dict[str, Any]:
     """Load configuration from split YAML files with legacy fallback."""
-    config = {}
+    config: dict[str, Any] = {}
     for path in [
         Path("config/standard_fields.yaml"),
         Path("config/shipping.yaml"),
@@ -75,8 +75,28 @@ def _extract_row_identity(row: dict[str, Any]) -> tuple[str | None, str | None]:
     return sku, title
 
 
+def _extract_row_category(row: dict[str, Any]) -> str | None:
+    direct_keys = ("category_id", "category", "categoria", "categoria_id", "my_category")
+    for key in direct_keys:
+        value = row.get(key)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+
+    for key, value in row.items():
+        normalized = str(key).strip().lower().replace(" ", "_").replace("-", "_")
+        if normalized in direct_keys:
+            text = str(value).strip()
+            if text:
+                return text
+
+    return None
+
+
 @app.callback(invoke_without_command=True)
-def upload(  # type: ignore[no-untyped-def]
+def upload(
     excel: Path = typer.Option(..., "--excel", "-e", help="Excel file path"),  # noqa: B008
     images: Path = typer.Option(..., "--images", "-i", help="Images directory"),  # noqa: B008
     category: str = typer.Option(..., "--category", "-c", help="Category name"),  # noqa: B008
@@ -85,12 +105,12 @@ def upload(  # type: ignore[no-untyped-def]
     detailed: bool = typer.Option(False, "--detailed", "-d"),  # noqa: B008
     batch_size: int = typer.Option(5, "--batch-size", min=1, help="Items per batch"),  # noqa: B008
     report_dir: Path = typer.Option(Path("cache/reports"), "--report-dir"),  # noqa: B008
-):
+) -> Any:
     """Upload products from Excel to Mercado Livre."""
     console.print(Panel.fit("Mercado Livre Bulk Upload", style="cyan"))
 
     # Load configuration
-    config = load_config()  # type: ignore[no-untyped-call]
+    config = load_config()
 
     # Defensive: if cache_dir is OptionInfo, use default
     if isinstance(cache_dir, typer.models.OptionInfo):
@@ -152,7 +172,7 @@ def upload(  # type: ignore[no-untyped-def]
     try:
         products = parser.parse(excel)
         console.print(f"Found {len(products)} products")
-    except Exception as e:
+    except (FileNotFoundError, ValueError) as e:
         err_console.print(f"[red]Error parsing Excel: {e}[/red]")
         raise typer.Exit(1) from e
 
@@ -178,16 +198,6 @@ def upload(  # type: ignore[no-untyped-def]
         batch_products = products[start : start + batch_size]
         console.print(f"[cyan]Processing batch {batch_index}/{total_batches}...[/cyan]")
 
-        results = use_case.execute(batch_products, category)  # type: ignore[arg-type]
-        batch_published = int(results.get("published", 0))
-        batch_failed = int(results.get("failed", 0))
-        total_published += batch_published
-        total_failed += batch_failed
-        total_clips_uploaded += int(results.get("clips_uploaded", 0))
-        total_clips_failed += int(results.get("clips_failed", 0))
-        all_errors.extend(str(error) for error in results.get("errors", []))
-
-        raw_item_results = results.get("item_results", [])
         item_results: list[dict[str, Any]] = []
         for index, row in enumerate(batch_products):
             sku, title = _extract_row_identity(row)
@@ -200,26 +210,71 @@ def upload(  # type: ignore[no-untyped-def]
                     "error": "Missing item result from use case",
                 }
             )
+        grouped_products: dict[str, list[tuple[int, dict[str, Any]]]] = {}
+        for index, row in enumerate(batch_products):
+            row_category = _extract_row_category(row) or category
+            grouped_products.setdefault(row_category, []).append((index, row))
 
-        if isinstance(raw_item_results, list):
-            for position, item in enumerate(raw_item_results):
-                if not isinstance(item, dict):
-                    continue
+        batch_published = 0
+        batch_failed = 0
+        batch_clips_uploaded = 0
+        batch_clips_failed = 0
+        batch_errors: list[str] = []
 
-                target_index = item.get("index")
-                if not isinstance(target_index, int):
-                    target_index = position
-                if target_index < 0 or target_index >= len(batch_products):
-                    continue
+        for group_category, indexed_rows in grouped_products.items():
+            rows_for_category = [row for _, row in indexed_rows]
+            results = use_case.execute(rows_for_category, group_category)  # type: ignore[arg-type]
 
-                row_status = str(item.get("status", "failed")).lower()
-                item_results[target_index] = {
-                    "index": target_index,
-                    "sku": item.get("sku") or item_results[target_index]["sku"],
-                    "title": item.get("title") or item_results[target_index]["title"],
-                    "status": "success" if row_status == "success" else "failed",
-                    "error": item.get("error"),
-                }
+            batch_published += int(results.get("published", 0))
+            batch_failed += int(results.get("failed", 0))
+            batch_clips_uploaded += int(results.get("clips_uploaded", 0))
+            batch_clips_failed += int(results.get("clips_failed", 0))
+            batch_errors.extend(str(error) for error in results.get("errors", []))
+
+            grouped_results: list[dict[str, Any]] = []
+            for group_index, (_, row) in enumerate(indexed_rows):
+                sku, title = _extract_row_identity(row)
+                grouped_results.append(
+                    {
+                        "index": group_index,
+                        "sku": sku,
+                        "title": title,
+                        "status": "failed",
+                        "error": "Missing item result from use case",
+                    }
+                )
+
+            raw_item_results = results.get("item_results", [])
+            if isinstance(raw_item_results, list):
+                for position, item in enumerate(raw_item_results):
+                    if not isinstance(item, dict):
+                        continue
+
+                    target_index = item.get("index")
+                    if not isinstance(target_index, int):
+                        target_index = position
+                    if target_index < 0 or target_index >= len(indexed_rows):
+                        continue
+
+                    row_status = str(item.get("status", "failed")).lower()
+                    grouped_results[target_index] = {
+                        "index": target_index,
+                        "sku": item.get("sku") or grouped_results[target_index]["sku"],
+                        "title": item.get("title") or grouped_results[target_index]["title"],
+                        "status": "success" if row_status == "success" else "failed",
+                        "error": item.get("error"),
+                    }
+
+            for group_index, (batch_index_pos, _) in enumerate(indexed_rows):
+                mapped = dict(grouped_results[group_index])
+                mapped["index"] = batch_index_pos
+                item_results[batch_index_pos] = mapped
+
+        total_published += batch_published
+        total_failed += batch_failed
+        total_clips_uploaded += batch_clips_uploaded
+        total_clips_failed += batch_clips_failed
+        all_errors.extend(batch_errors)
 
         for index, row in enumerate(batch_products):
             item_result = item_results[index]
