@@ -45,6 +45,48 @@ def load_config() -> dict[str, Any]:
     return config
 
 
+def build_publish_use_case(
+    *,
+    images: Path,
+    cache_dir: Path,
+    config: dict[str, Any],
+    dry_run: bool = False,
+    validation_only: bool = False,
+) -> PublishProductUseCase:
+    """Build upload/validate use case with shared dependency wiring."""
+    auth_manager = AuthManager()
+    api_client = MLApiClient(auth_manager)
+    cache = AttributeCache(cache_dir=str(cache_dir))
+
+    from mercadolivre_upload.infrastructure.cache.prediction_cache import PredictionCache
+
+    prediction_cache = PredictionCache(cache_dir=str(cache_dir / "predictions"))
+    category_adapter = CategoryAdapter(api_client)
+    image_uploader = ImageUploader(api_client, images)
+
+    from mercadolivre_upload.adapters.clip_uploader import ClipUploader
+
+    clip_uploader = ClipUploader(api_client, base_path=images)
+    category_resolver = CategoryResolver(
+        category_adapter, attribute_cache=cache, prediction_cache=prediction_cache
+    )
+    shipping_resolver = ShippingResolver(api_client)
+    fiscal_service = FiscalService(api_client)  # type: ignore[arg-type]
+
+    return PublishProductUseCase(
+        category_resolver=category_resolver,
+        publisher=api_client,
+        image_uploader=image_uploader,
+        shipping_resolver=shipping_resolver,
+        fiscal_service=fiscal_service,
+        clip_uploader=clip_uploader,
+        config=config,
+        dry_run=dry_run,
+        validation_only=validation_only,
+        attribute_cache=cache,
+    )
+
+
 console = Console()
 err_console = Console(stderr=True)
 
@@ -128,43 +170,11 @@ def upload(
         err_console.print("[red]batch-size must be greater than zero[/red]")
         raise typer.Exit(1)
 
-    # Initialize infrastructure
-    auth_manager = AuthManager()
-    api_client = MLApiClient(auth_manager)
-    cache = AttributeCache(cache_dir=str(cache_dir))
-
-    # Initialize prediction cache
-    from mercadolivre_upload.infrastructure.cache.prediction_cache import PredictionCache
-
-    prediction_cache = PredictionCache(cache_dir=str(cache_dir / "predictions"))
-
-    # Initialize adapters
-    category_adapter = CategoryAdapter(api_client)
-    image_uploader = ImageUploader(api_client, images)
-
-    # Initialize clip uploader (discovers videos in same images directory)
-    from mercadolivre_upload.adapters.clip_uploader import ClipUploader
-
-    clip_uploader = ClipUploader(api_client, base_path=images)
-
-    # Initialize domain services
-    category_resolver = CategoryResolver(
-        category_adapter, attribute_cache=cache, prediction_cache=prediction_cache
-    )
-    shipping_resolver = ShippingResolver(api_client)
-    fiscal_service = FiscalService(api_client)  # type: ignore[arg-type]
-
-    # Initialize use case
-    use_case = PublishProductUseCase(
-        category_resolver=category_resolver,
-        publisher=api_client,
-        image_uploader=image_uploader,
-        shipping_resolver=shipping_resolver,
-        fiscal_service=fiscal_service,
-        clip_uploader=clip_uploader,
+    use_case = build_publish_use_case(
+        images=images,
+        cache_dir=cache_dir,
         config=config,
         dry_run=dry_run,
-        attribute_cache=cache,
     )
 
     # Parse products

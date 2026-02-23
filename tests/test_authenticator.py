@@ -333,7 +333,9 @@ class TestAuthManager:
         from mercadolivre_upload.auth.oauth import OAuthHandler
 
         mock_response = Mock()
-        mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError("400 Client Error")
+        mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError(
+            "400 Client Error"
+        )
         mock_post.return_value = mock_response
 
         handler = OAuthHandler(client_id="test_app", client_secret="test_secret")

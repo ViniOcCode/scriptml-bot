@@ -64,7 +64,11 @@ class SecureTokenStorage:
         env_key = os.environ.get("ENCRYPTION_KEY")
         if env_key:
             logger.debug("Using encryption key from environment variable")
-            return env_key.encode()[:32].ljust(32, b"\0")
+            env_key_bytes = env_key.encode()
+            # Allow passing a full Fernet key directly.
+            if len(env_key_bytes) == 44:
+                return env_key_bytes
+            return env_key_bytes[:32].ljust(32, b"\0")
 
         # Priority 2: System keyring
         if KEYRING_AVAILABLE:
@@ -93,6 +97,21 @@ class SecureTokenStorage:
 
         return key
 
+    def _get_or_create_salt(self) -> bytes:
+        """Get a stable KDF salt for non-Fernet keys."""
+        salt_path = self.token_path.parent / self.SALT_FILE
+        if salt_path.exists():
+            salt = salt_path.read_bytes()
+            if len(salt) == 16:
+                return salt
+            logger.warning(f"Invalid salt file size at {salt_path}; regenerating salt.")
+
+        salt = os.urandom(16)
+        salt_path.parent.mkdir(parents=True, exist_ok=True)
+        salt_path.write_bytes(salt)
+        os.chmod(salt_path, 0o600)
+        return salt
+
     def _get_fernet(self) -> Fernet:
         """Get or create Fernet cipher instance."""
         if self._cipher is None:
@@ -107,7 +126,7 @@ class SecureTokenStorage:
                 kdf = PBKDF2HMAC(
                     algorithm=hashes.SHA256(),
                     length=32,
-                    salt=os.urandom(16),
+                    salt=self._get_or_create_salt(),
                     iterations=100000,
                 )
                 fernet_key = base64.urlsafe_b64encode(kdf.derive(key))

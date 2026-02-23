@@ -144,6 +144,8 @@ class TestValidateCommand:
         assert kwargs["category"] == "test-category"
         assert kwargs["cache_dir"] == Path("cache/categories")
         assert kwargs["detailed"] is True
+        assert kwargs["batch_size"] == 5
+        assert kwargs["report_dir"] == Path("cache/reports")
 
     def test_validate_requires_new_flow_params(self):
         """Test validate requires --images and --category."""

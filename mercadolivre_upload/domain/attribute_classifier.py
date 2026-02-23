@@ -104,7 +104,7 @@ class AttributeClassifier:
         Returns:
             Dictionary mapping classification to list of attributes
         """
-        result = {  # type: ignore[var-annotated]
+        result: dict[str, list[AttributeMeta]] = {
             CLASS_EDITORIAL: [],
             CLASS_TECHNICAL: [],
             CLASS_COMMERCIAL: [],

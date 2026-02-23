@@ -32,6 +32,10 @@ A CLI tool to prepare, validate and publish product listings to Mercado Libre fr
 
 - OAuth2 authorization/code exchange is done manually outside the CLI.
 - Store the returned tokens in `tokens.json` (or set `MERCADO_LIVRE_TOKEN_PATH`).
+- Optional hardening: set `MERCADO_LIVRE_USE_SECURE_STORAGE=1` to persist tokens in
+  encrypted `*.enc` storage managed by `SecureTokenStorage`.
+- Optional migration: set `MERCADO_LIVRE_AUTO_MIGRATE_TOKENS=1` together with secure mode
+  to migrate an existing plaintext token file to encrypted storage.
 - The app uses `TokenManager` to auto-refresh access tokens when expired.
 - After refresh, always persist the newest `refresh_token` returned by Mercado Libre.
 
@@ -40,8 +44,11 @@ A CLI tool to prepare, validate and publish product listings to Mercado Libre fr
 - Full test suite:
 
   ```bash
-  uv run pytest
+  uv run pytest -q
   ```
+
+- Coverage policy:
+  - Repository gate is `--cov-fail-under=60` (configured in `pyproject.toml`).
 
 - Run a single test / file:
 
@@ -54,10 +61,13 @@ A CLI tool to prepare, validate and publish product listings to Mercado Libre fr
 
   ```bash
   uv run ruff check .
-  uv run black --check .
+  uv run black --check --diff .
   uv run mypy mercadolivre_upload/
   uv run pre-commit run --all-files
   ```
+
+- CI quality gates are enforced in `.github/workflows/quality-gates.yml` in this order:
+  lint -> format -> type check -> tests/coverage -> security (bandit).
 
 ## What this project does (overview)
 

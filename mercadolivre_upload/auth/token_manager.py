@@ -8,6 +8,14 @@ from typing import Any
 
 from .exceptions import AuthError, TokenExpiredError
 from .oauth import OAuthHandler
+from .secure_storage import SecureTokenStorage, migrate_plaintext_tokens
+
+
+def _is_truthy_env(value: str | None) -> bool:
+    """Return whether an environment value should be interpreted as true."""
+    if value is None:
+        return False
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 class TokenManager:
@@ -33,9 +41,25 @@ class TokenManager:
             token_path: Path to tokens.json. Defaults to 'tokens.json' in current directory
             oauth_handler: OAuthHandler for token refresh. If None, creates default
         """
-        self.token_path = Path(token_path or os.getenv("MERCADO_LIVRE_TOKEN_PATH", "tokens.json"))  # type: ignore[arg-type]
+        default_path = token_path or os.getenv("MERCADO_LIVRE_TOKEN_PATH") or "tokens.json"
+        self.token_path = Path(default_path)
         self.oauth_handler = oauth_handler or OAuthHandler()
         self._tokens: dict[str, Any] | None = None
+        self._secure_storage: SecureTokenStorage | None = None
+
+        use_secure_storage = _is_truthy_env(os.getenv("MERCADO_LIVRE_USE_SECURE_STORAGE"))
+        if use_secure_storage or self.token_path.suffix == ".enc":
+            secure_path = (
+                self.token_path
+                if self.token_path.suffix == ".enc"
+                else Path(f"{self.token_path}.enc")
+            )
+            auto_migrate = _is_truthy_env(os.getenv("MERCADO_LIVRE_AUTO_MIGRATE_TOKENS"))
+            if auto_migrate and self.token_path.exists() and not secure_path.exists():
+                migrate_plaintext_tokens(self.token_path, secure_path)
+
+            self.token_path = secure_path
+            self._secure_storage = SecureTokenStorage(token_path=self.token_path)
 
     def load_tokens(self) -> dict[str, Any]:
         """Load tokens from the JSON file.
@@ -48,8 +72,14 @@ class TokenManager:
             json.JSONDecodeError: If token file is invalid JSON
         """
         if self._tokens is None:
-            with open(self.token_path, encoding="utf-8") as f:
-                self._tokens = json.load(f)
+            if self._secure_storage is not None:
+                loaded = self._secure_storage.load_tokens()
+                if loaded is None:
+                    raise FileNotFoundError(f"Token file not found: {self.token_path}")
+                self._tokens = loaded
+            else:
+                with open(self.token_path, encoding="utf-8") as f:
+                    self._tokens = json.load(f)
         return self._tokens
 
     def save_tokens(self, tokens: dict[str, Any]) -> None:
@@ -58,8 +88,11 @@ class TokenManager:
         Args:
             tokens: Dictionary containing access_token, refresh_token, and expires_at
         """
-        with open(self.token_path, "w", encoding="utf-8") as f:
-            json.dump(tokens, f, indent=2)
+        if self._secure_storage is not None:
+            self._secure_storage.save_tokens(tokens)
+        else:
+            with open(self.token_path, "w", encoding="utf-8") as f:
+                json.dump(tokens, f, indent=2)
         self._tokens = tokens
 
     def is_token_expired(self, buffer_seconds: int = 300) -> bool:
@@ -82,7 +115,10 @@ class TokenManager:
 
                 expires_at = datetime.fromisoformat(expires_at).timestamp()
 
-            return time.time() >= (expires_at - buffer_seconds)  # type: ignore[no-any-return]
+            expires_at_float = float(expires_at)
+            return time.time() >= (expires_at_float - buffer_seconds)
+        except (TypeError, ValueError):
+            return True
         except FileNotFoundError:
             return True
 
@@ -106,7 +142,10 @@ class TokenManager:
                 raise TokenExpiredError("Access token is expired")
             tokens = self.refresh_token()
 
-        return tokens["access_token"]  # type: ignore[no-any-return]
+        access_token = tokens.get("access_token")
+        if not isinstance(access_token, str) or not access_token:
+            raise TokenExpiredError("Access token is missing")
+        return access_token
 
     def refresh_token(self) -> dict[str, Any]:
         """Refresh and persist tokens using the current refresh token.
@@ -136,10 +175,13 @@ class TokenManager:
             Refresh token string
 
         Raises:
-            KeyError: If refresh_token is not in tokens
+            TokenExpiredError: If refresh_token is missing or empty
         """
         tokens = self.load_tokens()
-        return tokens["refresh_token"]  # type: ignore[no-any-return]
+        refresh_token = tokens.get("refresh_token")
+        if not isinstance(refresh_token, str) or not refresh_token:
+            raise TokenExpiredError("No refresh token available")
+        return refresh_token
 
     def invalidate_cache(self) -> None:
         """Clear the in-memory token cache.
@@ -226,5 +268,7 @@ class TokenManager:
     def logout(self) -> None:
         """Clear tokens and remove token file."""
         self._tokens = None
-        if self.token_path.exists():
+        if self._secure_storage is not None:
+            self._secure_storage.delete_tokens()
+        elif self.token_path.exists():
             self.token_path.unlink()

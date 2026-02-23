@@ -6,6 +6,7 @@ import asyncio
 import base64
 import logging
 from pathlib import Path
+from types import TracebackType
 from typing import Any
 
 import aiohttp
@@ -128,6 +129,11 @@ class AsyncImageUploader:
         """Enter async context manager."""
         return self
 
-    async def __aexit__(self, exc_type, exc, tb) -> None:  # type: ignore[no-untyped-def]
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
         """Exit async context manager and close session."""
         await self.close()
