@@ -1,5 +1,7 @@
 """Infrastructure layer for Mercado Livre Upload."""
 
+from typing import Any
+
 # Original exports
 from mercadolivre_upload.infrastructure.config import Settings, get_settings
 from mercadolivre_upload.infrastructure.logging import get_logger, setup_logging
@@ -40,11 +42,12 @@ from mercadolivre_upload.infrastructure.observability import (
 )
 
 # Ensure the cache subpackage is importable even if it's a shim we added at runtime
+AttributeCache: Any | None
 try:
     from .cache.attribute_cache import AttributeCache
-except Exception:  # noqa: BLE001
+except ImportError:
     # If the real cache package exists, it'll be imported; otherwise our shim handles it.
-    AttributeCache = None  # type: ignore[assignment, misc]
+    AttributeCache = None
 
 __all__ = [
     # Original

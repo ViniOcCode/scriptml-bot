@@ -8,6 +8,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from mercadolivre_upload.auth import AuthManager
+from mercadolivre_upload.auth.exceptions import AuthError
 
 logger = logging.getLogger(__name__)
 console = Console()
@@ -16,7 +17,7 @@ app = typer.Typer(name="doctor", help="Run health checks")
 
 
 @app.callback(invoke_without_command=True)
-def check():  # type: ignore[no-untyped-def]
+def check() -> None:
     """Run health check on environment."""
     console.print(Panel.fit("Health Check", style="cyan"))
 
@@ -32,7 +33,7 @@ def check():  # type: ignore[no-untyped-def]
         table.add_row(
             "Authentication", "[green]✓ OK[/green]" if auth_ok else "[red]✗ Not authenticated[/red]"
         )
-    except Exception:
+    except (AuthError, FileNotFoundError, ValueError):
         table.add_row("Authentication", "[red]✗ Error: Not authenticated[/red]")
 
     # Check config

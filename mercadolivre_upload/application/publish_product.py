@@ -63,6 +63,7 @@ class PublishProductUseCase:
         clip_uploader: ClipUploaderPort | None = None,
         config: dict[str, Any] | None = None,
         dry_run: bool = False,
+        validation_only: bool = False,
         min_attribute_score: int = 50,
         enable_feedback: bool = True,
         enable_fiscal_submission: bool = True,
@@ -80,6 +81,7 @@ class PublishProductUseCase:
             clip_uploader: Video clip uploader service (optional)
             config: Configuration dictionary with defaults (optional)
             dry_run: If True, only validate
+            validation_only: If True, validates payloads via /items/validate and skips create
             min_attribute_score: Minimum score for attributes (0-100)
             enable_feedback: Enable validation feedback tracking
             enable_fiscal_submission: Whether to submit fiscal data after publishing
@@ -95,6 +97,7 @@ class PublishProductUseCase:
         self.clip_uploader = clip_uploader
         self.config = config or {}
         self.dry_run = dry_run
+        self.validation_only = validation_only
         self.enable_fiscal_submission = enable_fiscal_submission
         self.cache_dir = cache_dir  # Deprecated but kept for backward compatibility
         self.attribute_cache = attribute_cache
@@ -135,6 +138,7 @@ class PublishProductUseCase:
         self._pending_fiscal: list[tuple[str, FiscalData]] = []
         self._available_listing_types_cache: dict[str, list[str]] = {}
         self._category_sale_terms_cache: dict[str, dict[str, dict[str, Any]]] = {}
+        self._current_cause_codes: list[str] = []
 
     def _reset_execution_state(self) -> None:
         """Reset per-run counters and artifacts."""
@@ -145,6 +149,7 @@ class PublishProductUseCase:
         self.clip_results = []
         self.item_results = []
         self._pending_fiscal = []
+        self._current_cause_codes = []
 
     @staticmethod
     def _extract_item_identity(product: Product | dict[str, Any]) -> tuple[str | None, str | None]:
@@ -337,6 +342,7 @@ class PublishProductUseCase:
                     )
                     continue
             previous_error_count = len(self.errors)
+            self._current_cause_codes = []
             success = self._publish_one(product, category_id)
             item_result: dict[str, Any] = {
                 "index": index,
@@ -344,6 +350,8 @@ class PublishProductUseCase:
                 "title": product.title,
                 "status": "success" if success else "failed",
             }
+            if self._current_cause_codes:
+                item_result["cause_codes"] = list(dict.fromkeys(self._current_cause_codes))
             new_errors = self.errors[previous_error_count:]
             if new_errors:
                 item_result["error"] = "; ".join(new_errors)
@@ -362,6 +370,7 @@ class PublishProductUseCase:
         return {
             "success": self.failed == 0,
             "published": self.published,
+            "validated": self.published if self.validation_only else 0,
             "failed": self.failed,
             "errors": self.errors,
             "fiscal_submitted": len([r for r in self.fiscal_results if r.success]),
@@ -624,7 +633,7 @@ class PublishProductUseCase:
             f"local_pick_up={shipping_config.get('local_pick_up')}"
         )
 
-        if self.dry_run:
+        if self.dry_run and not self.validation_only:
             logger.info(f"DRY RUN: Would publish {product.sku}")
             self.published += 1
             return True
@@ -665,10 +674,11 @@ class PublishProductUseCase:
             errors = []
             warnings = []
             shipping_issues = []
+            error_codes: list[str] = []
 
             for cause in causes:
                 cause_type = cause.get("type", "").lower()
-                cause_code = cause.get("code", "")
+                cause_code = str(cause.get("code", ""))
                 cause_message = cause.get("message", "")
                 logger.debug(f"Validation cause for {product.sku}: {cause}")
 
@@ -682,6 +692,8 @@ class PublishProductUseCase:
                 # Separate actual errors from warnings
                 if cause_type == "error":
                     errors.append(f"{cause_code}: {cause_message}")
+                    if cause_code:
+                        error_codes.append(cause_code)
                 elif cause_type == "warning":
                     warnings.append(f"{cause_code}: {cause_message}")
 
@@ -699,6 +711,7 @@ class PublishProductUseCase:
             # Only fail if there are actual errors
             if errors:
                 logger.error(f"Validation failed for {product.sku}: {errors}")
+                self._current_cause_codes = error_codes
                 self.errors.append(f"{product.sku}: {errors}")
                 self.failed += 1
                 # Record feedback
@@ -708,6 +721,7 @@ class PublishProductUseCase:
         except Exception as e:
             # Try to extract error details from exception
             error_msg = str(e)
+            cause_codes: list[str] = []
             error_detail = None
             if hasattr(e, "response") and e.response is not None:
                 try:
@@ -718,14 +732,26 @@ class PublishProductUseCase:
                     for cause in causes:
                         cause_code = cause.get("code", "").lower()
                         cause_message = cause.get("message", "").lower()
+                        if cause_code:
+                            cause_codes.append(cause_code)
                         if "shipping" in cause_code or "shipping" in cause_message:
                             logger.error(f"Shipping validation error for {product.sku}: {cause}")
                 except Exception:
                     error_msg = f"{error_msg} - {e.response.text[:200]}"
+            self._current_cause_codes = cause_codes
             logger.error(f"Validation error for {product.sku}: {error_msg}")
             self.errors.append(f"{product.sku}: {error_msg}")
             self.failed += 1
             return False
+
+        if self.validation_only:
+            logger.info(f"VALIDATION ONLY: Payload valid for {product.sku}")
+            self.published += 1
+            if self.feedback and validation_result:
+                self.feedback.record_validation_result(
+                    product.sku, ml_attributes, validation_result
+                )
+            return True
 
         # Publish
         published_item_id: str | None = None
