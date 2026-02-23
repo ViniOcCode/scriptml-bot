@@ -1,6 +1,6 @@
 """Result types for publish operations."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -11,12 +11,12 @@ class PublishResult:
     success: bool
     item_id: str | None = None
     permalink: str | None = None
-    errors: list[str] = None  # type: ignore[assignment]
-    warnings: list[str] = None  # type: ignore[assignment]
+    errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
     raw_response: dict[str, Any] | None = None
 
-    def __post_init__(self):  # type: ignore[no-untyped-def]
-        """Initialize default mutable fields."""
+    def __post_init__(self) -> None:
+        """Normalize optional mutable values."""
         if self.errors is None:
             self.errors = []
         if self.warnings is None:
@@ -30,11 +30,11 @@ class BatchPublishResult:
     published: int
     failed: int
     success: bool
-    errors: list[str] = None  # type: ignore[assignment]
-    results: list[PublishResult] = None  # type: ignore[assignment]
+    errors: list[str] = field(default_factory=list)
+    results: list[PublishResult] = field(default_factory=list)
 
-    def __post_init__(self):  # type: ignore[no-untyped-def]
-        """Initialize default mutable fields."""
+    def __post_init__(self) -> None:
+        """Normalize optional mutable values."""
         if self.errors is None:
             self.errors = []
         if self.results is None:

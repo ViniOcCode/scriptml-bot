@@ -4,7 +4,6 @@ Apenas inicialização e configuração. Comandos estão em cli/commands/.
 """
 
 import json
-import logging
 from importlib import import_module
 from pathlib import Path
 from typing import Any
@@ -12,6 +11,8 @@ from typing import Any
 import typer
 from rich.console import Console
 from rich.theme import Theme
+
+from mercadolivre_upload.infrastructure.logging import setup_logging as setup_app_logging
 
 # Configure custom theme
 console_theme = Theme(
@@ -39,25 +40,23 @@ app = typer.Typer(
 state = {"verbose": False, "output_format": "text"}
 
 
-def _get_auth_manager_cls():  # type: ignore[no-untyped-def]
+def _get_auth_manager_cls() -> Any:
     return import_module("mercadolivre_upload.cli").AuthManager
 
 
-def setup_logging(verbose: bool = False):  # type: ignore[no-untyped-def]
+def setup_logging(verbose: bool = False) -> None:
     """Configure logging based on verbosity."""
-    level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    )
+    setup_app_logging(level="DEBUG" if verbose else "INFO")
 
 
-def print_json(data: dict[str, Any]):  # type: ignore[no-untyped-def]
+def print_json(data: dict[str, Any]) -> None:
     """Print data as JSON."""
     console.print(json.dumps(data, indent=2, default=str))
 
 
-def print_result(result: dict[str, Any], success_message: str = "", error_message: str = ""):  # type: ignore[no-untyped-def]
+def print_result(
+    result: dict[str, Any], success_message: str = "", error_message: str = ""
+) -> None:
     """Print result based on output format."""
     if state["output_format"] == "json":
         print_json(result)
@@ -77,7 +76,7 @@ def print_result(result: dict[str, Any], success_message: str = "", error_messag
 
 
 @app.command()
-def upload(  # type: ignore[no-untyped-def]
+def upload(
     excel: Path | None = typer.Argument(None, help="Path to Excel file"),  # noqa: B008
     excel_option: Path | None = typer.Option(None, "--excel", "-e"),  # noqa: B008
     images: Path | None = typer.Option(None, "--images", "-i"),  # noqa: B008
@@ -87,7 +86,7 @@ def upload(  # type: ignore[no-untyped-def]
     detailed: bool = typer.Option(False, "--detailed", "-d"),  # noqa: B008
     batch_size: int = typer.Option(5, "--batch-size", min=1),  # noqa: B008
     report_dir: Path = typer.Option(Path("cache/reports"), "--report-dir"),  # noqa: B008
-):
+) -> Any:
     """Upload products using the new CLI implementation only."""
     setup_logging(verbose)
     selected_excel = excel_option or excel
@@ -112,13 +111,15 @@ def upload(  # type: ignore[no-untyped-def]
 
 
 @app.command()
-def validate(  # type: ignore[no-untyped-def]
+def validate(
     excel: Path | None = typer.Argument(None, help="Path to Excel file"),  # noqa: B008
     excel_option: Path | None = typer.Option(None, "--excel", "-e"),  # noqa: B008
     images: Path | None = typer.Option(None, "--images", "-i"),  # noqa: B008
     category: str | None = typer.Option(None, "--category", "-c"),  # noqa: B008
     detailed: bool = typer.Option(False, "--detailed", "-d"),  # noqa: B008
-):
+    batch_size: int = typer.Option(5, "--batch-size", min=1),  # noqa: B008
+    report_dir: Path = typer.Option(Path("cache/reports"), "--report-dir"),  # noqa: B008
+) -> Any:
     """Validate products using the new CLI implementation only."""
     selected_excel = excel_option or excel
     if selected_excel is None or not selected_excel.exists():
@@ -135,16 +136,18 @@ def validate(  # type: ignore[no-untyped-def]
         category=category,
         cache_dir=Path("cache/categories"),
         detailed=detailed,
+        batch_size=batch_size,
+        report_dir=report_dir,
     )
 
 
 @app.command()
-def auth(  # type: ignore[no-untyped-def]
+def auth(
     token: str | None = typer.Option(None, "--token"),  # noqa: B008
     refresh: bool = typer.Option(False, "--refresh"),  # noqa: B008
-):
+) -> None:
     """Manage authentication tokens."""
-    manager = _get_auth_manager_cls()()  # type: ignore[no-untyped-call]
+    manager = _get_auth_manager_cls()()
     if token:
         manager.set_token(token)
         console.print("Token configurado")
@@ -170,7 +173,7 @@ def auth(  # type: ignore[no-untyped-def]
         console.print("Não autenticado")
 
 
-def main():  # type: ignore[no-untyped-def]
+def main() -> None:
     """Compatibility entry point for tests."""
     import_module("mercadolivre_upload.cli").app()
 
@@ -186,14 +189,14 @@ app.add_typer(doctor.app, name="doctor")
 
 
 @app.callback()
-def main_callback(  # type: ignore[no-untyped-def]
+def main_callback(
     verbose: bool = typer.Option(
         False, "--verbose", "-v", help="Enable verbose logging"
     ),  # noqa: B008
     output: str = typer.Option(
         "text", "--output", "-o", help="Output format: text or json"
     ),  # noqa: B008
-):
+) -> None:
     """Mercado Livre Bulk Upload Tool."""
     state["verbose"] = verbose
     state["output_format"] = output

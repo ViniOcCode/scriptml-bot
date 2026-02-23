@@ -109,7 +109,7 @@ class FiscalData:
     # Additional attributes storage
     attributes: dict[str, Any] = field(default_factory=dict)
 
-    def __post_init__(self):  # type: ignore[no-untyped-def]
+    def __post_init__(self) -> None:
         """Normalize fiscal data using config defaults and value mappings."""
         # Load defaults from config (single source of truth)
         defaults = _load_fiscal_defaults()

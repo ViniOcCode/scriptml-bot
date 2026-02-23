@@ -166,6 +166,6 @@ class SpreadsheetParser:
         try:
             self.parse(path)
             return True, []
-        except Exception as exc:
+        except (FileNotFoundError, ValueError) as exc:
             errors.append(str(exc))
             return False, errors
