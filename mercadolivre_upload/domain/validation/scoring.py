@@ -35,7 +35,7 @@ def _load_scoring_config() -> dict[str, Any]:
             "bonuses": scoring_config.get("bonuses", {}),
             "min_score": scoring_config.get("min_score", 40),
         }
-    except Exception as e:
+    except (OSError, TypeError, ValueError) as e:
         logger.warning(f"Could not load scoring config: {e}. Using defaults.")
         return {
             "base_score": 100,

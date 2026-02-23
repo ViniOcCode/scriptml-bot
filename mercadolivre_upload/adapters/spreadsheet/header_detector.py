@@ -19,7 +19,7 @@ def _load_header_config() -> dict[str, Any]:
         Dictionary with column_patterns, header_indicators, and validation limits
     """
     try:
-        config = _load_yaml_config(
+        config = load_yaml_config(
             Path("config/header_detection.yaml"), Path("config/generic_mappings.yaml")
         )
 
@@ -41,7 +41,7 @@ def _load_header_config() -> dict[str, Any]:
             "max_cell_length": header_config.get("max_cell_length", 100),
             "max_row_length": header_config.get("max_row_length", 800),
         }
-    except Exception as e:
+    except (OSError, TypeError, ValueError) as e:
         logger.warning(f"Could not load header detection config: {e}. Using defaults.")
         return {
             "column_patterns": {},

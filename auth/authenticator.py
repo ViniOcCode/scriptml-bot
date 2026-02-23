@@ -151,8 +151,6 @@ class AuthManager(TokenManager):
 
     def start_auth_flow(self, state: str | None = None, scopes: list[str] | None = None) -> str:
         """Build and return the authorization URL (compatibility method)."""
-        from urllib.parse import urlencode
-
         from mercadolivre_upload.auth import OAuthHandler
 
         # Use OAuthHandler to get base URL

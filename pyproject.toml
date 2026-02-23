@@ -158,7 +158,7 @@ addopts = """
     --cov=mercadolivre_upload
     --cov-report=term-missing
     --cov-report=html:htmlcov
-    --cov-fail-under=20
+    --cov-fail-under=60
 """
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
@@ -188,7 +188,7 @@ exclude_lines = [
     "if TYPE_CHECKING:",
 ]
 precision = 2
-fail_under = 20
+fail_under = 60
 
 [tool.coverage.html]
 directory = "htmlcov"

@@ -1,10 +1,15 @@
-"""Main entry point for scriptml."""
+"""Compatibility entry point that delegates to the package CLI."""
+
+from __future__ import annotations
+
+import sys
+from importlib import import_module
 
 
-def main():
-    """Print hello message."""
-    print("Hello from scriptml!")
+def main() -> int:
+    """Run the package entrypoint from repository root."""
+    return int(import_module("mercadolivre_upload.main").run_as_module())
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

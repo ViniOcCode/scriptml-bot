@@ -13,7 +13,7 @@ from .scoring import ScoredAttribute
 logger = logging.getLogger(__name__)
 
 
-def _load_protected_attributes() -> set:  # type: ignore[type-arg]
+def _load_protected_attributes() -> set[str]:
     """Load protected attributes from config file.
 
     Returns:
@@ -26,7 +26,7 @@ def _load_protected_attributes() -> set:  # type: ignore[type-arg]
 
         protected = config.get("protected_attributes", [])
         return set(protected)
-    except Exception as e:
+    except (OSError, TypeError, ValueError) as e:
         logger.warning(f"Could not load protected attributes from config: {e}. Using empty set.")
         return set()
 
@@ -38,12 +38,12 @@ def _load_similarity_threshold() -> float:
         Threshold value for redundancy detection
     """
     try:
-        config = _load_yaml_config(
+        config = load_yaml_config(
             Path("config/attribute_rules.yaml"), Path("config/generic_mappings.yaml")
         )
 
-        return config.get("similarity", {}).get("redundancy_threshold", 0.9)  # type: ignore[no-any-return]
-    except Exception as e:
+        return float(config.get("similarity", {}).get("redundancy_threshold", 0.9))
+    except (OSError, TypeError, ValueError) as e:
         logger.warning(f"Could not load similarity threshold from config: {e}. Using default 0.9.")
         return 0.9
 
