@@ -14,6 +14,9 @@ class _FakeApi:
         self.raise_conditional = False
         self.raise_tech_specs = False
         self.predictions: list[dict[str, Any]] = []
+        self.predictions_by_title: dict[str, list[dict[str, Any]]] = {}
+        self.predict_limits: list[int | None] = []
+        self.predict_titles: list[str] = []
         self.categories: dict[str, Any] = {}
         self.attributes: list[dict[str, Any]] = []
         self.conditional_result: Any = []
@@ -46,9 +49,12 @@ class _FakeApi:
         self, _title: str, _site_id: str, limit: int | None = None
     ) -> list[dict[str, Any]]:
         self.predict_calls += 1
-        _ = limit
+        self.predict_limits.append(limit)
+        self.predict_titles.append(_title)
         if self.raise_predict:
             raise RuntimeError("predict error")
+        if _title in self.predictions_by_title:
+            return self.predictions_by_title[_title]
         return self.predictions
 
 
@@ -80,7 +86,7 @@ class _FakeAttributeCache:
 def test_predict_category_from_title_uses_cached_predictions() -> None:
     api = _FakeApi()
     cache = _FakePredictionCache()
-    cache.data[("MLB", "Produto Teste")] = [{"category_id": "MLB123", "category_name": "Teste"}]
+    cache.data[("MLB", "produto teste")] = [{"category_id": "MLB123", "category_name": "Teste"}]
     resolver = CategoryResolver(api, prediction_cache=cache)
 
     result = resolver.predict_category_from_title("Produto Teste")
@@ -100,6 +106,20 @@ def test_predict_category_from_title_caches_api_predictions() -> None:
     assert result == "MLB999"
     assert api.predict_calls == 1
     assert cache.set_calls == 1
+    assert cache.data[("MLB", "notebook gamer")] == api.predictions
+
+
+def test_predict_category_from_title_caches_empty_predictions() -> None:
+    api = _FakeApi()
+    cache = _FakePredictionCache()
+    resolver = CategoryResolver(api, prediction_cache=cache)
+
+    first_result = resolver.predict_category_from_title("Notebook Sem Categoria")
+    second_result = resolver.predict_category_from_title("  notebook sem categoria  ")
+
+    assert first_result is None
+    assert second_result is None
+    assert api.predict_calls == 1
 
 
 def test_call_domain_discovery_returns_empty_on_exception() -> None:
@@ -108,6 +128,17 @@ def test_call_domain_discovery_returns_empty_on_exception() -> None:
     resolver = CategoryResolver(api)
 
     assert resolver._call_domain_discovery("Notebook Gamer", "MLB") == []
+
+
+def test_call_domain_discovery_requests_limit_three() -> None:
+    api = _FakeApi()
+    api.predictions = [{"category_id": "MLB1", "category_name": "Livros"}]
+    resolver = CategoryResolver(api)
+
+    result = resolver._call_domain_discovery("Notebook Gamer", "MLB")
+
+    assert result == [{"category_id": "MLB1", "category_name": "Livros"}]
+    assert api.predict_limits == [3]
 
 
 def test_get_category_cached_returns_empty_on_exception() -> None:
@@ -218,6 +249,130 @@ def test_find_category_with_predictor_prefers_context_path_match() -> None:
     result = resolver.find_category_with_predictor("Livros > Romance", ["Livro XPTO"])
 
     assert result == "MLB100"
+
+
+def test_find_category_with_predictor_uses_only_top_three_predictions() -> None:
+    api = _FakeApi()
+    api.predictions = [
+        {"category_id": "MLB101", "category_name": "Eletrônicos", "confidence": 0.99},
+        {"category_id": "MLB102", "category_name": "Moda", "confidence": 0.98},
+        {"category_id": "MLB103", "category_name": "Esportes", "confidence": 0.97},
+        {"category_id": "MLB104", "category_name": "Livros", "confidence": 0.96},
+    ]
+    api.categories["MLB101"] = {
+        "children_categories": [],
+        "path_from_root": [{"id": "MLB101", "name": "Eletrônicos"}],
+    }
+    api.categories["MLB102"] = {
+        "children_categories": [],
+        "path_from_root": [{"id": "MLB102", "name": "Moda"}],
+    }
+    api.categories["MLB103"] = {
+        "children_categories": [],
+        "path_from_root": [{"id": "MLB103", "name": "Esportes"}],
+    }
+    api.categories["MLB104"] = {
+        "children_categories": [],
+        "path_from_root": [{"id": "MLB104", "name": "Livros"}],
+    }
+    resolver = CategoryResolver(api)
+
+    result = resolver.find_category_with_predictor("Livros", ["Produto XPTO"])
+
+    assert result is None
+
+
+def test_find_category_with_predictor_stops_after_first_reliable_title_match() -> None:
+    api = _FakeApi()
+    api.predictions_by_title = {
+        "Livro XPTO": [
+            {"category_id": "MLB100", "category_name": "Romance", "confidence": 0.9},
+        ],
+        "Segundo título": [
+            {"category_id": "MLB200", "category_name": "Romance", "confidence": 0.95},
+        ],
+    }
+    api.categories["MLB100"] = {
+        "children_categories": [],
+        "path_from_root": [
+            {"id": "MLB2", "name": "Livros"},
+            {"id": "MLB100", "name": "Romance"},
+        ],
+    }
+    api.categories["MLB200"] = {
+        "children_categories": [],
+        "path_from_root": [
+            {"id": "MLB1", "name": "Eletrônicos"},
+            {"id": "MLB200", "name": "Romance"},
+        ],
+    }
+    resolver = CategoryResolver(api)
+
+    result = resolver.find_category_with_predictor(
+        "Livros > Romance", ["Livro XPTO", "Segundo título"]
+    )
+
+    assert result == "MLB100"
+    assert api.predict_calls == 1
+    assert api.predict_titles == ["Livro XPTO"]
+
+
+def test_find_category_with_predictor_deduplicates_normalized_batch_titles() -> None:
+    api = _FakeApi()
+    api.predictions_by_title = {
+        "Segundo título": [
+            {"category_id": "MLB100", "category_name": "Romance", "confidence": 0.9},
+        ],
+    }
+    api.categories["MLB100"] = {
+        "children_categories": [],
+        "path_from_root": [
+            {"id": "MLB2", "name": "Livros"},
+            {"id": "MLB100", "name": "Romance"},
+        ],
+    }
+    resolver = CategoryResolver(api)
+
+    result = resolver.find_category_with_predictor(
+        "Livros > Romance",
+        ["Livro XPTO", "  livro xpto  ", "Segundo título", "SEGUNDO TITULO"],
+    )
+
+    assert result == "MLB100"
+    assert api.predict_calls == 2
+    assert api.predict_titles == ["Livro XPTO", "Segundo título"]
+
+
+def test_find_category_with_predictor_caches_empty_predictions_for_normalized_title() -> None:
+    api = _FakeApi()
+    cache = _FakePredictionCache()
+    resolver = CategoryResolver(api, prediction_cache=cache)
+
+    first_result = resolver.find_category_with_predictor("Livros", ["Livro Sem Categoria"])
+    second_result = resolver.find_category_with_predictor("Livros", ["  livro sem categoria  "])
+
+    assert first_result is None
+    assert second_result is None
+    assert api.predict_calls == 1
+
+
+def test_find_category_with_predictor_returns_predicted_id_for_path_match() -> None:
+    api = _FakeApi()
+    api.predictions = [
+        {"category_id": "MLB900", "category_name": "Romance", "confidence": 0.9},
+    ]
+    api.categories["MLB900"] = {
+        "children_categories": [],
+        "path_from_root": [
+            {"id": "MLB2", "name": "Livros"},
+            {"id": "MLB900", "name": "Romance"},
+        ],
+    }
+    resolver = CategoryResolver(api)
+
+    result = resolver.find_category_with_predictor("Livros", ["Livro XPTO"])
+
+    assert result == "MLB900"
 
 
 def test_is_listing_allowed_uses_category_settings() -> None:

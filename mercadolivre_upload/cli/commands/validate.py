@@ -17,6 +17,7 @@ from mercadolivre_upload.cli.commands.common import (
     parse_products_or_exit,
 )
 from mercadolivre_upload.cli.commands.upload import (
+    _empty_category_resolution_summary,
     _ensure_observability_evidence,
     _extract_cause_codes,
     _extract_decision_classified_codes,
@@ -25,6 +26,7 @@ from mercadolivre_upload.cli.commands.upload import (
     _increment_code_counter,
     _is_error_classification,
     _is_warning_classification,
+    _merge_category_resolution_summary,
     _top_code_entries,
     _top_codes_by_status,
     build_publish_use_case,
@@ -79,6 +81,7 @@ def validate(
     cause_code_counts: dict[str, int] = {}
     warning_code_counts: dict[str, dict[str, int]] = {"valid": {}, "failed": {}}
     error_code_counts: dict[str, dict[str, int]] = {"valid": {}, "failed": {}}
+    category_resolution_summary = _empty_category_resolution_summary()
     total_validated = 0
     total_failed = 0
 
@@ -115,6 +118,10 @@ def validate(
         for group_category, indexed_rows in grouped_products.items():
             rows_for_category = [row for _, row in indexed_rows]
             results = use_case.execute(rows_for_category, group_category)  # type: ignore[arg-type]
+            _merge_category_resolution_summary(
+                category_resolution_summary,
+                results.get("category_resolution"),
+            )
             raw_group_flow_routing = results.get("flow_routing")
             group_flow_routing = (
                 dict(raw_group_flow_routing) if isinstance(raw_group_flow_routing, dict) else None
@@ -187,6 +194,11 @@ def validate(
                         item,
                         grouped_results[target_index].get("category_input"),
                     )
+                    category_resolution_decision = item.get("category_resolution_decision")
+                    if isinstance(category_resolution_decision, dict):
+                        grouped_results[target_index]["category_resolution_decision"] = dict(
+                            category_resolution_decision
+                        )
                     policy_hash = item.get("policy_hash")
                     if isinstance(policy_hash, str) and policy_hash:
                         grouped_results[target_index]["policy_hash"] = policy_hash
@@ -326,6 +338,7 @@ def validate(
         "top_cause_codes": _top_code_entries(cause_code_counts),
         "top_warning_codes_by_status": _top_codes_by_status(warning_code_counts),
         "top_error_codes_by_status": _top_codes_by_status(error_code_counts),
+        "category_resolution": category_resolution_summary,
         "rollout_flags": rollout_flags_snapshot,
         "items": all_item_results,
     }

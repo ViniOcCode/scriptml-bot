@@ -105,6 +105,7 @@ def test_execute_uses_predictor_and_resolves_to_leaf_before_publishing() -> None
 
     assert result["success"] is True
     assert result["published"] == 1
+    assert resolver.find_calls == 0
     assert resolver.predictor_calls == [("Nao encontrada", ["Notebook Gamer"], "MLB")]
     assert resolver.title_calls == []
     assert resolver.resolve_calls == ["MLB1000"]
@@ -115,11 +116,25 @@ def test_execute_uses_predictor_and_resolves_to_leaf_before_publishing() -> None
     assert item_result["category_input"] == "Nao encontrada"
     assert item_result["category_resolved_id"] == "MLB1001"
     assert item_result["category_path"] == [{"id": "MLB1001", "name": "Category MLB1001"}]
+    assert item_result["category_resolution_decision"]["predictor_attempted"] is True
+    assert item_result["category_resolution_decision"]["predictor_matched"] is True
+    assert item_result["category_resolution_decision"]["fallback_attempted"] is False
+    assert result["category_resolution"]["strategy_counts"]["predictor_path_match"] == 1
+    assert result["category_resolution"]["fallback_counts"] == {
+        "attempted": 0,
+        "resolved": 0,
+        "unresolved": 0,
+    }
+    assert result["category_resolution"]["predictor_counts"] == {
+        "attempted": 1,
+        "matched": 1,
+        "unmatched": 0,
+    }
 
 
 def test_execute_fails_fast_when_category_is_not_allowed_for_listing() -> None:
     resolver = _CategoryFlowResolver(
-        find_result="MLB2000",
+        find_result=None,
         listing_allowed={"MLB2000": False},
     )
     use_case = PublishProductUseCase(
@@ -131,15 +146,15 @@ def test_execute_fails_fast_when_category_is_not_allowed_for_listing() -> None:
     )
     use_case._publish_one = MagicMock(return_value=True)  # type: ignore[method-assign]
 
-    result = use_case.execute([_build_product()], "Eletronicos")
+    result = use_case.execute([_build_product()], "MLB2000")
 
     assert result["success"] is False
     assert result["published"] == 0
     assert result["failed"] == 1
     assert result["errors"] == ["Category not available for listing: MLB2000"]
     assert result["item_results"][0]["status"] == "failed"
-    assert result["item_results"][0]["resolution_strategy"] == "name_match"
-    assert result["item_results"][0]["category_input"] == "Eletronicos"
+    assert result["item_results"][0]["resolution_strategy"] == "direct_id"
+    assert result["item_results"][0]["category_input"] == "MLB2000"
     assert result["item_results"][0]["category_resolved_id"] == "MLB2000"
     assert use_case._publish_one.call_count == 0
 
@@ -204,11 +219,10 @@ def test_execute_accepts_direct_category_id_with_surrounding_whitespace() -> Non
     assert item_result["category_resolved_id"] == "MLB2000"
 
 
-def test_execute_uses_title_prediction_when_predictor_does_not_match() -> None:
+def test_execute_returns_unresolved_when_predictor_does_not_match() -> None:
     resolver = _CategoryFlowResolver(
         find_result=None,
         predictor_result=None,
-        title_result="MLB3300",
     )
     use_case = PublishProductUseCase(
         category_resolver=resolver,  # type: ignore[arg-type]
@@ -217,22 +231,27 @@ def test_execute_uses_title_prediction_when_predictor_does_not_match() -> None:
         enable_feedback=False,
         enable_fiscal_submission=False,
     )
-
-    def _publish(_product: Product, _category_id: str) -> bool:
-        use_case.published += 1
-        return True
-
-    use_case._publish_one = MagicMock(side_effect=_publish)  # type: ignore[method-assign]
+    use_case._publish_one = MagicMock(return_value=True)  # type: ignore[method-assign]
 
     result = use_case.execute([_build_product("Notebook Gamer")], "Nao encontrada")
 
-    assert result["success"] is True
+    assert result["success"] is False
     assert resolver.predictor_calls == [("Nao encontrada", ["Notebook Gamer"], "MLB")]
-    assert resolver.title_calls == [("Notebook Gamer", "MLB")]
-    assert use_case._publish_one.call_args.args[1] == "MLB3300"
+    assert resolver.find_calls == 0
+    assert resolver.title_calls == []
+    assert use_case._publish_one.call_count == 0
     item_result = result["item_results"][0]
-    assert item_result["resolution_strategy"] == "title_prediction"
-    assert item_result["category_resolved_id"] == "MLB3300"
+    assert item_result["resolution_strategy"] == "unresolved"
+    assert item_result["category_resolved_id"] is None
+    assert item_result["category_resolution_decision"]["predictor_attempted"] is True
+    assert item_result["category_resolution_decision"]["predictor_matched"] is False
+    assert item_result["category_resolution_decision"]["fallback_reason"] == "predictor_no_match"
+    assert result["category_resolution"]["strategy_counts"]["unresolved"] == 1
+    assert result["category_resolution"]["predictor_counts"] == {
+        "attempted": 1,
+        "matched": 0,
+        "unmatched": 1,
+    }
 
 
 def test_execute_includes_unresolved_metadata_when_category_not_found() -> None:
@@ -250,11 +269,48 @@ def test_execute_includes_unresolved_metadata_when_category_not_found() -> None:
 
     assert result["success"] is False
     assert result["errors"] == ["Category not found: Nao encontrada"]
+    assert resolver.find_calls == 0
+    assert resolver.title_calls == []
     item_result = result["item_results"][0]
     assert item_result["resolution_strategy"] == "unresolved"
     assert item_result["category_input"] == "Nao encontrada"
     assert item_result["category_resolved_id"] is None
     assert item_result["category_path"] == []
+
+
+def test_execute_records_name_match_fallback_observability_when_titles_are_missing() -> None:
+    resolver = _CategoryFlowResolver(find_result="MLB3000")
+    use_case = PublishProductUseCase(
+        category_resolver=resolver,  # type: ignore[arg-type]
+        publisher=MagicMock(),
+        image_uploader=MagicMock(),
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+
+    def _publish(_product: Product, _category_id: str) -> bool:
+        use_case.published += 1
+        return True
+
+    use_case._publish_one = MagicMock(side_effect=_publish)  # type: ignore[method-assign]
+
+    result = use_case.execute([_build_product("")], "Categoria sem titulo")
+
+    assert result["success"] is True
+    item_result = result["item_results"][0]
+    assert item_result["resolution_strategy"] == "name_match"
+    assert item_result["category_resolution_decision"]["predictor_attempted"] is False
+    assert item_result["category_resolution_decision"]["fallback_attempted"] is True
+    assert (
+        item_result["category_resolution_decision"]["fallback_reason"]
+        == "missing_titles_for_predictor"
+    )
+    assert result["category_resolution"]["strategy_counts"]["name_match"] == 1
+    assert result["category_resolution"]["fallback_counts"] == {
+        "attempted": 1,
+        "resolved": 1,
+        "unresolved": 0,
+    }
 
 
 @pytest.mark.parametrize(
@@ -276,8 +332,8 @@ def test_execute_includes_unresolved_metadata_when_category_not_found() -> None:
         (
             "Celulares e Smartphones",
             "Smartphone Android",
-            {"find_result": "MLB1055"},
-            "name_match",
+            {"find_result": None, "predictor_result": "MLB1055"},
+            "predictor_path_match",
             "MLB1055",
         ),
         (
@@ -297,10 +353,9 @@ def test_execute_includes_unresolved_metadata_when_category_not_found() -> None:
             {
                 "find_result": None,
                 "predictor_result": None,
-                "title_result": "MLB3492",
             },
-            "title_prediction",
-            "MLB3492",
+            "unresolved",
+            None,
         ),
     ],
 )
@@ -309,7 +364,7 @@ def test_execute_resolution_strategy_matrix(
     title: str,
     resolver_kwargs: dict[str, Any],
     expected_strategy: str,
-    expected_category: str,
+    expected_category: str | None,
 ) -> None:
     resolver = _CategoryFlowResolver(**resolver_kwargs)
     use_case = PublishProductUseCase(
@@ -328,8 +383,14 @@ def test_execute_resolution_strategy_matrix(
 
     result = use_case.execute([_build_product(title)], category_input)
 
-    assert result["success"] is True
-    assert result["published"] == 1
+    if expected_category is None:
+        assert result["success"] is False
+        assert result["published"] == 0
+        assert result["errors"] == [f"Category not found: {category_input}"]
+    else:
+        assert result["success"] is True
+        assert result["published"] == 1
+
     item_result = result["item_results"][0]
     assert item_result["resolution_strategy"] == expected_strategy
     assert item_result["category_input"] == category_input
