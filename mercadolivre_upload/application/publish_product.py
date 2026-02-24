@@ -5,6 +5,7 @@ Orchestrates domain logic and adapters to publish products.
 
 import logging
 import re
+from itertools import product as cartesian_product
 from typing import Any
 
 from mercadolivre_upload.api.cbt_extractor import CbtIdExtractor
@@ -583,6 +584,7 @@ class PublishProductUseCase:
 
         # Upload images
         picture_urls = self.image_uploader.upload_images(product.sku)
+        picture_ids = self._resolve_picture_ids(picture_urls)
 
         # Build pictures list
         pictures = [{"source": url} for url in picture_urls]
@@ -600,20 +602,71 @@ class PublishProductUseCase:
 
         # Check if listing_type_id was explicitly mapped from spreadsheet
         explicit_listing_type: str | None = None
+        variation_candidates: dict[str, list[dict[str, Any]]] = {}
         marker_indexes_to_remove: list[int] = []
         for index, attr in enumerate(ml_attributes):
+            if not isinstance(attr, dict):
+                continue
+
             if "_listing_type_id" in attr:
                 marker_indexes_to_remove.append(index)
                 mapped_listing_type = attr.get("_listing_type_id")
-                if isinstance(mapped_listing_type, str) and mapped_listing_type:
+                if (
+                    explicit_listing_type is None
+                    and isinstance(mapped_listing_type, str)
+                    and mapped_listing_type
+                ):
                     explicit_listing_type = mapped_listing_type
-                break
+
+            if "_variation_candidates" in attr:
+                marker_indexes_to_remove.append(index)
+                raw_candidates = attr.get("_variation_candidates")
+                if not isinstance(raw_candidates, dict):
+                    continue
+
+                for attr_id, values in raw_candidates.items():
+                    if not isinstance(attr_id, str) or not isinstance(values, list):
+                        continue
+                    bucket = variation_candidates.setdefault(attr_id, [])
+                    existing = {
+                        (value.get("id"), value.get("name"))
+                        for value in bucket
+                        if isinstance(value, dict)
+                    }
+                    for value in values:
+                        if not isinstance(value, dict):
+                            continue
+                        key = (value.get("id"), value.get("name"))
+                        if key in existing:
+                            continue
+                        existing.add(key)
+                        bucket.append(value)
         if marker_indexes_to_remove:
             ml_attributes = [
                 attr
                 for index, attr in enumerate(ml_attributes)
                 if index not in marker_indexes_to_remove
             ]
+
+        variations: list[dict[str, Any]] = []
+        if variation_candidates:
+            variations = self._build_variations_from_candidates(
+                variation_candidates=variation_candidates,
+                quantity=product.available_quantity,
+                price=product.price,
+                picture_ids=picture_ids,
+            )
+            if variations:
+                variation_attr_ids = set(variation_candidates.keys())
+                ml_attributes = [
+                    attr
+                    for attr in ml_attributes
+                    if not (
+                        isinstance(attr, dict)
+                        and isinstance(attr.get("id"), str)
+                        and attr["id"] in variation_attr_ids
+                    )
+                ]
 
         available_listing_types = self._get_available_listing_type_ids(category_id)
         listing_type_id = self._resolve_listing_type_id(
@@ -680,6 +733,8 @@ class PublishProductUseCase:
         channels = core_defaults.get("channels")
         if channels:
             item["channels"] = channels
+        if variations:
+            item["variations"] = variations
 
         # Log shipping section before validation
         logger.info(
@@ -985,6 +1040,103 @@ class PublishProductUseCase:
         if self.feedback:
             return self.feedback.get_problematic_attributes()
         return {}
+
+    def _build_variations_from_candidates(
+        self,
+        variation_candidates: dict[str, list[dict[str, Any]]],
+        quantity: int,
+        price: float,
+        picture_ids: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Build variations payload from candidate values extracted during mapping."""
+        if not picture_ids:
+            logger.warning(
+                "Variation candidates detected but no picture IDs are available; "
+                "skipping variations payload."
+            )
+            return []
+
+        normalized_candidates: list[tuple[str, list[dict[str, Any]]]] = []
+        for attr_id, values in variation_candidates.items():
+            unique_values: list[dict[str, Any]] = []
+            seen: set[tuple[Any, Any]] = set()
+            for value in values:
+                if not isinstance(value, dict):
+                    continue
+                value_name = value.get("name")
+                if not isinstance(value_name, str) or not value_name:
+                    continue
+                key = (value.get("id"), value_name)
+                if key in seen:
+                    continue
+                seen.add(key)
+                unique_values.append({"id": value.get("id"), "name": value_name})
+
+            if unique_values:
+                normalized_candidates.append((attr_id, unique_values))
+
+        if not normalized_candidates:
+            return []
+
+        combinations = list(
+            cartesian_product(*(values for _attr_id, values in normalized_candidates))
+        )
+        if len(combinations) <= 1:
+            return []
+
+        variations: list[dict[str, Any]] = []
+        for combination in combinations:
+            attribute_combinations = []
+            for (attr_id, _values), value in zip(normalized_candidates, combination, strict=True):
+                mapped = {"id": attr_id, "value_name": value["name"]}
+                value_id = value.get("id")
+                if value_id is not None:
+                    mapped["value_id"] = value_id
+                attribute_combinations.append(mapped)
+
+            variation: dict[str, Any] = {
+                "attribute_combinations": attribute_combinations,
+                "available_quantity": max(1, quantity),
+                "price": price,
+                "picture_ids": picture_ids[:10],
+            }
+
+            variations.append(variation)
+
+        return variations
+
+    @staticmethod
+    def _split_multi_value(raw_value: str | None) -> list[str]:
+        """Split a multi-value cell string into normalized tokens."""
+        if not isinstance(raw_value, str):
+            return []
+        return [part.strip() for part in re.split(r"[,;/|]", raw_value) if part.strip()]
+
+    def _resolve_picture_ids(self, picture_urls: list[str]) -> list[str]:
+        """Resolve ML picture IDs for current picture URLs from uploader history."""
+        getter = getattr(self.image_uploader, "get_uploaded_images", None)
+        if not callable(getter):
+            return []
+
+        try:
+            uploaded_images = getter()
+        except Exception as error:
+            logger.warning("Could not read uploaded image IDs: %s", error)
+            return []
+
+        if not isinstance(uploaded_images, list):
+            return []
+
+        url_to_id: dict[str, str] = {}
+        for image in uploaded_images:
+            if not isinstance(image, dict):
+                continue
+            url = image.get("url")
+            image_id = image.get("id")
+            if isinstance(url, str) and isinstance(image_id, str) and url and image_id:
+                url_to_id[url] = image_id
+
+        return [url_to_id[url] for url in picture_urls if url in url_to_id]
 
     def _get_available_listing_type_ids(self, category_id: str) -> list[str]:
         """Fetch available listing types for current seller and category."""

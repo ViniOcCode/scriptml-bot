@@ -286,7 +286,10 @@ class AttributeMapper:
                         listing_type_map = {
                             "clássico": "gold_special",
                             "classico": "gold_special",
-                            "premium": "gold_premium",
+                            "premium": "gold_pro",
+                            "gold pro": "gold_pro",
+                            "diamante": "gold_premium",
+                            "gold premium": "gold_premium",
                             "grátis": "free",
                             "gratis": "free",
                         }
@@ -340,6 +343,7 @@ class AttributeMapper:
                                 "id": target_attr_id,
                                 "name": mapping_config.get("name", target_attr_id),
                                 "value_name": value or mapping_config.get("value_name", ""),
+                                "_source_column": col,
                             }
                         )
                         logger.info(f"Explicitly mapped '{col}' -> {target_attr_id}")
