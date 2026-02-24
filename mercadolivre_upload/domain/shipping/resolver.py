@@ -8,7 +8,7 @@ import logging
 from pathlib import Path
 from typing import Any, Protocol
 
-from mercadolivre_upload.shared.utils.config_loader import load_yaml_config
+from mercadolivre_upload.shared.utils.config_loader import load_merged_yaml_config
 
 logger = logging.getLogger(__name__)
 
@@ -20,8 +20,8 @@ def _load_shipping_config() -> dict[str, Any]:
         Dictionary with mode_priority and default_mode
     """
     try:
-        config = load_yaml_config(
-            Path("config/shipping.yaml"), Path("config/generic_mappings.yaml")
+        config = load_merged_yaml_config(
+            Path("config/shipping.yaml"), fallback=Path("config/generic_mappings.yaml")
         )
 
         shipping_config = config.get("shipping", {})
