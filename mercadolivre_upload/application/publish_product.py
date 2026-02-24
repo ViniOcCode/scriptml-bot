@@ -789,6 +789,33 @@ class PublishProductUseCase:
         return decisions
 
     @staticmethod
+    def _extract_exception_error_detail(error: Exception) -> dict[str, Any] | None:
+        """Return parsed API error payload when available."""
+        response = getattr(error, "response", None)
+        if response is None:
+            return None
+        response_json = getattr(response, "json", None)
+        if not callable(response_json):
+            return None
+        try:
+            payload = response_json()
+        except (TypeError, ValueError):
+            return None
+        return payload if isinstance(payload, dict) else None
+
+    @staticmethod
+    def _extract_exception_response_excerpt(error: Exception, *, limit: int = 200) -> str | None:
+        """Return bounded response text excerpt for non-JSON API failures."""
+        response = getattr(error, "response", None)
+        if response is None:
+            return None
+        response_text = getattr(response, "text", None)
+        if not isinstance(response_text, str):
+            return None
+        excerpt = response_text[:limit].strip()
+        return excerpt or None
+
+    @staticmethod
     def _normalize_seller_tags(raw_tags: Any) -> list[str]:
         """Normalize seller tag payload from users/me style responses."""
         return normalize_seller_tags(raw_tags)
@@ -1098,6 +1125,15 @@ class PublishProductUseCase:
                 except Exception as exc:
                     logger.error(f"Failed to build product from row: {exc}")
                     error_message = str(exc)
+                    build_error_code = "input.row_build_failed"
+                    build_error_taxonomy = [
+                        {
+                            "type": "error",
+                            "code": build_error_code,
+                            "message": error_message,
+                            "classification": "blocking_error",
+                        }
+                    ]
                     self.errors.append(error_message)
                     self.failed += 1
                     self.item_results.append(
@@ -1107,6 +1143,11 @@ class PublishProductUseCase:
                             "title": source_title,
                             "status": "failed",
                             "error": error_message,
+                            "cause_codes": [build_error_code],
+                            "cause_taxonomy": build_error_taxonomy,
+                            "validation_decision": self._build_validation_decision(
+                                build_error_taxonomy
+                            ),
                             "rollout_flags": deepcopy(self._rollout_flags_artifact),
                         }
                     )
@@ -1786,38 +1827,33 @@ class PublishProductUseCase:
             error_msg = str(e)
             cause_codes: list[str] = []
             validation_exception_taxonomy: list[dict[str, str]] = []
-            error_detail = None
-            if hasattr(e, "response") and e.response is not None:
-                try:
-                    error_detail = e.response.json()
-                    error_msg = f"{error_msg} - {error_detail}"
-                    # Check for shipping-specific errors
-                    causes_raw = (
-                        error_detail.get("cause", []) if isinstance(error_detail, dict) else []
+            error_detail = self._extract_exception_error_detail(e)
+            if error_detail is not None:
+                error_msg = f"{error_msg} - {error_detail}"
+                causes_raw = error_detail.get("cause", [])
+                causes = causes_raw if isinstance(causes_raw, list) else []
+                shipping_cause_decisions = self._register_shipping_causes(
+                    causes, stage="validate_exception"
+                )
+                normalized_causes = [cause for cause in causes if isinstance(cause, dict)]
+                validation_exception_taxonomy = self._build_validation_cause_taxonomy(
+                    normalized_causes
+                )
+                for cause in normalized_causes:
+                    cause_code = str(cause.get("code", "")).strip().lower()
+                    if cause_code:
+                        cause_codes.append(cause_code)
+                for shipping_cause in shipping_cause_decisions:
+                    logger.error(
+                        "Shipping validation error for %s: [%s] %s",
+                        product.sku,
+                        shipping_cause.get("classification"),
+                        shipping_cause,
                     )
-                    causes = causes_raw if isinstance(causes_raw, list) else []
-                    shipping_cause_decisions = self._register_shipping_causes(
-                        causes, stage="validate_exception"
-                    )
-                    normalized_causes = [cause for cause in causes if isinstance(cause, dict)]
-                    validation_exception_taxonomy = self._build_validation_cause_taxonomy(
-                        normalized_causes
-                    )
-                    for cause in causes:
-                        if not isinstance(cause, dict):
-                            continue
-                        cause_code = str(cause.get("code", "")).strip()
-                        if cause_code:
-                            cause_codes.append(cause_code)
-                    for shipping_cause in shipping_cause_decisions:
-                        logger.error(
-                            "Shipping validation error for %s: [%s] %s",
-                            product.sku,
-                            shipping_cause.get("classification"),
-                            shipping_cause,
-                        )
-                except Exception:
-                    error_msg = f"{error_msg} - {e.response.text[:200]}"
+            else:
+                response_excerpt = self._extract_exception_response_excerpt(e)
+                if response_excerpt:
+                    error_msg = f"{error_msg} - {response_excerpt}"
             self._current_cause_codes = list(
                 dict.fromkeys(code.lower() for code in cause_codes if str(code).strip())
             )
@@ -1924,42 +1960,49 @@ class PublishProductUseCase:
         except Exception as e:
             error_msg = str(e)
             publish_cause_codes: list[str] = []
-            if hasattr(e, "response") and e.response is not None:
-                try:
-                    error_detail = e.response.json()
-                    error_msg = f"{error_msg} - {error_detail}"
-                    # Check for shipping-specific errors
-                    causes_raw = (
-                        error_detail.get("cause", []) if isinstance(error_detail, dict) else []
+            publish_exception_taxonomy: list[dict[str, str]] = []
+            error_detail = self._extract_exception_error_detail(e)
+            if error_detail is not None:
+                error_msg = f"{error_msg} - {error_detail}"
+                causes_raw = error_detail.get("cause", [])
+                causes = causes_raw if isinstance(causes_raw, list) else []
+                normalized_causes = [cause for cause in causes if isinstance(cause, dict)]
+                publish_exception_taxonomy = self._build_validation_cause_taxonomy(
+                    normalized_causes
+                )
+                # Record publish failure feedback
+                if self.feedback:
+                    self.feedback.record_validation_result(
+                        product.sku,
+                        ml_attributes,
+                        error_detail,
                     )
-                    causes = causes_raw if isinstance(causes_raw, list) else []
-                    # Record publish failure feedback
-                    if self.feedback:
-                        self.feedback.record_validation_result(
-                            product.sku,
-                            ml_attributes,
-                            error_detail if isinstance(error_detail, dict) else {},
-                        )
-                    for cause in causes:
-                        if not isinstance(cause, dict):
-                            continue
-                        cause_code = str(cause.get("code", "")).strip()
-                        if cause_code:
-                            publish_cause_codes.append(cause_code)
-                    shipping_cause_decisions = self._register_shipping_causes(
-                        causes, stage="publish_exception"
+                for cause in normalized_causes:
+                    cause_code = str(cause.get("code", "")).strip().lower()
+                    if cause_code:
+                        publish_cause_codes.append(cause_code)
+                shipping_cause_decisions = self._register_shipping_causes(
+                    causes, stage="publish_exception"
+                )
+                for shipping_cause in shipping_cause_decisions:
+                    logger.error(
+                        "Shipping publish error for %s: [%s] %s",
+                        product.sku,
+                        shipping_cause.get("classification"),
+                        shipping_cause,
                     )
-                    for shipping_cause in shipping_cause_decisions:
-                        logger.error(
-                            "Shipping publish error for %s: [%s] %s",
-                            product.sku,
-                            shipping_cause.get("classification"),
-                            shipping_cause,
-                        )
-                except Exception:
-                    error_msg = f"{error_msg} - {e.response.text[:200]}"
+            else:
+                response_excerpt = self._extract_exception_response_excerpt(e)
+                if response_excerpt:
+                    error_msg = f"{error_msg} - {response_excerpt}"
             self._current_cause_codes = list(
-                dict.fromkeys(code for code in publish_cause_codes if str(code).strip())
+                dict.fromkeys(code.lower() for code in publish_cause_codes if str(code).strip())
+            )
+            self._current_cause_taxonomy = publish_exception_taxonomy
+            self._current_validation_decision = (
+                self._build_validation_decision(publish_exception_taxonomy)
+                if publish_exception_taxonomy
+                else {}
             )
             logger.error(f"Publish error for {product.sku}: {error_msg}")
             self.errors.append(f"{product.sku}: {error_msg}")

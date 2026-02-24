@@ -1,9 +1,12 @@
 """Tests for fiscal submission workflow behavior."""
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import requests
+import yaml
 
+import mercadolivre_upload.domain.fiscal.data as fiscal_data_module
 from mercadolivre_upload.domain.fiscal.data import FiscalData
 from mercadolivre_upload.domain.fiscal.service import (
     FiscalService,
@@ -179,6 +182,26 @@ def test_extract_error_code_returns_none_for_invalid_json():
     exc.response = response  # type: ignore[attr-defined]
 
     assert service._extract_error_code(exc) is None
+
+
+def test_load_fiscal_config_uses_shared_yaml_loader(monkeypatch):
+    loader = MagicMock(return_value={"fiscal_defaults": {"type": "single"}})
+    monkeypatch.setattr(fiscal_data_module, "load_yaml_config", loader)
+
+    config = fiscal_data_module._load_fiscal_config()
+
+    assert config == {"fiscal_defaults": {"type": "single"}}
+    loader.assert_called_once_with(Path("config/fiscal_config.yaml"))
+
+
+def test_load_fiscal_config_returns_empty_dict_on_yaml_error(monkeypatch):
+    monkeypatch.setattr(
+        fiscal_data_module,
+        "load_yaml_config",
+        MagicMock(side_effect=yaml.YAMLError("invalid yaml")),
+    )
+
+    assert fiscal_data_module._load_fiscal_config() == {}
 
 
 def test_fiscal_data_treats_measurement_unit_as_optional_for_mlb_payload():
