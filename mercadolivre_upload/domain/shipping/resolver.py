@@ -66,6 +66,8 @@ class ShippingResolver:
         """
         self.provider = provider
         self._cached_modes: list[str] | None = None
+        self._cached_shipping_preferences: dict[str, Any] | None = None
+        self._cached_logistic_type_by_mode: dict[str, str] = {}
 
         # Load shipping config from config file (single source of truth), allow override
         if config:
@@ -85,21 +87,77 @@ class ShippingResolver:
         Returns:
             Shipping mode: "me1", "me2", or "not_specified"
         """
+        selection = self.get_best_shipping_selection()
+        selected_mode = selection.get("mode")
+        if not isinstance(selected_mode, str) or not selected_mode:
+            return self.default_mode  # type: ignore[no-any-return]
+        return selected_mode
+
+    def get_best_shipping_selection(self) -> dict[str, Any]:
+        """Get best shipping selection including optional logistic type.
+
+        Returns:
+            Dictionary containing:
+            - mode: selected mode ("me1", "me2", "not_specified")
+            - logistic_type: optional preferred logistic type from seller preferences
+        """
         available_modes = self._get_available_modes()
 
         if not available_modes:
             logger.info(f"No shipping modes available, using {self.default_mode}")
-            return self.default_mode  # type: ignore[no-any-return]
+            return {"mode": self.default_mode, "logistic_type": None}
+
+        selected_mode: str | None = None
 
         # Select best mode based on priority from config
         for mode in self.mode_priority:
             if mode in available_modes:
-                logger.info(f"Selected shipping mode: {mode}")
-                return mode  # type: ignore[no-any-return]
+                selected_mode = mode
+                break
 
         # Fallback: return first available mode
-        logger.info(f"No priority modes available, using first available: {available_modes[0]}")
-        return available_modes[0]
+        if selected_mode is None:
+            selected_mode = available_modes[0]
+            logger.info(f"No priority modes available, using first available: {selected_mode}")
+        else:
+            logger.info(f"Selected shipping mode: {selected_mode}")
+
+        logistic_type = self._cached_logistic_type_by_mode.get(selected_mode)
+        return {"mode": selected_mode, "logistic_type": logistic_type}
+
+    @staticmethod
+    def _extract_default_logistic_type(logistic_types: Any) -> str | None:
+        """Extract preferred logistic type from shipping preferences.types payload."""
+        if not isinstance(logistic_types, list):
+            return None
+
+        # Prefer entries explicitly marked as default.
+        for logistic_type in logistic_types:
+            if not isinstance(logistic_type, dict):
+                continue
+            type_name = logistic_type.get("type")
+            if logistic_type.get("default") and isinstance(type_name, str) and type_name:
+                return type_name
+
+        # Fallback to first available type.
+        for logistic_type in logistic_types:
+            if not isinstance(logistic_type, dict):
+                continue
+            type_name = logistic_type.get("type")
+            if isinstance(type_name, str) and type_name:
+                return type_name
+        return None
+
+    def _get_shipping_preferences(self, user_id: str) -> dict[str, Any]:
+        """Get shipping preferences with per-instance caching."""
+        if self._cached_shipping_preferences is not None:
+            return self._cached_shipping_preferences
+
+        shipping_preferences = self.provider.get_user_shipping_preferences(user_id)
+        if isinstance(shipping_preferences, dict):
+            self._cached_shipping_preferences = shipping_preferences
+            return shipping_preferences
+        return {}
 
     def _get_available_modes(self) -> list[str]:
         """Fetch and cache user's available shipping modes from ML API.
@@ -121,10 +179,27 @@ class ShippingResolver:
             available_modes: list[str] = []
             if user_id:
                 try:
-                    shipping_preferences = self.provider.get_user_shipping_preferences(str(user_id))
+                    shipping_preferences = self._get_shipping_preferences(str(user_id))
                     pref_modes = shipping_preferences.get("modes", [])
                     if isinstance(pref_modes, list):
-                        available_modes = [mode for mode in pref_modes if mode in ["me1", "me2"]]
+                        available_modes = [mode for mode in pref_modes if mode in {"me1", "me2"}]
+
+                    # Some sellers only expose mode/type combinations under logistics.
+                    logistics = shipping_preferences.get("logistics", [])
+                    if isinstance(logistics, list):
+                        for logistic in logistics:
+                            if not isinstance(logistic, dict):
+                                continue
+                            mode = logistic.get("mode")
+                            if not isinstance(mode, str) or mode not in {"me1", "me2"}:
+                                continue
+                            if mode not in available_modes:
+                                available_modes.append(mode)
+                            preferred_type = self._extract_default_logistic_type(
+                                logistic.get("types", [])
+                            )
+                            if preferred_type:
+                                self._cached_logistic_type_by_mode[mode] = preferred_type
                     logger.info(
                         "Available shipping modes from shipping_preferences: " f"{available_modes}"
                     )
@@ -135,7 +210,7 @@ class ShippingResolver:
                 user_shipping_modes = user_info.get("shipping_modes", [])
                 if isinstance(user_shipping_modes, list):
                     available_modes = [
-                        mode for mode in user_shipping_modes if mode in ["me1", "me2"]
+                        mode for mode in user_shipping_modes if mode in {"me1", "me2"}
                     ]
                 logger.info(f"Available shipping modes from /users/me: {available_modes}")
 
@@ -156,3 +231,5 @@ class ShippingResolver:
     def clear_cache(self) -> None:
         """Clear cached shipping modes."""
         self._cached_modes = None
+        self._cached_shipping_preferences = None
+        self._cached_logistic_type_by_mode = {}

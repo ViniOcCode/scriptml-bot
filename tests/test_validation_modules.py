@@ -137,6 +137,7 @@ def test_image_category_stock_and_suite_validators(monkeypatch) -> None:
     assert category_validator.validate({"category_id": 1})[0].is_error()
     assert category_validator.validate({"category_id": "ABC"})[0].is_error()
     assert category_validator.validate({"category_id": "MLB123"}) == []
+    assert category_validator.validate({"category_id": "MLM123"}) == []
 
     stock_validator = StockValidator()
     assert stock_validator.validate({})[0].is_error()

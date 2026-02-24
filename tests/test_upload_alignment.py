@@ -580,6 +580,51 @@ def test_shipping_resolver_returns_default_when_no_modes_available() -> None:
     assert resolver.get_best_shipping_mode() == "not_specified"
 
 
+def test_shipping_resolver_selection_reads_modes_and_logistic_type_from_logistics() -> None:
+    provider = _FakeShippingProvider(
+        user_info={"id": 123, "shipping_modes": []},
+        shipping_preferences={
+            "modes": [],
+            "logistics": [
+                {
+                    "mode": "me2",
+                    "types": [{"type": "drop_off"}, {"type": "fulfillment", "default": True}],
+                },
+                {"mode": "me1", "types": [{"type": "cross_docking", "default": True}]},
+            ],
+        },
+    )
+    resolver = ShippingResolver(
+        provider,
+        config={"mode_priority": ["me2", "me1"], "default_mode": "not_specified"},
+    )
+
+    selection = resolver.get_best_shipping_selection()
+
+    assert selection["mode"] == "me2"
+    assert selection["logistic_type"] == "fulfillment"
+    assert provider.requested_user_id == "123"
+
+
+def test_shipping_resolver_selection_uses_first_logistic_type_when_no_default() -> None:
+    provider = _FakeShippingProvider(
+        user_info={"id": 456},
+        shipping_preferences={
+            "modes": [],
+            "logistics": [{"mode": "me1", "types": [{"type": "xd_drop_off"}, {"type": "self"}]}],
+        },
+    )
+    resolver = ShippingResolver(
+        provider,
+        config={"mode_priority": ["me1", "me2"], "default_mode": "not_specified"},
+    )
+
+    selection = resolver.get_best_shipping_selection()
+
+    assert selection["mode"] == "me1"
+    assert selection["logistic_type"] == "xd_drop_off"
+
+
 def test_publish_attribute_normalization_uses_attribute_id_for_weights() -> None:
     use_case = object.__new__(PublishProductUseCase)
     use_case.config = {}
