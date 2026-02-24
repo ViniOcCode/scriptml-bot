@@ -632,7 +632,24 @@ class FiscalService:
 
         for index, (item_id, fiscal_data) in enumerate(items, 1):
             logger.info(f"Processing item {index}/{total}: {item_id}")
-            result = self.submit_fiscal_data_workflow(item_id, fiscal_data)
+            try:
+                result = self.submit_fiscal_data_workflow(item_id, fiscal_data)
+            except Exception as e:
+                logger.exception(
+                    "Unexpected fiscal workflow error for item %s (SKU: %s): %s",
+                    item_id,
+                    fiscal_data.sku,
+                    e,
+                )
+                result = FiscalSubmissionResult(
+                    success=False,
+                    item_id=item_id,
+                    sku=fiscal_data.sku,
+                    status=FiscalSubmissionStatus.FAILED,
+                    fiscal_data=fiscal_data,
+                    error_message=f"Unexpected fiscal workflow error: {e}",
+                    error_code="BATCH_ITEM_ERROR",
+                )
             results.append(result)
 
             if result.success:

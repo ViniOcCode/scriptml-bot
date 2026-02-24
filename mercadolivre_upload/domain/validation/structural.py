@@ -8,6 +8,7 @@ from typing import Any
 from ..attribute_metadata import AttributeMeta
 
 logger = logging.getLogger(__name__)
+NON_FILLABLE_TAGS = {"hidden", "read_only", "non_modifiable"}
 
 
 @dataclass
@@ -30,6 +31,20 @@ class StructuralValidator:
         """Initialize with attribute metadata list."""
         self.metadata = {attr.id: attr for attr in attribute_metadata}
 
+    @staticmethod
+    def _normalize_tag(tag: Any) -> str:
+        return str(tag).strip().lower().replace("-", "_")
+
+    def _is_fillable_required(self, meta: AttributeMeta) -> bool:
+        if not meta.required:
+            return False
+        tags = {
+            self._normalize_tag(tag)
+            for tag in getattr(meta, "tags", set())
+            if str(tag).strip()
+        }
+        return not bool(tags.intersection(NON_FILLABLE_TAGS))
+
     def validate(self, attributes: list[dict[str, Any]]) -> ValidationResult:
         """Validate attributes against structural rules.
 
@@ -44,7 +59,9 @@ class StructuralValidator:
         sanitized_attrs = []
 
         # Track required attributes
-        required_ids = {attr.id for attr in self.metadata.values() if attr.required}
+        required_ids = {
+            attr.id for attr in self.metadata.values() if self._is_fillable_required(attr)
+        }
         provided_ids = set()
 
         for attr in attributes:

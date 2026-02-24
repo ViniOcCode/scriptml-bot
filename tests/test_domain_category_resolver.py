@@ -150,18 +150,74 @@ def test_resolve_to_leaf_returns_original_for_non_dict_category() -> None:
     assert resolver.resolve_to_leaf("MLB1") == "MLB1"
 
 
-def test_resolve_to_leaf_selects_most_populated_child() -> None:
+def test_resolve_to_leaf_selects_deterministic_child_path() -> None:
     api = _FakeApi()
     api.categories["MLB1"] = {
         "children_categories": [
-            {"id": "MLB11", "name": "Child A", "total_items_in_this_category": 2},
             {"id": "MLB12", "name": "Child B", "total_items_in_this_category": 8},
+            {"id": "MLB11", "name": "Child A", "total_items_in_this_category": 2},
         ]
     }
+    api.categories["MLB11"] = {"children_categories": []}
     api.categories["MLB12"] = {"children_categories": []}
     resolver = CategoryResolver(api)
 
-    assert resolver.resolve_to_leaf("MLB1") == "MLB12"
+    assert resolver.resolve_to_leaf("MLB1") == "MLB11"
+
+
+def test_find_category_uses_hierarchy_context_deterministically() -> None:
+    api = _FakeApi()
+    api.categories["MLB1"] = {"children_categories": [{"id": "MLB11", "name": "Romance"}]}
+    api.categories["MLB2"] = {"children_categories": [{"id": "MLB21", "name": "Romance"}]}
+    api.categories["MLB11"] = {"children_categories": []}
+    api.categories["MLB21"] = {"children_categories": []}
+    api.get_site_categories = lambda _site_id: [  # type: ignore[assignment]
+        {"id": "MLB1", "name": "Eletrônicos"},
+        {"id": "MLB2", "name": "Livros"},
+    ]
+    resolver = CategoryResolver(api)
+
+    assert resolver.find_category("Romance") == "MLB11"
+    assert resolver.find_category("Livros > Romance") == "MLB21"
+
+
+def test_predict_category_from_title_filters_invalid_ids_for_site() -> None:
+    api = _FakeApi()
+    api.predictions = [
+        {"category_id": "BAD-ID", "category_name": "Inválida", "confidence": 0.99},
+        {"category_id": "MLM999", "category_name": "Outro site", "confidence": 0.95},
+        {"category_id": "MLB777", "category_name": "Categoria válida", "confidence": 0.5},
+    ]
+    resolver = CategoryResolver(api)
+
+    assert resolver.predict_category_from_title("Notebook Gamer", site_id="MLB") == "MLB777"
+
+
+def test_find_category_with_predictor_prefers_context_path_match() -> None:
+    api = _FakeApi()
+    api.predictions = [
+        {"category_id": "MLB100", "category_name": "Romance", "confidence": 0.7},
+        {"category_id": "MLB200", "category_name": "Romance", "confidence": 0.8},
+    ]
+    api.categories["MLB100"] = {
+        "children_categories": [],
+        "path_from_root": [
+            {"id": "MLB2", "name": "Livros"},
+            {"id": "MLB100", "name": "Romance"},
+        ],
+    }
+    api.categories["MLB200"] = {
+        "children_categories": [],
+        "path_from_root": [
+            {"id": "MLB1", "name": "Eletrônicos"},
+            {"id": "MLB200", "name": "Romance"},
+        ],
+    }
+    resolver = CategoryResolver(api)
+
+    result = resolver.find_category_with_predictor("Livros > Romance", ["Livro XPTO"])
+
+    assert result == "MLB100"
 
 
 def test_is_listing_allowed_uses_category_settings() -> None:

@@ -174,6 +174,36 @@ def test_execute_accepts_direct_category_id_without_name_lookup() -> None:
     assert item_result["category_resolved_id"] == "MLB2000"
 
 
+def test_execute_accepts_direct_category_id_with_surrounding_whitespace() -> None:
+    resolver = _CategoryFlowResolver(find_result="UNUSED")
+    use_case = PublishProductUseCase(
+        category_resolver=resolver,  # type: ignore[arg-type]
+        publisher=MagicMock(),
+        image_uploader=MagicMock(),
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+
+    def _publish(_product: Product, _category_id: str) -> bool:
+        use_case.published += 1
+        return True
+
+    use_case._publish_one = MagicMock(side_effect=_publish)  # type: ignore[method-assign]
+
+    result = use_case.execute([_build_product()], "  MLB2000  ")
+
+    assert result["success"] is True
+    assert resolver.find_calls == 0
+    assert resolver.predictor_calls == []
+    assert resolver.title_calls == []
+    assert resolver.resolve_calls == ["MLB2000"]
+    assert use_case._publish_one.call_args.args[1] == "MLB2000"
+    item_result = result["item_results"][0]
+    assert item_result["resolution_strategy"] == "direct_id"
+    assert item_result["category_input"] == "MLB2000"
+    assert item_result["category_resolved_id"] == "MLB2000"
+
+
 def test_execute_uses_title_prediction_when_predictor_does_not_match() -> None:
     resolver = _CategoryFlowResolver(
         find_result=None,
