@@ -48,6 +48,17 @@ DEFAULT_NA_SKIP_TAGS = {
     "catalog_listing_required",
     "allow_variations",
 }
+CRITICAL_ATTRIBUTE_WARNING_TOKENS = (
+    "unknown attribute",
+    "attribute missing id",
+    "value type mismatch",
+    "doesn't match pattern",
+)
+CRITICAL_VALIDATION_WARNING_TOKENS = (
+    "item.attributes.omitted",
+    "item.attributes.invalid",
+    "item.attributes.required",
+)
 
 
 class PublishProductUseCase:
@@ -96,6 +107,8 @@ class PublishProductUseCase:
         self.fiscal_service = fiscal_service
         self.clip_uploader = clip_uploader
         self.config = config or {}
+        strict_warnings = self.config.get("strict_attribute_warnings")
+        self.strict_attribute_warnings = True if strict_warnings is None else bool(strict_warnings)
         self.dry_run = dry_run
         self.validation_only = validation_only
         self.enable_fiscal_submission = enable_fiscal_submission
@@ -208,6 +221,26 @@ class PublishProductUseCase:
             return None
         title_str = title.strip()
         return title_str or None
+
+    @staticmethod
+    def _get_critical_attribute_warnings(warnings: list[str]) -> list[str]:
+        """Return attribute-processing warnings that should block publication."""
+        critical: list[str] = []
+        for warning in warnings:
+            normalized = str(warning).lower()
+            if any(token in normalized for token in CRITICAL_ATTRIBUTE_WARNING_TOKENS):
+                critical.append(str(warning))
+        return critical
+
+    @staticmethod
+    def _get_critical_validation_warnings(warnings: list[str]) -> list[str]:
+        """Return API validation warnings that indicate payload/data loss."""
+        critical: list[str] = []
+        for warning in warnings:
+            normalized = str(warning).lower()
+            if any(token in normalized for token in CRITICAL_VALIDATION_WARNING_TOKENS):
+                critical.append(str(warning))
+        return critical
 
     def execute(
         self, products: list[Product | dict[str, Any]], category_name: str
@@ -530,6 +563,21 @@ class PublishProductUseCase:
         # Log attribute processing results
         if attr_warnings:
             logger.warning(f"Attribute warnings for {product.sku}: {attr_warnings}")
+            critical_attr_warnings = self._get_critical_attribute_warnings(attr_warnings)
+            if critical_attr_warnings and self.strict_attribute_warnings:
+                summary = critical_attr_warnings[:5]
+                logger.error(
+                    "Blocking %s due to critical attribute warnings (%s): %s",
+                    product.sku,
+                    len(critical_attr_warnings),
+                    summary,
+                )
+                self.errors.append(
+                    f"{product.sku}: critical attribute warnings ({len(critical_attr_warnings)}): "
+                    f"{summary}"
+                )
+                self.failed += 1
+                return False
 
         logger.info(f"Final attribute count for {product.sku}: {len(ml_attributes)}")
 
@@ -552,12 +600,20 @@ class PublishProductUseCase:
 
         # Check if listing_type_id was explicitly mapped from spreadsheet
         explicit_listing_type: str | None = None
-        for attr in ml_attributes:
+        marker_indexes_to_remove: list[int] = []
+        for index, attr in enumerate(ml_attributes):
             if "_listing_type_id" in attr:
-                mapped_listing_type = attr.pop("_listing_type_id")
+                marker_indexes_to_remove.append(index)
+                mapped_listing_type = attr.get("_listing_type_id")
                 if isinstance(mapped_listing_type, str) and mapped_listing_type:
                     explicit_listing_type = mapped_listing_type
                 break
+        if marker_indexes_to_remove:
+            ml_attributes = [
+                attr
+                for index, attr in enumerate(ml_attributes)
+                if index not in marker_indexes_to_remove
+            ]
 
         available_listing_types = self._get_available_listing_type_ids(category_id)
         listing_type_id = self._resolve_listing_type_id(
@@ -701,9 +757,33 @@ class PublishProductUseCase:
             if shipping_issues:
                 logger.info(f"Shipping validation issues for {product.sku}: {shipping_issues}")
 
-            # Log warnings (don't block publishing)
+            # Log warnings (can block publishing when strict warning gate is enabled)
             if warnings:
                 logger.warning(f"Validation warnings for {product.sku}: {warnings}")
+                critical_validation_warnings = self._get_critical_validation_warnings(warnings)
+                if critical_validation_warnings and self.strict_attribute_warnings:
+                    summary = critical_validation_warnings[:5]
+                    logger.error(
+                        "Blocking %s due to critical validation warnings (%s): %s",
+                        product.sku,
+                        len(critical_validation_warnings),
+                        summary,
+                    )
+                    self._current_cause_codes = [
+                        warning.split(":", 1)[0]
+                        for warning in critical_validation_warnings
+                        if ":" in warning
+                    ]
+                    self.errors.append(
+                        f"{product.sku}: critical validation warnings "
+                        f"({len(critical_validation_warnings)}): {summary}"
+                    )
+                    self.failed += 1
+                    if self.feedback:
+                        self.feedback.record_validation_result(
+                            product.sku, ml_attributes, validation
+                        )
+                    return False
 
             # Record validation result for feedback
             validation_result = validation

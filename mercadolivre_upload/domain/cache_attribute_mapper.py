@@ -4,6 +4,7 @@ Uses AttributeCache to map Excel column headers to Mercado Livre API
 attribute definitions with value mapping support.
 """
 
+import re
 from typing import Any, Protocol
 
 from mercadolivre_upload.shared.utils.text_utils import PortugueseTextNormalizer
@@ -14,6 +15,41 @@ ValueDef = dict[str, Any]
 NameIndex = dict[str, AttributeDef]
 ValueIndex = dict[str, dict[str, ValueDef]]
 MLPayload = dict[str, Any]
+
+_STOPWORDS = {"de", "do", "da", "dos", "das", "e"}
+_BLOCKED_HEADER_PREFIXES = (
+    "unidade de altura",
+    "unidade de largura",
+    "unidade de comprimento",
+    "unidade de profundidade",
+    "unidade de peso",
+    "unidade de tempo de garantia",
+    "varia por",
+)
+_BLOCKED_HEADER_EXACT = {
+    "forma de envio",
+    "custo de envio",
+    "tarifa de venda",
+    "retirar pessoalmente",
+    "quantidade de caracteres",
+}
+
+
+def _simplify_match_text(text: str) -> str:
+    """Remove low-signal stopwords from normalized text for matching."""
+    tokens = [token for token in text.split() if token and token not in _STOPWORDS]
+    return " ".join(tokens)
+
+
+def _token_overlap(a: str, b: str) -> float:
+    """Compute token overlap ratio between two normalized strings."""
+    a_tokens = {token for token in a.split() if token}
+    b_tokens = {token for token in b.split() if token}
+    if not a_tokens or not b_tokens:
+        return 0.0
+    intersection = len(a_tokens.intersection(b_tokens))
+    denominator = max(len(a_tokens), len(b_tokens))
+    return intersection / denominator
 
 
 class AttributeCachePort(Protocol):
@@ -52,6 +88,7 @@ class CachedAttributeMapper:
         self.category_id = category_id
         self._cache: dict[str, Any] = {}
         self._name_index: NameIndex = {}
+        self._simplified_name_index: NameIndex = {}
         self._value_index: ValueIndex = {}
 
         # Load cache and build indexes on initialization
@@ -91,6 +128,7 @@ class CachedAttributeMapper:
             Dictionary mapping normalized names to attribute definitions
         """
         self._name_index = {}
+        self._simplified_name_index = {}
         self._value_index = {}
 
         attributes = self._cache.get("attributes", [])
@@ -105,9 +143,12 @@ class CachedAttributeMapper:
             # Index by normalized name
             normalized_name = PortugueseTextNormalizer.normalize(name)
             self._name_index[normalized_name] = attr
+            simplified_name = _simplify_match_text(normalized_name)
+            if simplified_name and simplified_name not in self._simplified_name_index:
+                self._simplified_name_index[simplified_name] = attr
 
-            # Build value index for list-type attributes
-            if attr.get("value_type") == "list" and "values" in attr:
+            # Build value index for attributes that expose allowed values.
+            if "values" in attr and isinstance(attr.get("values"), list) and attr.get("values"):
                 value_map: dict[str, ValueDef] = {}
                 for value in attr["values"]:
                     value_name = value.get("name", "")
@@ -138,29 +179,37 @@ class CachedAttributeMapper:
             return None
 
         normalized_header = PortugueseTextNormalizer.normalize(excel_header)
+        if self._is_blocked_header(normalized_header):
+            return None
 
         # Exact match on normalized name
         if normalized_header in self._name_index:
             return self._name_index[normalized_header]
 
-        # Near-exact match: look for high similarity
+        simplified_header = _simplify_match_text(normalized_header)
+        if simplified_header in self._simplified_name_index:
+            return self._simplified_name_index[simplified_header]
+
+        # Near-exact match: high similarity + token overlap (avoid loose substring matches).
         best_match: AttributeDef | None = None
         best_score = 0.0
 
         for normalized_name, attr in self._name_index.items():
-            # Check for substring containment (high score for contained matches)
-            if normalized_header in normalized_name or normalized_name in normalized_header:
-                score = 0.95
-                if score > best_score:
-                    best_score = score
-                    best_match = attr
-            else:
-                # Use similarity for fuzzy matching
-                attr_name = attr.get("name", "")
-                score = PortugueseTextNormalizer.similarity(excel_header, attr_name)
-                if score > best_score and score >= 0.85:  # High threshold for near-exact
-                    best_score = score
-                    best_match = attr
+            simplified_name = _simplify_match_text(normalized_name)
+            overlap = _token_overlap(
+                simplified_header or normalized_header,
+                simplified_name or normalized_name,
+            )
+            if overlap < 0.6:
+                continue
+
+            score = max(
+                PortugueseTextNormalizer.similarity(normalized_header, normalized_name),
+                PortugueseTextNormalizer.similarity(simplified_header, simplified_name),
+            )
+            if score > best_score and score >= 0.9:
+                best_score = score
+                best_match = attr
 
         return best_match
 
@@ -228,40 +277,46 @@ class CachedAttributeMapper:
                     ],
                 }
 
-        # Handle list-type attributes
-        if value_type == "list" and attribute_id in self._value_index:
-            normalized_input = PortugueseTextNormalizer.normalize(excel_value)
+        # Handle attributes that expose allowed values (even when value_type is string).
+        if attribute_id in self._value_index:
             value_map = self._value_index[attribute_id]
+            candidate_values = self._build_value_candidates(excel_value)
 
             # Try exact match first
-            if normalized_input in value_map:
-                matched_value = value_map[normalized_input]
-                value_id = matched_value.get("id")
-                value_name = matched_value.get("name")
-                return {
-                    "id": attribute_id,
-                    "name": attr_name,
-                    "value_id": value_id,
-                    "value_name": value_name,
-                    "values": [{"id": value_id, "name": value_name, "struct": None}],
-                }
+            for candidate in candidate_values:
+                normalized_candidate = PortugueseTextNormalizer.normalize(candidate)
+                if normalized_candidate in value_map:
+                    matched_value = value_map[normalized_candidate]
+                    value_id = matched_value.get("id")
+                    value_name = matched_value.get("name")
+                    return {
+                        "id": attribute_id,
+                        "name": attr_name,
+                        "value_id": value_id,
+                        "value_name": value_name,
+                        "values": [{"id": value_id, "name": value_name, "struct": None}],
+                    }
 
             # Try partial/fuzzy matching
             best_match: ValueDef | None = None
             best_score = 0.0
 
-            for normalized_value, value_def in value_map.items():
-                # Check for containment
-                if normalized_input in normalized_value or normalized_value in normalized_input:
-                    score = 0.9
-                else:
-                    score = PortugueseTextNormalizer.similarity(
-                        excel_value, value_def.get("name", "")
-                    )
+            for candidate in candidate_values:
+                normalized_candidate = PortugueseTextNormalizer.normalize(candidate)
+                for normalized_value, value_def in value_map.items():
+                    if (
+                        normalized_candidate in normalized_value
+                        or normalized_value in normalized_candidate
+                    ):
+                        score = 0.9
+                    else:
+                        score = PortugueseTextNormalizer.similarity(
+                            candidate, value_def.get("name", "")
+                        )
 
-                if score > best_score:
-                    best_score = score
-                    best_match = value_def
+                    if score > best_score:
+                        best_score = score
+                        best_match = value_def
 
             if best_match and best_score >= 0.8:
                 value_id = best_match.get("id")
@@ -274,7 +329,16 @@ class CachedAttributeMapper:
                     "values": [{"id": value_id, "name": value_name, "struct": None}],
                 }
 
-        # For string/number types or when no value match found
+            # No allowed value match found: return empty value so caller can skip safely.
+            return {
+                "id": attribute_id,
+                "name": attr_name,
+                "value_id": None,
+                "value_name": None,
+                "values": [],
+            }
+
+        # For string/number types
         return {
             "id": attribute_id,
             "name": attr_name,
@@ -362,6 +426,7 @@ class CachedAttributeMapper:
         """
         self._cache = {}
         self._name_index = {}
+        self._simplified_name_index = {}
         self._value_index = {}
         self.load_cache()
         self.build_name_index()
@@ -399,3 +464,19 @@ class CachedAttributeMapper:
                 return int(num_str)
 
         return None
+
+    def _is_blocked_header(self, normalized_header: str) -> bool:
+        """Return whether a header is operational metadata, not a product attribute."""
+        if normalized_header in _BLOCKED_HEADER_EXACT:
+            return True
+        return any(normalized_header.startswith(prefix) for prefix in _BLOCKED_HEADER_PREFIXES)
+
+    def _build_value_candidates(self, excel_value: str) -> list[str]:
+        """Build candidate values for enum matching from potentially multi-value cells."""
+        value_str = str(excel_value).strip()
+        if not value_str:
+            return []
+        parts = [part.strip() for part in re.split(r"[,;/|]", value_str) if part.strip()]
+        if len(parts) > 1:
+            return parts + [value_str]
+        return [value_str]
