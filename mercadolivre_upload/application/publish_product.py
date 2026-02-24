@@ -50,6 +50,7 @@ DEFAULT_NA_SKIP_TAGS = {
     "conditional_required",
     "catalog_listing_required",
     "allow_variations",
+    "variation_attribute",
 }
 IDENTIFIER_EMPTY_TOKENS = {
     "",
@@ -270,6 +271,26 @@ class PublishProductUseCase:
                     normalized_diag_mode,
                 )
 
+        self.shipping_non_blocking_codes: set[str] = set()
+        shipping_policy_config = self.config.get("shipping_policy")
+        if not isinstance(shipping_policy_config, dict):
+            shipping_config = self.config.get("shipping")
+            if isinstance(shipping_config, dict):
+                nested_policy = shipping_config.get("policy")
+                if isinstance(nested_policy, dict):
+                    shipping_policy_config = nested_policy
+
+        if isinstance(shipping_policy_config, dict):
+            raw_non_blocking_codes = shipping_policy_config.get("non_blocking_codes", [])
+            if isinstance(raw_non_blocking_codes, str):
+                raw_non_blocking_codes = [raw_non_blocking_codes]
+            if isinstance(raw_non_blocking_codes, list):
+                self.shipping_non_blocking_codes = {
+                    str(code).strip().lower()
+                    for code in raw_non_blocking_codes
+                    if str(code).strip()
+                }
+
         self._rollout_flags_artifact = self._build_rollout_flags_artifact()
         self.dry_run = dry_run
         self.validation_only = validation_only
@@ -361,6 +382,7 @@ class PublishProductUseCase:
             "image_diagnostics_gate_mode": self.image_diagnostics_gate_mode,
             "flow_user_products_enabled": self.flow_user_products_enabled,
             "flow_blocked_behavior": self.flow_blocked_behavior,
+            "shipping_non_blocking_codes": sorted(self.shipping_non_blocking_codes),
         }
 
     def _annotate_image_diagnostics_artifact(self, artifact: dict[str, Any]) -> dict[str, Any]:
@@ -671,12 +693,16 @@ class PublishProductUseCase:
             or "envio" in normalized_message
         )
 
-    @staticmethod
-    def _classify_shipping_cause(cause_code: str, cause_message: str) -> str:
+    def _classify_shipping_cause(self, cause_code: str, cause_message: str) -> str:
         """Classify shipping causes into blocking/retryable/unknown buckets."""
         normalized_code = cause_code.lower()
         normalized_message = cause_message.lower()
 
+        if any(
+            normalized_code == code or normalized_code.startswith(f"{code}.")
+            for code in self.shipping_non_blocking_codes
+        ):
+            return "unknown"
         if any(token in normalized_code for token in SHIPPING_BLOCKING_CODE_TOKENS):
             return "blocking"
         if any(token in normalized_code for token in SHIPPING_RETRYABLE_CODE_TOKENS):
@@ -2852,6 +2878,17 @@ class PublishProductUseCase:
             if str(value).strip()
         }
 
+        default_reason_artifact = self._inject_default_empty_gtin_reason(
+            item=item,
+            gtin_required=gtin_required,
+            empty_gtin_reason_attribute_id=(
+                empty_gtin_reason_attribute_id
+                if isinstance(empty_gtin_reason_attribute_id, str)
+                else None
+            ),
+            allowed_reason_ids=allowed_reason_ids,
+        )
+
         item_state = self._collect_identifier_state(item.get("attributes"))
         variations = item.get("variations", [])
         variation_states: list[dict[str, Any]] = []
@@ -2902,9 +2939,87 @@ class PublishProductUseCase:
                 item_state.get("empty_gtin_reason_value_id")
                 or item_state.get("empty_gtin_reason_value_name")
             ),
+            "default_empty_gtin_reason": default_reason_artifact,
             "violations": identifier_violations,
         }
         return identifier_violations, artifact
+
+    def _inject_default_empty_gtin_reason(
+        self,
+        *,
+        item: dict[str, Any],
+        gtin_required: bool,
+        empty_gtin_reason_attribute_id: str | None,
+        allowed_reason_ids: set[str],
+    ) -> dict[str, Any]:
+        """Inject configured EMPTY_GTIN_REASON when GTIN is missing."""
+        artifact: dict[str, Any] = {
+            "applied": False,
+            "value_id": None,
+            "value_name": None,
+        }
+        if not gtin_required:
+            return artifact
+
+        policy = self.config.get("identifier_policy")
+        if not isinstance(policy, dict) or not bool(policy.get("auto_fill_empty_gtin_reason")):
+            return artifact
+
+        default_value_name = self._normalize_identifier_text(
+            policy.get("default_empty_gtin_reason_value_name")
+        )
+        if default_value_name is None:
+            return artifact
+
+        attributes = item.get("attributes")
+        if not isinstance(attributes, list):
+            return artifact
+
+        state = self._collect_identifier_state(attributes)
+        if state.get("gtin"):
+            return artifact
+        if state.get("empty_gtin_reason_value_id") or state.get("empty_gtin_reason_value_name"):
+            return artifact
+
+        target_id = (
+            empty_gtin_reason_attribute_id
+            if isinstance(empty_gtin_reason_attribute_id, str) and empty_gtin_reason_attribute_id
+            else "EMPTY_GTIN_REASON"
+        )
+
+        reason_attribute: dict[str, Any] | None = None
+        for attribute in attributes:
+            if not isinstance(attribute, dict):
+                continue
+            attribute_id = attribute.get("id")
+            if (
+                isinstance(attribute_id, str)
+                and attribute_id.strip().upper() == "EMPTY_GTIN_REASON"
+            ):
+                reason_attribute = attribute
+                break
+
+        if reason_attribute is None:
+            reason_attribute = {"id": target_id}
+            attributes.append(reason_attribute)
+
+        selected_reason_id: str | None = None
+        if allowed_reason_ids:
+            selected_reason_id = sorted(allowed_reason_ids)[0]
+            reason_attribute["value_id"] = selected_reason_id
+        reason_attribute["value_name"] = default_value_name
+
+        artifact.update(
+            {
+                "applied": True,
+                "value_id": selected_reason_id,
+                "value_name": default_value_name,
+            }
+        )
+        logger.warning(
+            "Auto-filled EMPTY_GTIN_REASON with configured default value for missing GTIN."
+        )
+        return artifact
 
     def _run_schema_contract_preflight(
         self,
@@ -2932,6 +3047,7 @@ class PublishProductUseCase:
         required_ids = {attr_id for attr_id in required_ids_raw if isinstance(attr_id, str)}
         required_ids.discard("")
         required_ids.discard("GTIN")
+        required_ids.discard("EMPTY_GTIN_REASON")
         if required_ids:
             provided_ids = {
                 attr.get("id")
@@ -3252,9 +3368,11 @@ class PublishProductUseCase:
         configured_skip_tags = na_policy.get("skip_tags", [])
         skip_tags = DEFAULT_NA_SKIP_TAGS.copy()
         if isinstance(configured_skip_tags, list):
-            skip_tags = {
+            configured = {
                 str(tag).strip().lower() for tag in configured_skip_tags if str(tag).strip()
-            } or skip_tags
+            }
+            if configured:
+                skip_tags = skip_tags.union(configured)
 
         conditional_required_ids = self._get_conditional_required_attribute_ids(
             category_id=category_id,
