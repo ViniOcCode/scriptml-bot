@@ -22,6 +22,12 @@ from mercadolivre_upload.shared.utils.text_utils import PortugueseTextNormalizer
 from .attribute_builder import AttributeBuilderService
 from .policy_snapshot import compile_policy_snapshot, compile_schema_contract
 from .ports import ClipUploaderPort, ImageUploaderPort, ItemPublisherPort, ShippingResolverPort
+from .shipping_policy import (
+    coerce_shipping_bool,
+    normalize_seller_tags,
+    normalize_shipping_constraints,
+    resolve_shipping_policy_settings,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -279,60 +285,25 @@ class PublishProductUseCase:
                     normalized_diag_mode,
                 )
 
-        self.shipping_non_blocking_codes: set[str] = set()
-        self.shipping_mandatory_free_shipping_tags: set[str] = set(
-            DEFAULT_MANDATORY_FREE_SHIPPING_TAGS
+        shipping_policy_settings = resolve_shipping_policy_settings(
+            self.config,
+            default_mandatory_free_shipping_tags=DEFAULT_MANDATORY_FREE_SHIPPING_TAGS,
         )
-        self.shipping_enforce_mandatory_free_shipping = True
-        self.shipping_allow_runtime_tag_overrides = True
-        self.shipping_allow_runtime_free_shipping_override = True
-        shipping_policy_config = self.config.get("shipping_policy")
-        if not isinstance(shipping_policy_config, dict):
-            shipping_config = self.config.get("shipping")
-            if isinstance(shipping_config, dict):
-                nested_policy = shipping_config.get("policy")
-                if isinstance(nested_policy, dict):
-                    shipping_policy_config = nested_policy
-
-        if isinstance(shipping_policy_config, dict):
-            raw_non_blocking_codes = shipping_policy_config.get("non_blocking_codes", [])
-            if isinstance(raw_non_blocking_codes, str):
-                raw_non_blocking_codes = [raw_non_blocking_codes]
-            if isinstance(raw_non_blocking_codes, list):
-                self.shipping_non_blocking_codes = {
-                    str(code).strip().lower()
-                    for code in raw_non_blocking_codes
-                    if str(code).strip()
-                }
-
-            raw_mandatory_tags = shipping_policy_config.get(
-                "mandatory_free_shipping_tags",
-                sorted(DEFAULT_MANDATORY_FREE_SHIPPING_TAGS),
-            )
-            if isinstance(raw_mandatory_tags, str):
-                raw_mandatory_tags = [raw_mandatory_tags]
-            if isinstance(raw_mandatory_tags, list):
-                normalized_tags = {
-                    str(tag).strip().lower() for tag in raw_mandatory_tags if str(tag).strip()
-                }
-                if normalized_tags:
-                    self.shipping_mandatory_free_shipping_tags = normalized_tags
-
-            raw_enforce_mandatory = shipping_policy_config.get("enforce_mandatory_free_shipping")
-            if isinstance(raw_enforce_mandatory, bool):
-                self.shipping_enforce_mandatory_free_shipping = raw_enforce_mandatory
-
-            raw_allow_tag_overrides = shipping_policy_config.get("allow_runtime_tag_overrides")
-            if isinstance(raw_allow_tag_overrides, bool):
-                self.shipping_allow_runtime_tag_overrides = raw_allow_tag_overrides
-
-            raw_allow_free_shipping_override = shipping_policy_config.get(
-                "allow_runtime_free_shipping_override"
-            )
-            if isinstance(raw_allow_free_shipping_override, bool):
-                self.shipping_allow_runtime_free_shipping_override = (
-                    raw_allow_free_shipping_override
-                )
+        self.shipping_non_blocking_codes: set[str] = set(
+            shipping_policy_settings.non_blocking_codes
+        )
+        self.shipping_mandatory_free_shipping_tags: set[str] = set(
+            shipping_policy_settings.mandatory_free_shipping_tags
+        )
+        self.shipping_enforce_mandatory_free_shipping = (
+            shipping_policy_settings.enforce_mandatory_free_shipping
+        )
+        self.shipping_allow_runtime_tag_overrides = (
+            shipping_policy_settings.allow_runtime_tag_overrides
+        )
+        self.shipping_allow_runtime_free_shipping_override = (
+            shipping_policy_settings.allow_runtime_free_shipping_override
+        )
 
         self._rollout_flags_artifact = self._build_rollout_flags_artifact()
         self.dry_run = dry_run
@@ -820,42 +791,17 @@ class PublishProductUseCase:
     @staticmethod
     def _normalize_seller_tags(raw_tags: Any) -> list[str]:
         """Normalize seller tag payload from users/me style responses."""
-        normalized_tags: list[str] = []
-        if isinstance(raw_tags, list):
-            for tag in raw_tags:
-                tag_name = str(tag).strip().lower()
-                if tag_name:
-                    normalized_tags.append(tag_name)
-        elif isinstance(raw_tags, dict):
-            for tag, enabled in raw_tags.items():
-                if not enabled:
-                    continue
-                tag_name = str(tag).strip().lower()
-                if tag_name:
-                    normalized_tags.append(tag_name)
-        return list(dict.fromkeys(normalized_tags))
+        return normalize_seller_tags(raw_tags)
 
     @staticmethod
     def _normalize_shipping_constraints(raw_constraints: Any) -> dict[str, Any]:
         """Normalize shipping constraints payload into a deterministic mapping."""
-        if not isinstance(raw_constraints, dict):
-            return {}
-        return {
-            str(key).strip(): value for key, value in raw_constraints.items() if str(key).strip()
-        }
+        return normalize_shipping_constraints(raw_constraints)
 
     @staticmethod
     def _coerce_shipping_bool(value: Any) -> bool | None:
         """Coerce supported shipping booleans into strict bool values."""
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, str):
-            normalized = value.strip().lower()
-            if normalized in {"true", "1", "yes", "y", "on"}:
-                return True
-            if normalized in {"false", "0", "no", "n", "off"}:
-                return False
-        return None
+        return coerce_shipping_bool(value)
 
     def _get_seller_capabilities_artifact(self) -> dict[str, Any]:
         """Read seller capability tags once and reuse within the use case instance."""
@@ -3356,8 +3302,8 @@ class PublishProductUseCase:
             self._category_non_fillable_attribute_ids_cache = cache
 
         cached = cache.get(category_id)
-        if cached is not None:
-            return cached
+        if isinstance(cached, set):
+            return {attr_id for attr_id in cached if isinstance(attr_id, str)}
 
         try:
             metadata = self.category_resolver.get_attribute_metadata(category_id)
@@ -3475,9 +3421,7 @@ class PublishProductUseCase:
         skip_tags = DEFAULT_NA_SKIP_TAGS.copy()
         if isinstance(configured_skip_tags, list):
             configured = {
-                _normalize_attribute_tag(tag)
-                for tag in configured_skip_tags
-                if str(tag).strip()
+                _normalize_attribute_tag(tag) for tag in configured_skip_tags if str(tag).strip()
             }
             if configured:
                 skip_tags = skip_tags.union(configured)
