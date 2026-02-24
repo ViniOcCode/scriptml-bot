@@ -21,7 +21,7 @@ from mercadolivre_upload.domain.category.resolver import CategoryResolver
 from mercadolivre_upload.domain.fiscal.service import FiscalService
 from mercadolivre_upload.domain.shipping.resolver import ShippingResolver
 from mercadolivre_upload.infrastructure.cache.attribute_cache import AttributeCache
-from mercadolivre_upload.shared.utils.config_loader import load_yaml_config as _load_yaml_config
+from mercadolivre_upload.shared.utils.config_loader import load_merged_yaml_config
 
 logger = logging.getLogger(__name__)
 
@@ -158,22 +158,13 @@ def _top_codes_by_status(
 
 
 def load_config() -> dict[str, Any]:
-    """Load configuration from split YAML files with legacy fallback."""
-    config: dict[str, Any] = {}
-    for path in [
+    """Load split configs with deterministic legacy fallback precedence."""
+    return load_merged_yaml_config(
         Path("config/standard_fields.yaml"),
         Path("config/shipping.yaml"),
         Path("config/attribute_rules.yaml"),
         Path("config/header_detection.yaml"),
-    ]:
-        config.update(_load_yaml_config(path))
-
-    legacy_config = _load_yaml_config(Path("config/generic_mappings.yaml"))
-    if legacy_config:
-        for key, value in legacy_config.items():
-            config.setdefault(key, value)
-
-    return config
+    )
 
 
 def build_publish_use_case(

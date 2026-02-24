@@ -39,9 +39,7 @@ class StructuralValidator:
         if not meta.required:
             return False
         tags = {
-            self._normalize_tag(tag)
-            for tag in getattr(meta, "tags", set())
-            if str(tag).strip()
+            self._normalize_tag(tag) for tag in getattr(meta, "tags", set()) if str(tag).strip()
         }
         return not bool(tags.intersection(NON_FILLABLE_TAGS))
 

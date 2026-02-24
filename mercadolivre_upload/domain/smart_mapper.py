@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from mercadolivre_upload.shared.utils.config_loader import load_yaml_config
+from mercadolivre_upload.shared.utils.config_loader import load_merged_yaml_config, load_yaml_config
 from mercadolivre_upload.shared.utils.text_utils import PortugueseTextNormalizer
 
 logger = logging.getLogger(__name__)
@@ -73,7 +73,7 @@ class SmartAttributeMapper:
         try:
             config_file = Path(config_path)
             legacy_file = Path("config/generic_mappings.yaml")
-            config = load_yaml_config(config_file, legacy_file)
+            config = load_merged_yaml_config(config_file, fallback=legacy_file)
             if not config:
                 logger.warning(f"Config file not found: {config_path}")
                 return {}

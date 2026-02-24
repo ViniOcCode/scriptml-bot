@@ -5,12 +5,23 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 
-from mercadolivre_upload.shared.utils.config_loader import load_yaml_config
+from mercadolivre_upload.shared.utils.config_loader import load_merged_yaml_config
 
 from ..attribute_classifier import CLASS_EDITORIAL, AttributeClassifier
 from .scoring import ScoredAttribute
 
 logger = logging.getLogger(__name__)
+
+
+def _load_sanitizer_config() -> dict[str, Any]:
+    """Load sanitizer configuration with split-over-legacy precedence."""
+    try:
+        return load_merged_yaml_config(
+            Path("config/attribute_rules.yaml"), fallback=Path("config/generic_mappings.yaml")
+        )
+    except (OSError, TypeError, ValueError) as e:
+        logger.warning(f"Could not load sanitizer config: {e}. Using defaults.")
+        return {}
 
 
 def _load_protected_attributes() -> set[str]:
@@ -19,16 +30,8 @@ def _load_protected_attributes() -> set[str]:
     Returns:
         Set of attribute IDs that should never be dropped
     """
-    try:
-        config = load_yaml_config(
-            Path("config/attribute_rules.yaml"), Path("config/generic_mappings.yaml")
-        )
-
-        protected = config.get("protected_attributes", [])
-        return set(protected)
-    except (OSError, TypeError, ValueError) as e:
-        logger.warning(f"Could not load protected attributes from config: {e}. Using empty set.")
-        return set()
+    protected = _load_sanitizer_config().get("protected_attributes", [])
+    return set(protected) if isinstance(protected, list) else set()
 
 
 def _load_similarity_threshold() -> float:
@@ -38,12 +41,10 @@ def _load_similarity_threshold() -> float:
         Threshold value for redundancy detection
     """
     try:
-        config = load_yaml_config(
-            Path("config/attribute_rules.yaml"), Path("config/generic_mappings.yaml")
+        return float(
+            _load_sanitizer_config().get("similarity", {}).get("redundancy_threshold", 0.9)
         )
-
-        return float(config.get("similarity", {}).get("redundancy_threshold", 0.9))
-    except (OSError, TypeError, ValueError) as e:
+    except (TypeError, ValueError) as e:
         logger.warning(f"Could not load similarity threshold from config: {e}. Using default 0.9.")
         return 0.9
 
