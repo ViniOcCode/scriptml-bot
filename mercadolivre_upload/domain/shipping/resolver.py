@@ -11,6 +11,7 @@ from typing import Any, Protocol
 from mercadolivre_upload.shared.utils.config_loader import load_merged_yaml_config
 
 logger = logging.getLogger(__name__)
+_SUPPORTED_SHIPPING_MODES = {"me1", "me2", "custom", "not_specified"}
 
 
 def _load_shipping_config() -> dict[str, Any]:
@@ -125,7 +126,26 @@ class ShippingResolver:
             logger.info(f"Selected shipping mode: {selected_mode}")
 
         logistic_type = self._cached_logistic_type_by_mode.get(selected_mode)
-        selection: dict[str, Any] = {"mode": selected_mode, "logistic_type": logistic_type}
+        selection: dict[str, Any] = {
+            "mode": selected_mode,
+            "logistic_type": logistic_type,
+            "available_modes": list(available_modes),
+            "logistic_type_by_mode": dict(self._cached_logistic_type_by_mode),
+        }
+        runtime_policy_by_mode: dict[str, dict[str, Any]] = {}
+        for mode, raw_policy in self._cached_runtime_policy_by_mode.items():
+            if not isinstance(raw_policy, dict):
+                continue
+            normalized_policy = dict(raw_policy)
+            tags = normalized_policy.get("tags")
+            if isinstance(tags, list):
+                normalized_policy["tags"] = list(tags)
+            constraints = normalized_policy.get("constraints")
+            if isinstance(constraints, dict):
+                normalized_policy["constraints"] = dict(constraints)
+            runtime_policy_by_mode[str(mode)] = normalized_policy
+        if runtime_policy_by_mode:
+            selection["runtime_policy_by_mode"] = runtime_policy_by_mode
         runtime_policy = self._cached_runtime_policy_by_mode.get(selected_mode, {})
         if isinstance(runtime_policy, dict):
             runtime_tags = runtime_policy.get("tags")
@@ -271,7 +291,7 @@ class ShippingResolver:
         Falls back to /users/me shipping_modes when preferences are unavailable.
 
         Returns:
-            List of available shipping mode IDs (me1, me2, or empty if none)
+            List of available shipping mode IDs (me1/me2/custom/not_specified or empty)
         """
         if self._cached_modes is not None:
             return self._cached_modes
@@ -289,7 +309,9 @@ class ShippingResolver:
                     shipping_preferences = self._get_shipping_preferences(str(user_id))
                     pref_modes = shipping_preferences.get("modes", [])
                     if isinstance(pref_modes, list):
-                        available_modes = [mode for mode in pref_modes if mode in {"me1", "me2"}]
+                        available_modes = [
+                            mode for mode in pref_modes if mode in _SUPPORTED_SHIPPING_MODES
+                        ]
 
                     # Some sellers only expose mode/type combinations under logistics.
                     logistics = shipping_preferences.get("logistics", [])
@@ -298,7 +320,7 @@ class ShippingResolver:
                             if not isinstance(logistic, dict):
                                 continue
                             mode = logistic.get("mode")
-                            if not isinstance(mode, str) or mode not in {"me1", "me2"}:
+                            if not isinstance(mode, str) or mode not in _SUPPORTED_SHIPPING_MODES:
                                 continue
                             if mode not in available_modes:
                                 available_modes.append(mode)
@@ -323,9 +345,11 @@ class ShippingResolver:
                 user_shipping_modes = user_info.get("shipping_modes", [])
                 if isinstance(user_shipping_modes, list):
                     available_modes = [
-                        mode for mode in user_shipping_modes if mode in {"me1", "me2"}
+                        mode for mode in user_shipping_modes if mode in _SUPPORTED_SHIPPING_MODES
                     ]
                 logger.info(f"Available shipping modes from /users/me: {available_modes}")
+
+            available_modes = list(dict.fromkeys(available_modes))
 
             # Cache only real discovered modes to avoid pinning transient empty results.
             if available_modes:
