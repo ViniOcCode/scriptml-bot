@@ -79,9 +79,15 @@ class _FakeShippingProvider:
 class _FakeImageUploader:
     def __init__(self, image_urls: list[str] | None = None):
         self.image_urls = image_urls or ["https://example.com/image.jpg"]
+        self._uploads = [
+            {"url": url, "id": f"PIC-{index + 1}"} for index, url in enumerate(self.image_urls)
+        ]
 
     def upload_images(self, sku: str) -> list[str]:
         return self.image_urls
+
+    def get_uploaded_images(self) -> list[dict[str, str]]:
+        return list(self._uploads)
 
 
 class _FixedShippingResolver:
@@ -293,6 +299,28 @@ def test_cached_mapper_splits_multi_value_enum_and_maps_first_match() -> None:
     assert mapped["value_name"] == "Azul"
 
 
+def test_cached_mapper_extracts_all_matching_enum_values() -> None:
+    mapper = CachedAttributeMapper(
+        _StaticAttributeCache(
+            [
+                {
+                    "id": "COLOR",
+                    "name": "Cor",
+                    "value_type": "string",
+                    "values": [
+                        {"id": "1", "name": "Azul"},
+                        {"id": "2", "name": "Verde"},
+                    ],
+                }
+            ]
+        ),
+        "MLB40280",
+    )
+
+    mapped_values = mapper.map_all_values("COLOR", "Azul, bege, verde")
+    assert [value["name"] for value in mapped_values] == ["Azul", "Verde"]
+
+
 def test_attribute_mapper_skips_operational_header_fuzzy_mapping() -> None:
     mapper = AttributeMapper(similarity_threshold=0.7)
 
@@ -309,6 +337,24 @@ def test_attribute_mapper_skips_operational_header_fuzzy_mapping() -> None:
     assert len(mapped_attrs) == 1
     assert mapped_attrs[0]["id"] == "SALE_FORMAT"
     assert mapped_attrs[0]["value_name"] == "Unidade"
+
+
+def test_listing_type_explicit_mapping_uses_gold_pro_for_premium() -> None:
+    mapper = AttributeMapper(similarity_threshold=0.7)
+
+    mapped_attrs, _ = mapper.map_product_attributes(
+        {"Tipo do anúncio": "Premium"},
+        [],
+        explicit_mappings={
+            "Tipo do anúncio": {
+                "target": "listing_type_id",
+                "id": "gold_special",
+            }
+        },
+        auto_explicit_mappings=[],
+    )
+
+    assert mapped_attrs == [{"_listing_type_id": "gold_pro"}]
 
 
 def test_attribute_mapper_skips_unsupported_explicit_attribute() -> None:
@@ -542,6 +588,97 @@ def test_publish_flow_uses_available_listing_type_and_description_endpoint() -> 
     assert resolver.last_conditional_payload["description"] == {"plain_text": "Desc"}
 
 
+def test_publish_builds_variations_from_marked_candidates() -> None:
+    resolver = _FakeCategoryResolver(
+        [
+            AttributeMeta(id="BRAND", name="Marca", value_type="string", required=False),
+            AttributeMeta(id="COLOR", name="Cor", value_type="string", required=False),
+        ]
+    )
+    publisher = _FakePublisher(
+        listing_types=[{"id": "gold_pro"}, {"id": "gold_special"}],
+        sale_terms=[],
+    )
+    use_case = PublishProductUseCase(
+        category_resolver=resolver,  # type: ignore[arg-type]
+        publisher=publisher,  # type: ignore[arg-type]
+        image_uploader=_FakeImageUploader(),  # type: ignore[arg-type]
+        shipping_resolver=_FixedShippingResolver("me2"),  # type: ignore[arg-type]
+        fiscal_service=None,
+        clip_uploader=None,
+        config={
+            "core_item_fields": {
+                "defaults": {
+                    "currency_id": "BRL",
+                    "buying_mode": "buy_it_now",
+                    "listing_type_id": "gold_special",
+                    "sale_terms": [],
+                }
+            },
+            "shipping": {
+                "default_mode": "me2",
+                "modes": {
+                    "me2": {
+                        "local_pick_up": False,
+                        "logistic_type": "drop_off",
+                        "methods": [],
+                        "tags": [],
+                        "dimensions": None,
+                        "free_shipping": False,
+                        "store_pick_up": False,
+                    }
+                },
+            },
+        },
+        dry_run=False,
+        min_attribute_score=0,
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+
+    class _VariationMarkerBuilder:
+        def build_attributes(
+            self,
+            product: Product,
+            category_id: str,
+        ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], list[str]]:
+            return (
+                [
+                    {"id": "BRAND", "value_name": "Marca X"},
+                    {"id": "COLOR", "value_name": "Azul"},
+                    {"id": "GTIN", "value_name": "1234567890123"},
+                    {
+                        "_variation_candidates": {
+                            "COLOR": [
+                                {"id": "1", "name": "Azul"},
+                                {"id": "2", "name": "Verde"},
+                            ]
+                        }
+                    },
+                    {"_listing_type_id": "gold_pro"},
+                ],
+                [],
+                [],
+                [],
+            )
+
+        def set_cache_mapper(self, cache_mapper: Any) -> None:  # pragma: no cover - compat hook
+            del cache_mapper
+
+    use_case._attribute_builder = _VariationMarkerBuilder()  # type: ignore[assignment]
+
+    assert use_case._publish_one(_build_product({}), "MLB123") is True
+    created_item = publisher.created_items[0]
+    assert created_item["listing_type_id"] == "gold_pro"
+    assert len(created_item["variations"]) == 2
+    assert all(
+        variation["attribute_combinations"][0]["id"] == "COLOR"
+        for variation in created_item["variations"]
+    )
+    assert all("picture_ids" in variation for variation in created_item["variations"])
+    assert all(attr["id"] != "COLOR" for attr in created_item["attributes"])
+
+
 def test_publish_blocks_on_critical_validation_warning_by_default() -> None:
     resolver = _FakeCategoryResolver(
         [
@@ -757,3 +894,39 @@ def test_build_product_reads_descricao_header() -> None:
     )
 
     assert product.description == "Descrição vinda da planilha"
+
+
+def test_gtin_source_priority_scores_universal_code_higher_than_isbn() -> None:
+    resolver = _FakeCategoryResolver(
+        [
+            AttributeMeta(id="GTIN", name="GTIN", value_type="string", required=False),
+        ]
+    )
+    service = AttributeBuilderService(
+        category_resolver=resolver,
+        config={
+            "gtin_source_priority": [
+                "Código de produtos universal",
+                "EAN / GTIN",
+                "ISBN",
+                "IBSN",
+            ]
+        },
+        min_attribute_score=0,
+    )
+    meta = resolver.get_attribute_metadata("MLB123")[0]
+
+    universal_score = service._score_attribute_payload(
+        {
+            "id": "GTIN",
+            "value_name": "1234567890123",
+            "_source_column": "Código de produtos universal",
+        },
+        meta,
+    )
+    isbn_score = service._score_attribute_payload(
+        {"id": "GTIN", "value_name": "1234567890123", "_source_column": "ISBN"},
+        meta,
+    )
+
+    assert universal_score > isbn_score

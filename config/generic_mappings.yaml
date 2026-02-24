@@ -95,6 +95,18 @@ explicit_mappings:
   "Tipo de anúncio":
     target: "listing_type_id"
     id: "gold_special"
+
+  "Tipo do anúncio":
+    target: "listing_type_id"
+    id: "gold_special"
+
+  "Tipo de anuncio":
+    target: "listing_type_id"
+    id: "gold_special"
+
+  "Tipo do anuncio":
+    target: "listing_type_id"
+    id: "gold_special"
   
   # Dimension fields - automatically append units
   "Largura (cm)":
@@ -122,8 +134,20 @@ explicit_mappings:
   "EAN / GTIN":
     target: "attribute"
     id: "GTIN"
-  
+
+  "Código de produtos universal":
+    target: "attribute"
+    id: "GTIN"
+
+  "Codigo de produtos universal":
+    target: "attribute"
+    id: "GTIN"
+
   "ISBN":
+    target: "attribute"
+    id: "GTIN"
+
+  "IBSN":
     target: "attribute"
     id: "GTIN"
   
@@ -164,6 +188,13 @@ auto_explicit_mappings:
       target: "attribute"
       id: "WEIGHT"
       unit_suffix: " kg"
+
+# Priority used when multiple GTIN columns are present in the same spreadsheet row.
+gtin_source_priority:
+  - "Código de produtos universal"
+  - "EAN / GTIN"
+  - "ISBN"
+  - "IBSN"
 
 # Standard product fields (same across all categories)
 standard_fields:
