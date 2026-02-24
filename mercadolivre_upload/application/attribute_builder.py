@@ -8,6 +8,7 @@ import re
 from typing import Any
 
 from mercadolivre_upload.domain.attribute_mapper import AttributeMapper
+from mercadolivre_upload.domain.attribute_metadata import AttributeMeta
 from mercadolivre_upload.domain.cache_attribute_mapper import CachedAttributeMapper
 from mercadolivre_upload.domain.category.resolver import CategoryResolver
 from mercadolivre_upload.domain.product.model import Product
@@ -66,8 +67,8 @@ class AttributeBuilderService:
 
         # 1. Get attribute metadata for structural validation
         try:
-            attr_metadata = self.category_resolver.get_attribute_metadata(category_id)
-            self._attr_metadata_cache[category_id] = attr_metadata
+            attr_metadata = list(self.category_resolver.get_attribute_metadata(category_id))
+            self._attr_metadata_cache[category_id] = list(attr_metadata)
         except Exception as e:
             logger.error(f"Failed to get attribute metadata: {e}")
             errors.append(f"attribute_metadata: {e}")
@@ -127,6 +128,38 @@ class AttributeBuilderService:
         else:
             logger.info("All attributes mapped via cache, no fuzzy fallback needed")
 
+        previous_metadata_count = len(attr_metadata)
+        attr_metadata = self._merge_conditional_metadata(
+            category_id=category_id,
+            product=product,
+            ml_attributes=ml_attributes,
+            attr_metadata=attr_metadata,
+        )
+        if len(attr_metadata) > previous_metadata_count and remaining_attributes:
+            remapped_attributes, remapped_sale_terms = attribute_mapper.map_product_attributes(
+                remaining_attributes,
+                [meta.__dict__ for meta in attr_metadata],
+                explicit_mappings=explicit_mappings,
+                auto_explicit_mappings=auto_explicit_mappings,
+            )
+            ml_attributes.extend(
+                attr
+                for attr in remapped_attributes
+                if isinstance(attr, dict) and isinstance(attr.get("id"), str) and attr.get("id")
+            )
+            existing_sale_term_ids = {
+                sale_term["id"]
+                for sale_term in sale_terms
+                if isinstance(sale_term, dict) and isinstance(sale_term.get("id"), str)
+            }
+            sale_terms.extend(
+                sale_term
+                for sale_term in remapped_sale_terms
+                if isinstance(sale_term, dict)
+                and isinstance(sale_term.get("id"), str)
+                and sale_term["id"] not in existing_sale_term_ids
+            )
+
         # 3. Structural validation
         special_markers = [
             attr
@@ -179,6 +212,75 @@ class AttributeBuilderService:
         final_attr_dicts.extend(special_markers)
 
         return final_attr_dicts, sale_terms, warnings, errors
+
+    def _merge_conditional_metadata(
+        self,
+        *,
+        category_id: str,
+        product: Product,
+        ml_attributes: list[dict[str, Any]],
+        attr_metadata: list[AttributeMeta],
+    ) -> list[AttributeMeta]:
+        """Merge dynamic conditional attribute metadata into base category metadata."""
+        get_conditionals = getattr(self.category_resolver, "get_conditional_attributes", None)
+        if not callable(get_conditionals):
+            return attr_metadata
+
+        conditional_payload: dict[str, Any] = {
+            "title": product.title,
+            "attributes": [
+                attr
+                for attr in ml_attributes
+                if isinstance(attr, dict) and isinstance(attr.get("id"), str) and attr.get("id")
+            ],
+        }
+        if product.description:
+            conditional_payload["description"] = {"plain_text": product.description}
+
+        try:
+            conditional_attrs = get_conditionals(category_id, conditional_payload)
+        except Exception as e:
+            logger.debug("Failed to load conditional metadata for %s: %s", category_id, e)
+            return attr_metadata
+
+        if not isinstance(conditional_attrs, list) or not conditional_attrs:
+            return attr_metadata
+
+        existing_ids = {
+            meta.id
+            for meta in attr_metadata
+            if isinstance(getattr(meta, "id", None), str) and meta.id
+        }
+        merged_metadata = list(attr_metadata)
+        added = 0
+        for raw_attr in conditional_attrs:
+            if not isinstance(raw_attr, dict):
+                continue
+            attr_id = raw_attr.get("id")
+            if not isinstance(attr_id, str) or not attr_id or attr_id in existing_ids:
+                continue
+
+            normalized_attr = dict(raw_attr)
+            normalized_attr.setdefault("name", attr_id)
+            normalized_attr.setdefault("value_type", "string")
+            tags = normalized_attr.get("tags")
+            if isinstance(tags, (list, tuple, set)):
+                normalized_attr["tags"] = {
+                    str(tag).strip(): True for tag in tags if str(tag).strip()
+                }
+            elif not isinstance(tags, dict):
+                normalized_attr["tags"] = {}
+
+            try:
+                merged_metadata.append(AttributeMeta.from_ml_api(normalized_attr))
+                existing_ids.add(attr_id)
+                added += 1
+            except Exception as e:
+                logger.debug("Skipping invalid conditional metadata for %s: %s", attr_id, e)
+
+        if added:
+            logger.info("Loaded %s dynamic conditional attributes for %s", added, category_id)
+        return merged_metadata
 
     def _map_attributes_with_cache(
         self, attributes: dict[str, Any]

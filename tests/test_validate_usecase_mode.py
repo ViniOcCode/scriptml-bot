@@ -137,12 +137,29 @@ class _FixedShippingResolver:
 
 
 class _SelectionShippingResolver:
-    def __init__(self, mode: str, logistic_type: str | None = None):
+    def __init__(
+        self,
+        mode: str,
+        logistic_type: str | None = None,
+        tags: list[str] | None = None,
+        free_shipping: bool | None = None,
+        constraints: dict[str, Any] | None = None,
+    ):
         self.mode = mode
         self.logistic_type = logistic_type
+        self.tags = tags
+        self.free_shipping = free_shipping
+        self.constraints = constraints
 
-    def get_best_shipping_selection(self) -> dict[str, str | None]:
-        return {"mode": self.mode, "logistic_type": self.logistic_type}
+    def get_best_shipping_selection(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {"mode": self.mode, "logistic_type": self.logistic_type}
+        if self.tags is not None:
+            payload["tags"] = list(self.tags)
+        if self.free_shipping is not None:
+            payload["free_shipping"] = self.free_shipping
+        if self.constraints is not None:
+            payload["constraints"] = dict(self.constraints)
+        return payload
 
 
 class _SchemaContractResolver(_ValidationResolver):
@@ -364,8 +381,14 @@ def test_validation_only_mode_exposes_shipping_policy_metadata() -> None:
     result = use_case.execute([_build_product()], "MLB1234")
 
     item_result = result["item_results"][0]
-    assert item_result["shipping_policy"]["decision"]["source"] == "shipping_resolver"
-    assert item_result["shipping_policy"]["decision"]["selected_mode"] == "me2"
+    decision = item_result["shipping_policy"]["decision"]
+    assert decision["source"] == "shipping_resolver"
+    assert decision["selected_mode"] == "me2"
+    assert decision["mode_configured"] is True
+    assert decision["available_modes"] == ["me2", "not_specified"]
+    assert decision["constraints"]["category_id"] == "MLB1234"
+    assert decision["constraints"]["listing_allowed"] is True
+    assert decision["constraints"]["category_status"] == "enabled"
     assert item_result["shipping_policy"]["payload"]["mode"] == "me2"
 
 
@@ -393,6 +416,73 @@ def test_validation_only_mode_exposes_selection_logistic_type_metadata() -> None
     assert decision["selected_logistic_type"] == "fulfillment"
     assert decision["logistic_type_source"] == "shipping_resolver.selection"
     assert item_result["shipping_policy"]["payload"]["logistic_type"] == "fulfillment"
+
+
+def test_validation_only_mode_enforces_mandatory_free_shipping_tag_from_selection() -> None:
+    publisher = _ValidationPublisher()
+    config = _base_config()
+    config["shipping"] = _shipping_config()
+    use_case = PublishProductUseCase(
+        category_resolver=_ValidationResolver(),  # type: ignore[arg-type]
+        publisher=publisher,  # type: ignore[arg-type]
+        image_uploader=_ImageUploader(),  # type: ignore[arg-type]
+        shipping_resolver=_SelectionShippingResolver(  # type: ignore[arg-type]
+            "me2",
+            tags=["mandatory_free_shipping"],
+            free_shipping=False,
+            constraints={"carrier": "me2"},
+        ),
+        config=config,
+        validation_only=True,
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+
+    result = use_case.execute([_build_product()], "MLB1234")
+
+    item_result = result["item_results"][0]
+    decision = item_result["shipping_policy"]["decision"]
+    assert decision["tags_source"] == "config.mode+shipping_resolver.selection"
+    assert decision["selected_tags"] == ["mandatory_free_shipping"]
+    assert decision["selected_free_shipping"] is True
+    assert decision["free_shipping_source"] == "policy.mandatory_free_shipping_tag"
+    assert "mandatory_free_shipping_enforced" in decision["policy_overrides"]
+    assert decision["constraints"]["runtime"] == {"carrier": "me2"}
+    assert decision["constraints"]["mandatory_free_shipping_detected"] is True
+    assert decision["constraints"]["mandatory_free_shipping_enforced"] is True
+    assert item_result["shipping_policy"]["payload"]["tags"] == ["mandatory_free_shipping"]
+    assert item_result["shipping_policy"]["payload"]["free_shipping"] is True
+
+
+def test_validation_only_mode_allows_free_shipping_override_to_disable_enforcement() -> None:
+    publisher = _ValidationPublisher()
+    config = _base_config()
+    config["shipping"] = _shipping_config()
+    config["shipping_policy"] = {"enforce_mandatory_free_shipping": False}
+    use_case = PublishProductUseCase(
+        category_resolver=_ValidationResolver(),  # type: ignore[arg-type]
+        publisher=publisher,  # type: ignore[arg-type]
+        image_uploader=_ImageUploader(),  # type: ignore[arg-type]
+        shipping_resolver=_SelectionShippingResolver(  # type: ignore[arg-type]
+            "me2",
+            tags=["mandatory_free_shipping"],
+            free_shipping=False,
+        ),
+        config=config,
+        validation_only=True,
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+
+    result = use_case.execute([_build_product()], "MLB1234")
+
+    item_result = result["item_results"][0]
+    decision = item_result["shipping_policy"]["decision"]
+    assert decision["selected_free_shipping"] is False
+    assert decision["free_shipping_source"] == "shipping_resolver.selection"
+    assert decision["constraints"]["mandatory_free_shipping_detected"] is True
+    assert decision["constraints"]["mandatory_free_shipping_enforced"] is False
+    assert item_result["shipping_policy"]["payload"]["free_shipping"] is False
 
 
 def test_validation_only_blocks_deterministic_shipping_policy_warning() -> None:
@@ -790,6 +880,8 @@ def test_validation_only_mode_normalizes_gtin_and_surfaces_identifier_gate() -> 
     identifier_gate = result["item_results"][0]["identifier_gate"]
     assert identifier_gate["checked"] is True
     assert identifier_gate["gtin_required"] is True
+    assert identifier_gate["item_has_gtin"] is True
+    assert identifier_gate["fallback_reason_available"] is False
     assert identifier_gate["violations"] == []
 
 
@@ -882,6 +974,8 @@ def test_validation_only_mode_accepts_valid_empty_gtin_reason_when_gtin_required
     identifier_gate = result["item_results"][0]["identifier_gate"]
     assert identifier_gate["item_has_gtin"] is False
     assert identifier_gate["item_has_empty_gtin_reason"] is True
+    assert identifier_gate["fallback_reason_available"] is True
+    assert identifier_gate["default_empty_gtin_reason"]["applied"] is False
     assert identifier_gate["violations"] == []
 
 
@@ -1145,7 +1239,7 @@ def test_forced_user_products_flow_falls_back_to_legacy_when_configured() -> Non
     assert result["item_results"][0]["rollout_flags"]["flow_blocked_behavior"] == "fallback_legacy"
 
 
-def test_forced_user_products_flow_fails_fast_when_family_name_is_missing() -> None:
+def test_forced_user_products_flow_uses_title_as_family_name_fallback() -> None:
     publisher = _ValidationPublisher(users_me={"id": 1234, "tags": ["user_product_seller"]})
     config = _base_config()
     config["flow_routing"] = {"mode": "forced", "forced_flow": "user_products"}
@@ -1160,16 +1254,19 @@ def test_forced_user_products_flow_fails_fast_when_family_name_is_missing() -> N
 
     result = use_case.execute([_build_product()], "MLB1234")
 
-    assert result["success"] is False
-    assert result["published"] == 0
-    assert result["failed"] == 1
-    assert publisher.validated_items == []
-    assert publisher.created_items == []
+    assert result["success"] is True
+    assert result["published"] == 1
+    assert result["failed"] == 0
+    assert publisher.created_user_product_items
+    created_item = publisher.created_user_product_items[0]
+    assert created_item["family_name"] == "Produto teste"
+    assert "title" not in created_item
     routing = result["item_results"][0]["flow_routing"]
     assert routing["mode"] == "forced"
     assert routing["selected_flow"] == "user_products"
     assert routing["blocked"] is False
-    assert "missing required field 'family_name'" in result["errors"][0]
+    assert routing["up_family_name"] == "Produto teste"
+    assert routing["up_family_name_source"] == "title"
 
 
 def test_user_products_flow_builds_distinct_pxv_payload_and_artifacts() -> None:
@@ -1219,10 +1316,19 @@ def test_user_products_flow_builds_distinct_pxv_payload_and_artifacts() -> None:
     assert publisher.created_user_product_items
     created_item = publisher.created_user_product_items[0]
     assert "variations" not in created_item
+    assert "title" not in created_item
     assert created_item["family_name"] == "Linha Alpha"
-    assert created_item["user_product"]["selected_model"] == "Model X"
-    assert len(created_item["user_product"]["variations"]) == 2
+    assert "user_product" not in created_item
+    attribute_ids = {
+        attr.get("id") for attr in created_item["attributes"] if isinstance(attr, dict)
+    }
+    assert "MODEL" in attribute_ids
+    assert "COLOR" in attribute_ids
     routing = result["item_results"][0]["flow_routing"]
+    assert routing["selected_flow"] == "user_products"
+    assert routing["payload_builder"] == "user_products_pxv"
     assert routing["selected_model"] == "Model X"
     assert routing["up_family_name"] == "Linha Alpha"
+    assert routing["up_family_name_source"] == "attribute"
+    assert routing["up_attribute_ids"] == ["COLOR"]
     assert routing["up_variation_count"] == 2

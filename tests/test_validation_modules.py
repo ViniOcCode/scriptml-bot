@@ -139,6 +139,10 @@ def test_image_category_stock_and_suite_validators(monkeypatch) -> None:
     assert category_validator.validate({"category_id": "MLB123"}) == []
     assert category_validator.validate({"category_id": "MLM123"}) == []
 
+    mlb_only_validator = CategoryValidator(site_id="MLB")
+    assert mlb_only_validator.validate({"category_id": "MLB123"}) == []
+    assert mlb_only_validator.validate({"category_id": "MLM123"})[0].is_error()
+
     stock_validator = StockValidator()
     assert stock_validator.validate({})[0].is_error()
     assert stock_validator.validate({"available_quantity": "x"})[0].is_error()

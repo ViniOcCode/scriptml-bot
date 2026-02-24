@@ -44,6 +44,7 @@ DIMENSION_UNIT_MARKER_PATTERN = r"\b(cm|mm|m|in|pouce|polegadas|g|kg)\b"
 DIMENSION_DEFAULT_UNIT = "cm"
 WEIGHT_DEFAULT_UNIT = "kg"
 PACKAGE_WEIGHT_DEFAULT_UNIT = "g"
+NON_FILLABLE_ATTRIBUTE_TAGS = {"hidden", "read_only", "non_modifiable"}
 DEFAULT_NA_SKIP_TAGS = {
     "required",
     "new_required",
@@ -51,6 +52,7 @@ DEFAULT_NA_SKIP_TAGS = {
     "catalog_listing_required",
     "allow_variations",
     "variation_attribute",
+    *NON_FILLABLE_ATTRIBUTE_TAGS,
 }
 IDENTIFIER_EMPTY_TOKENS = {
     "",
@@ -130,6 +132,12 @@ IMPLEMENTED_ROUTING_FLOWS = {"legacy", "user_products"}
 STRICT_WARNING_GATE_MODES = {"enforce", "report_only"}
 IMAGE_DIAGNOSTIC_GATE_MODES = {"enforce", "report_only", "disabled"}
 FLOW_BLOCKED_BEHAVIORS = {"fail", "fallback_legacy"}
+DEFAULT_MANDATORY_FREE_SHIPPING_TAGS = {"mandatory_free_shipping"}
+
+
+def _normalize_attribute_tag(tag: Any) -> str:
+    """Normalize API/config attribute tags into a canonical token."""
+    return str(tag).strip().lower().replace("-", "_")
 
 
 class PublishProductUseCase:
@@ -272,6 +280,12 @@ class PublishProductUseCase:
                 )
 
         self.shipping_non_blocking_codes: set[str] = set()
+        self.shipping_mandatory_free_shipping_tags: set[str] = set(
+            DEFAULT_MANDATORY_FREE_SHIPPING_TAGS
+        )
+        self.shipping_enforce_mandatory_free_shipping = True
+        self.shipping_allow_runtime_tag_overrides = True
+        self.shipping_allow_runtime_free_shipping_override = True
         shipping_policy_config = self.config.get("shipping_policy")
         if not isinstance(shipping_policy_config, dict):
             shipping_config = self.config.get("shipping")
@@ -290,6 +304,35 @@ class PublishProductUseCase:
                     for code in raw_non_blocking_codes
                     if str(code).strip()
                 }
+
+            raw_mandatory_tags = shipping_policy_config.get(
+                "mandatory_free_shipping_tags",
+                sorted(DEFAULT_MANDATORY_FREE_SHIPPING_TAGS),
+            )
+            if isinstance(raw_mandatory_tags, str):
+                raw_mandatory_tags = [raw_mandatory_tags]
+            if isinstance(raw_mandatory_tags, list):
+                normalized_tags = {
+                    str(tag).strip().lower() for tag in raw_mandatory_tags if str(tag).strip()
+                }
+                if normalized_tags:
+                    self.shipping_mandatory_free_shipping_tags = normalized_tags
+
+            raw_enforce_mandatory = shipping_policy_config.get("enforce_mandatory_free_shipping")
+            if isinstance(raw_enforce_mandatory, bool):
+                self.shipping_enforce_mandatory_free_shipping = raw_enforce_mandatory
+
+            raw_allow_tag_overrides = shipping_policy_config.get("allow_runtime_tag_overrides")
+            if isinstance(raw_allow_tag_overrides, bool):
+                self.shipping_allow_runtime_tag_overrides = raw_allow_tag_overrides
+
+            raw_allow_free_shipping_override = shipping_policy_config.get(
+                "allow_runtime_free_shipping_override"
+            )
+            if isinstance(raw_allow_free_shipping_override, bool):
+                self.shipping_allow_runtime_free_shipping_override = (
+                    raw_allow_free_shipping_override
+                )
 
         self._rollout_flags_artifact = self._build_rollout_flags_artifact()
         self.dry_run = dry_run
@@ -336,6 +379,7 @@ class PublishProductUseCase:
         self._category_sale_terms_cache: dict[str, dict[str, dict[str, Any]]] = {}
         self._category_policy_cache: dict[str, dict[str, Any]] = {}
         self._category_schema_contract_cache: dict[str, dict[str, Any]] = {}
+        self._category_non_fillable_attribute_ids_cache: dict[str, set[str]] = {}
         self._current_cause_codes: list[str] = []
         self._current_preflight_artifact: dict[str, Any] = {
             "identifier_gate": {"checked": False, "violations": []}
@@ -362,6 +406,7 @@ class PublishProductUseCase:
         self._pending_fiscal = []
         self._category_policy_cache = {}
         self._category_schema_contract_cache = {}
+        self._category_non_fillable_attribute_ids_cache = {}
         self._current_cause_codes = []
         self._current_preflight_artifact = {"identifier_gate": {"checked": False, "violations": []}}
         self._current_cause_taxonomy = []
@@ -383,6 +428,16 @@ class PublishProductUseCase:
             "flow_user_products_enabled": self.flow_user_products_enabled,
             "flow_blocked_behavior": self.flow_blocked_behavior,
             "shipping_non_blocking_codes": sorted(self.shipping_non_blocking_codes),
+            "shipping_mandatory_free_shipping_tags": sorted(
+                self.shipping_mandatory_free_shipping_tags
+            ),
+            "shipping_enforce_mandatory_free_shipping": (
+                self.shipping_enforce_mandatory_free_shipping
+            ),
+            "shipping_allow_runtime_tag_overrides": self.shipping_allow_runtime_tag_overrides,
+            "shipping_allow_runtime_free_shipping_override": (
+                self.shipping_allow_runtime_free_shipping_override
+            ),
         }
 
     def _annotate_image_diagnostics_artifact(self, artifact: dict[str, Any]) -> dict[str, Any]:
@@ -779,6 +834,28 @@ class PublishProductUseCase:
                 if tag_name:
                     normalized_tags.append(tag_name)
         return list(dict.fromkeys(normalized_tags))
+
+    @staticmethod
+    def _normalize_shipping_constraints(raw_constraints: Any) -> dict[str, Any]:
+        """Normalize shipping constraints payload into a deterministic mapping."""
+        if not isinstance(raw_constraints, dict):
+            return {}
+        return {
+            str(key).strip(): value for key, value in raw_constraints.items() if str(key).strip()
+        }
+
+    @staticmethod
+    def _coerce_shipping_bool(value: Any) -> bool | None:
+        """Coerce supported shipping booleans into strict bool values."""
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"true", "1", "yes", "y", "on"}:
+                return True
+            if normalized in {"false", "0", "no", "n", "off"}:
+                return False
+        return None
 
     def _get_seller_capabilities_artifact(self) -> dict[str, Any]:
         """Read seller capability tags once and reuse within the use case instance."""
@@ -1404,7 +1481,6 @@ class PublishProductUseCase:
             attr for attr in ml_attributes if isinstance(attr, dict)
         ]
 
-        variation_attr_ids = set(variation_candidates.keys())
         variations: list[dict[str, Any]] = []
         user_products_payload: dict[str, Any] | None = None
         if selected_flow == "legacy":
@@ -1454,20 +1530,11 @@ class PublishProductUseCase:
                 {
                     "selected_model": user_products_payload.get("selected_model"),
                     "up_family_name": user_products_payload.get("family_name"),
+                    "up_family_name_source": user_products_payload.get("family_name_source"),
                     "up_variation_count": len(user_products_payload.get("variations", [])),
                     "up_attribute_ids": user_products_payload.get("variation_attribute_ids", []),
                 }
             )
-            if variation_attr_ids:
-                ml_attributes = [
-                    attr
-                    for attr in ml_attributes
-                    if not (
-                        isinstance(attr, dict)
-                        and isinstance(attr.get("id"), str)
-                        and attr["id"] in variation_attr_ids
-                    )
-                ]
 
         available_listing_types = self._get_available_listing_type_ids(category_id)
         listing_type_id = self._resolve_listing_type_id(
@@ -1516,7 +1583,6 @@ class PublishProductUseCase:
 
         # Build item with values from config only (no hardcoded fallbacks)
         item = {
-            "title": product.title,
             "category_id": category_id,
             "price": product.price,
             "currency_id": core_defaults.get("currency_id"),
@@ -1530,6 +1596,8 @@ class PublishProductUseCase:
             "sale_terms": sale_terms,
             "seller_custom_field": product.sku,
         }
+        if selected_flow != "user_products":
+            item["title"] = product.title
 
         channels = core_defaults.get("channels")
         if channels:
@@ -1538,10 +1606,6 @@ class PublishProductUseCase:
             item["variations"] = variations
         if selected_flow == "user_products" and user_products_payload:
             item["family_name"] = user_products_payload["family_name"]
-            item["user_product"] = {
-                "selected_model": user_products_payload["selected_model"],
-                "variations": user_products_payload["variations"],
-            }
 
         # Log shipping section before validation
         logger.info(
@@ -2044,51 +2108,48 @@ class PublishProductUseCase:
         price: float,
         picture_ids: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Build deterministic user-products PxV payload."""
+        """Build MLB-safe user-products metadata and payload fields."""
         family_name = self._extract_user_products_family_name(product)
+        family_name_source = "attribute"
         if not family_name:
-            raise ValueError(
-                "missing required field 'family_name' "
-                "(accepted headers: family_name, family name, família)."
-            )
+            title_fallback = str(product.title).strip() if product.title else ""
+            if title_fallback:
+                family_name = title_fallback
+                family_name_source = "title"
+        if not family_name:
+            raise ValueError("missing required field 'family_name' and no title fallback.")
 
         selected_model = self._extract_selected_model(ml_attributes, variation_candidates)
-        if not selected_model:
-            raise ValueError("missing required MODEL attribute to identify selected model.")
 
         normalized_candidates = self._normalize_variation_candidates(variation_candidates)
-        if not normalized_candidates:
-            raise ValueError("missing PxV variation candidates (allow_variations attributes).")
-        if not picture_ids:
-            raise ValueError("missing uploaded picture IDs required for PxV variations.")
-
-        combinations = list(
-            cartesian_product(*(values for _attr_id, values in normalized_candidates))
-        )
-        if len(combinations) <= 1:
-            raise ValueError("PxV requires at least two variation combinations.")
-
         variations: list[dict[str, Any]] = []
-        for combination in combinations:
-            attributes: list[dict[str, Any]] = []
-            for (attr_id, _values), value in zip(normalized_candidates, combination, strict=True):
-                mapped = {"id": attr_id, "value_name": value["name"]}
-                value_id = value.get("id")
-                if value_id is not None:
-                    mapped["value_id"] = value_id
-                attributes.append(mapped)
+        if normalized_candidates:
+            combinations = list(
+                cartesian_product(*(values for _attr_id, values in normalized_candidates))
+            )
+            for combination in combinations:
+                attributes: list[dict[str, Any]] = []
+                for (attr_id, _values), value in zip(
+                    normalized_candidates, combination, strict=True
+                ):
+                    mapped = {"id": attr_id, "value_name": value["name"]}
+                    value_id = value.get("id")
+                    if value_id is not None:
+                        mapped["value_id"] = value_id
+                    attributes.append(mapped)
 
-            variations.append(
-                {
+                variation_payload: dict[str, Any] = {
                     "attributes": attributes,
                     "available_quantity": max(1, quantity),
                     "price": price,
-                    "picture_ids": picture_ids[:10],
                 }
-            )
+                if picture_ids:
+                    variation_payload["picture_ids"] = picture_ids[:10]
+                variations.append(variation_payload)
 
         return {
             "family_name": family_name,
+            "family_name_source": family_name_source,
             "selected_model": selected_model,
             "variation_attribute_ids": [attr_id for attr_id, _values in normalized_candidates],
             "variations": variations,
@@ -3287,6 +3348,44 @@ class PublishProductUseCase:
 
         return filtered_sale_terms
 
+    def _get_non_fillable_attribute_ids(self, category_id: str) -> set[str]:
+        """Return attribute IDs that should not be auto-filled or hard-required."""
+        cache = getattr(self, "_category_non_fillable_attribute_ids_cache", None)
+        if not isinstance(cache, dict):
+            cache = {}
+            self._category_non_fillable_attribute_ids_cache = cache
+
+        cached = cache.get(category_id)
+        if cached is not None:
+            return cached
+
+        try:
+            metadata = self.category_resolver.get_attribute_metadata(category_id)
+        except Exception as e:
+            logger.warning(
+                "Could not fetch attribute metadata for non-fillable filtering in %s: %s",
+                category_id,
+                e,
+            )
+            cache[category_id] = set()
+            return set()
+
+        non_fillable_attribute_ids: set[str] = set()
+        for meta in metadata:
+            attr_id = getattr(meta, "id", None)
+            if not isinstance(attr_id, str) or not attr_id:
+                continue
+            tags = {
+                _normalize_attribute_tag(tag)
+                for tag in getattr(meta, "tags", set())
+                if str(tag).strip()
+            }
+            if tags.intersection(NON_FILLABLE_ATTRIBUTE_TAGS):
+                non_fillable_attribute_ids.add(attr_id)
+
+        cache[category_id] = non_fillable_attribute_ids
+        return non_fillable_attribute_ids
+
     def _get_missing_conditional_attributes(
         self,
         category_id: str,
@@ -3339,13 +3438,20 @@ class PublishProductUseCase:
         if not isinstance(conditional_attrs, list):
             return set()
 
-        return {
+        required_ids = {
             attr_id
             for attr in conditional_attrs
             if isinstance(attr, dict)
             for attr_id in [attr.get("id")]
             if isinstance(attr_id, str) and attr_id
         }
+        if not required_ids:
+            return set()
+
+        non_fillable_attribute_ids = self._get_non_fillable_attribute_ids(category_id)
+        if non_fillable_attribute_ids:
+            required_ids.difference_update(non_fillable_attribute_ids)
+        return required_ids
 
     def _inject_optional_na_attributes(
         self,
@@ -3369,7 +3475,9 @@ class PublishProductUseCase:
         skip_tags = DEFAULT_NA_SKIP_TAGS.copy()
         if isinstance(configured_skip_tags, list):
             configured = {
-                str(tag).strip().lower() for tag in configured_skip_tags if str(tag).strip()
+                _normalize_attribute_tag(tag)
+                for tag in configured_skip_tags
+                if str(tag).strip()
             }
             if configured:
                 skip_tags = skip_tags.union(configured)
@@ -3404,7 +3512,9 @@ class PublishProductUseCase:
                 continue
 
             tags = {
-                str(tag).strip().lower() for tag in getattr(meta, "tags", set()) if str(tag).strip()
+                _normalize_attribute_tag(tag)
+                for tag in getattr(meta, "tags", set())
+                if str(tag).strip()
             }
             if bool(getattr(meta, "required", False)):
                 tags.add("required")
@@ -3484,6 +3594,9 @@ class PublishProductUseCase:
         decision_reason = "Using configured default mode."
         resolved_logistic_type: str | None = None
         resolved_logistic_type_source: str | None = None
+        resolved_runtime_tags: list[str] = []
+        resolved_runtime_constraints: dict[str, Any] = {}
+        resolved_runtime_free_shipping: bool | None = None
 
         if self.shipping_resolver:
             resolved_from_selection = False
@@ -3525,6 +3638,33 @@ class PublishProductUseCase:
                         else:
                             resolved_logistic_type = None
 
+                        resolved_runtime_tags = self._normalize_seller_tags(
+                            selection_payload.get("tags")
+                        )
+                        if resolved_runtime_tags:
+                            logger.info(
+                                "Using shipping tags from resolver selection metadata: %s",
+                                resolved_runtime_tags,
+                            )
+
+                        resolved_runtime_constraints = self._normalize_shipping_constraints(
+                            selection_payload.get("constraints")
+                        )
+                        if resolved_runtime_constraints:
+                            logger.info(
+                                "Using shipping constraints from resolver selection metadata: %s",
+                                resolved_runtime_constraints,
+                            )
+
+                        resolved_runtime_free_shipping = self._coerce_shipping_bool(
+                            selection_payload.get("free_shipping")
+                        )
+                        if resolved_runtime_free_shipping is not None:
+                            logger.info(
+                                "Using shipping free_shipping from resolver selection metadata: %s",
+                                resolved_runtime_free_shipping,
+                            )
+
             if not resolved_from_selection:
                 try:
                     resolved_mode_raw = self.shipping_resolver.get_best_shipping_mode()
@@ -3561,15 +3701,56 @@ class PublishProductUseCase:
 
         raw_mode_config = modes_config.get(shipping_mode, {})
         mode_config = raw_mode_config if isinstance(raw_mode_config, dict) else {}
+        configured_tags = self._normalize_seller_tags(mode_config.get("tags", []))
+        selected_tags = list(configured_tags)
+        tags_source = "config.mode"
+        policy_overrides: list[str] = []
+
+        if self.shipping_allow_runtime_tag_overrides and resolved_runtime_tags:
+            merged_tags = list(dict.fromkeys([*configured_tags, *resolved_runtime_tags]))
+            if merged_tags != selected_tags:
+                policy_overrides.append("runtime_tags_merged")
+            selected_tags = merged_tags
+            tags_source = "config.mode+shipping_resolver.selection"
+
+        configured_free_shipping = self._coerce_shipping_bool(
+            mode_config.get("free_shipping", False)
+        )
+        selected_free_shipping = (
+            configured_free_shipping if configured_free_shipping is not None else False
+        )
+        free_shipping_source = "config.mode"
+        if (
+            self.shipping_allow_runtime_free_shipping_override
+            and resolved_runtime_free_shipping is not None
+        ):
+            if selected_free_shipping != resolved_runtime_free_shipping:
+                policy_overrides.append("runtime_free_shipping_override")
+            selected_free_shipping = resolved_runtime_free_shipping
+            free_shipping_source = "shipping_resolver.selection"
+
+        mandatory_free_shipping_detected = bool(
+            self.shipping_mandatory_free_shipping_tags.intersection(selected_tags)
+        )
+        mandatory_free_shipping_enforced = False
+        if (
+            self.shipping_enforce_mandatory_free_shipping
+            and mandatory_free_shipping_detected
+            and not selected_free_shipping
+        ):
+            selected_free_shipping = True
+            free_shipping_source = "policy.mandatory_free_shipping_tag"
+            mandatory_free_shipping_enforced = True
+            policy_overrides.append("mandatory_free_shipping_enforced")
 
         # Build complete shipping config matching ML API format
         config_shipping: dict[str, Any] = {
             "mode": shipping_mode,
             "methods": mode_config.get("methods", []),
-            "tags": mode_config.get("tags", []),
+            "tags": selected_tags,
             "dimensions": mode_config.get("dimensions"),
             "local_pick_up": mode_config.get("local_pick_up", False),
-            "free_shipping": mode_config.get("free_shipping", False),
+            "free_shipping": selected_free_shipping,
             "logistic_type": mode_config.get("logistic_type"),
             "store_pick_up": mode_config.get("store_pick_up", False),
         }
@@ -3598,6 +3779,13 @@ class PublishProductUseCase:
                         "category_status": policy_summary.get("status"),
                     }
                 )
+        if resolved_runtime_constraints:
+            constraints["runtime"] = dict(resolved_runtime_constraints)
+        constraints["mandatory_free_shipping_tags"] = sorted(
+            self.shipping_mandatory_free_shipping_tags
+        )
+        constraints["mandatory_free_shipping_detected"] = mandatory_free_shipping_detected
+        constraints["mandatory_free_shipping_enforced"] = mandatory_free_shipping_enforced
 
         self._current_shipping_policy = {
             "decision": {
@@ -3611,6 +3799,11 @@ class PublishProductUseCase:
                 "available_modes": sorted(str(mode) for mode in modes_config),
                 "selected_logistic_type": selected_logistic_type,
                 "logistic_type_source": logistic_type_source,
+                "selected_tags": list(selected_tags),
+                "tags_source": tags_source,
+                "selected_free_shipping": selected_free_shipping,
+                "free_shipping_source": free_shipping_source,
+                "policy_overrides": policy_overrides,
                 "constraints": constraints,
             },
             "payload": dict(config_shipping),
