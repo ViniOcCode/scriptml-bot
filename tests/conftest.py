@@ -99,7 +99,7 @@ def mock_auth_manager_global():
     Fixture autouse que garante que AuthManager seja mockado em todos os testes.
     Isso evita que o AuthManager tente carregar credenciais reais.
     """
-    with patch("mercadolivre_upload.auth.authenticator.AuthManager") as mock_auth_class:
+    with patch("mercadolivre_upload.auth.AuthManager") as mock_auth_class:
         mock_auth = MagicMock()
         mock_auth.is_authenticated.return_value = True
         mock_auth.get_valid_token.return_value = "mock_access_token_12345"
