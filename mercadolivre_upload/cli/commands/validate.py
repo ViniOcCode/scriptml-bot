@@ -17,20 +17,22 @@ from mercadolivre_upload.cli.commands.common import (
     parse_products_or_exit,
 )
 from mercadolivre_upload.cli.commands.upload import (
+    _extract_row_category,
+    _extract_row_identity,
+    build_publish_use_case,
+    load_config,
+)
+from mercadolivre_upload.cli.commands.upload_reporting import (
     _empty_category_resolution_summary,
     _ensure_observability_evidence,
     _extract_cause_codes,
     _extract_decision_classified_codes,
-    _extract_row_category,
-    _extract_row_identity,
     _increment_code_counter,
     _is_error_classification,
     _is_warning_classification,
     _merge_category_resolution_summary,
     _top_code_entries,
     _top_codes_by_status,
-    build_publish_use_case,
-    load_config,
 )
 
 logger = logging.getLogger(__name__)
