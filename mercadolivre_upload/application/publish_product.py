@@ -3482,26 +3482,68 @@ class PublishProductUseCase:
         requested_mode = default_mode
         decision_source = "config.default_mode"
         decision_reason = "Using configured default mode."
+        resolved_logistic_type: str | None = None
+        resolved_logistic_type_source: str | None = None
 
         if self.shipping_resolver:
-            try:
-                resolved_mode_raw = self.shipping_resolver.get_best_shipping_mode()
-            except Exception as error:
-                logger.warning(
-                    "Shipping resolver failed; using default mode %s: %s",
-                    default_mode,
-                    error,
-                )
-                decision_reason = "Shipping resolver failed; using default mode."
-            else:
-                resolved_mode = (
-                    str(resolved_mode_raw).strip() if resolved_mode_raw is not None else ""
-                )
-                if resolved_mode:
-                    requested_mode = resolved_mode
-                    decision_source = "shipping_resolver"
-                    decision_reason = "Resolved mode from seller shipping preferences."
-                    logger.info("Using shipping mode from resolver: %s", requested_mode)
+            resolved_from_selection = False
+            selection_getter = getattr(self.shipping_resolver, "get_best_shipping_selection", None)
+            if callable(selection_getter):
+                try:
+                    selection_payload = selection_getter()
+                except Exception as error:
+                    logger.warning(
+                        "Shipping resolver selection failed; fallback to mode-only resolver: %s",
+                        error,
+                    )
+                else:
+                    if isinstance(selection_payload, dict):
+                        resolved_mode_raw = selection_payload.get("mode")
+                        resolved_mode = (
+                            str(resolved_mode_raw).strip() if resolved_mode_raw is not None else ""
+                        )
+                        if resolved_mode:
+                            requested_mode = resolved_mode
+                            decision_source = "shipping_resolver.selection"
+                            decision_reason = (
+                                "Resolved mode from seller shipping selection metadata."
+                            )
+                            resolved_from_selection = True
+
+                        resolved_logistic_type_raw = selection_payload.get("logistic_type")
+                        resolved_logistic_type = (
+                            str(resolved_logistic_type_raw).strip()
+                            if resolved_logistic_type_raw is not None
+                            else ""
+                        )
+                        if resolved_logistic_type:
+                            resolved_logistic_type_source = "shipping_resolver.selection"
+                            logger.info(
+                                "Using shipping logistic_type from resolver selection: %s",
+                                resolved_logistic_type,
+                            )
+                        else:
+                            resolved_logistic_type = None
+
+            if not resolved_from_selection:
+                try:
+                    resolved_mode_raw = self.shipping_resolver.get_best_shipping_mode()
+                except Exception as error:
+                    logger.warning(
+                        "Shipping resolver failed; using default mode %s: %s",
+                        default_mode,
+                        error,
+                    )
+                    decision_reason = "Shipping resolver failed; using default mode."
+                else:
+                    resolved_mode = (
+                        str(resolved_mode_raw).strip() if resolved_mode_raw is not None else ""
+                    )
+                    if resolved_mode:
+                        requested_mode = resolved_mode
+                        decision_source = "shipping_resolver"
+                        decision_reason = "Resolved mode from seller shipping preferences."
+                        logger.info("Using shipping mode from resolver: %s", requested_mode)
 
         shipping_mode = requested_mode or default_mode
         fallback_applied = False
@@ -3531,9 +3573,20 @@ class PublishProductUseCase:
             "logistic_type": mode_config.get("logistic_type"),
             "store_pick_up": mode_config.get("store_pick_up", False),
         }
+        if resolved_logistic_type and shipping_mode == requested_mode:
+            config_shipping["logistic_type"] = resolved_logistic_type
 
         # Remove None values to keep payload clean
         config_shipping = {k: v for k, v in config_shipping.items() if v is not None}
+        selected_logistic_type = config_shipping.get("logistic_type")
+        logistic_type_source = "config.mode"
+        if (
+            resolved_logistic_type
+            and resolved_logistic_type_source
+            and shipping_mode == requested_mode
+            and selected_logistic_type == resolved_logistic_type
+        ):
+            logistic_type_source = resolved_logistic_type_source
 
         constraints: dict[str, Any] = {"category_id": category_id}
         if category_id:
@@ -3556,6 +3609,8 @@ class PublishProductUseCase:
                 "fallback_applied": fallback_applied,
                 "mode_configured": shipping_mode in modes_config if modes_config else False,
                 "available_modes": sorted(str(mode) for mode in modes_config),
+                "selected_logistic_type": selected_logistic_type,
+                "logistic_type_source": logistic_type_source,
                 "constraints": constraints,
             },
             "payload": dict(config_shipping),
