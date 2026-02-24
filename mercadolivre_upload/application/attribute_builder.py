@@ -4,6 +4,7 @@ Handles attribute mapping, validation, scoring, and sanitization.
 """
 
 import logging
+import re
 from typing import Any
 
 from mercadolivre_upload.domain.attribute_mapper import AttributeMapper
@@ -18,6 +19,7 @@ from mercadolivre_upload.domain.validation import (
 )
 
 logger = logging.getLogger(__name__)
+_UNIT_ONLY_VALUE_PATTERN = re.compile(r"^(cm|mm|m|kg|g|mg|ml|l|oz|in)$", re.IGNORECASE)
 
 
 class AttributeBuilderService:
@@ -125,8 +127,20 @@ class AttributeBuilderService:
             logger.info("All attributes mapped via cache, no fuzzy fallback needed")
 
         # 3. Structural validation
+        special_markers = [
+            attr
+            for attr in ml_attributes
+            if isinstance(attr, dict) and "id" not in attr and any(k.startswith("_") for k in attr)
+        ]
+        attrs_for_validation = [
+            attr
+            for attr in ml_attributes
+            if isinstance(attr, dict) and isinstance(attr.get("id"), str) and attr.get("id")
+        ]
+        attrs_for_validation = self._deduplicate_attributes(attrs_for_validation, attr_metadata)
+
         validator = StructuralValidator(attr_metadata)
-        struct_result = validator.validate(ml_attributes)
+        struct_result = validator.validate(attrs_for_validation)
 
         warnings.extend(struct_result.warnings)
         if struct_result.blocking_errors:
@@ -161,6 +175,7 @@ class AttributeBuilderService:
 
         # Convert final attributes back to dict format
         final_attr_dicts = [{"id": a.id, "value_name": a.value} for a in final_attrs]
+        final_attr_dicts.extend(special_markers)
 
         return final_attr_dicts, sale_terms, warnings, errors
 
@@ -187,8 +202,70 @@ class AttributeBuilderService:
             attr = self._cache_mapper.find_attribute_by_name(header)
             if attr and attr.get("id"):
                 payload = self._cache_mapper.map_value(str(attr["id"]), str(value))
+                if (
+                    isinstance(attr.get("values"), list)
+                    and attr.get("values")
+                    and payload.get("value_id") is None
+                    and payload.get("value_name") is None
+                ):
+                    logger.debug("Skipping cache mapped value with no allowed match: %s", header)
+                    continue
                 mapped.append(payload)
                 mapped_headers.add(header)
                 logger.debug(f"Cache mapped: {header} -> {attr['id']}")
 
         return mapped, mapped_headers
+
+    def _deduplicate_attributes(
+        self, attributes: list[dict[str, Any]], attr_metadata: list[Any]
+    ) -> list[dict[str, Any]]:
+        """Keep one payload per attribute id, preferring higher-quality values."""
+        metadata_by_id = {
+            meta.id: meta for meta in attr_metadata if isinstance(getattr(meta, "id", None), str)
+        }
+
+        selected: dict[str, tuple[int, dict[str, Any]]] = {}
+        order: list[str] = []
+        for attr in attributes:
+            attr_id = attr.get("id")
+            if not isinstance(attr_id, str) or not attr_id:
+                continue
+
+            score = self._score_attribute_payload(attr, metadata_by_id.get(attr_id))
+            if attr_id not in selected:
+                selected[attr_id] = (score, attr)
+                order.append(attr_id)
+                continue
+
+            previous_score, _previous_attr = selected[attr_id]
+            if score > previous_score:
+                selected[attr_id] = (score, attr)
+
+        return [selected[attr_id][1] for attr_id in order]
+
+    def _score_attribute_payload(self, attr: dict[str, Any], meta: Any | None) -> int:
+        """Score payload quality so duplicates keep the most informative value."""
+        score = 0
+        value = attr.get("value_name")
+        value_text = str(value).strip() if value is not None else ""
+        value_id = attr.get("value_id")
+
+        if value_id not in (None, ""):
+            score += 4
+        if isinstance(attr.get("values"), list) and attr.get("values"):
+            score += 2
+        if value_text:
+            score += 1
+            if any(char.isdigit() for char in value_text):
+                score += 3
+            if _UNIT_ONLY_VALUE_PATTERN.match(value_text):
+                score -= 4
+
+        if meta is not None and getattr(meta, "value_type", "") == "number_unit":
+            lower = value_text.lower()
+            if any(char.isdigit() for char in value_text) and any(
+                unit in lower for unit in ("cm", "mm", "m", "kg", "g", "in", "oz")
+            ):
+                score += 3
+
+        return score

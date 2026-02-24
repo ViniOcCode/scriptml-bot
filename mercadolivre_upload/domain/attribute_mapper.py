@@ -11,6 +11,21 @@ from mercadolivre_upload.shared.utils.text_utils import PortugueseTextNormalizer
 
 logger = logging.getLogger(__name__)
 
+_OPERATIONAL_HEADER_PATTERNS = (
+    "forma de envio",
+    "custo de envio",
+    "tarifa de venda",
+    "retirar pessoalmente",
+    "quantidade de caracteres",
+    "varia por",
+    "unidade de altura",
+    "unidade de largura",
+    "unidade de comprimento",
+    "unidade de profundidade",
+    "unidade de peso",
+    "unidade de tempo de garantia",
+)
+
 
 def _normalize_column_name(column_name: str) -> str:
     """Normalize column names to a canonical form used by mappings."""
@@ -70,6 +85,19 @@ def _resolve_auto_explicit_mappings(
                 break
 
     return normalized_mappings
+
+
+def _is_operational_header(column_name: str) -> bool:
+    """Return whether header is operational metadata and should not be fuzzy-mapped."""
+    normalized = _normalize_column_name(column_name)
+    for pattern in _OPERATIONAL_HEADER_PATTERNS:
+        if pattern == "varia por":
+            if normalized.startswith(pattern):
+                return True
+            continue
+        if normalized == pattern:
+            return True
+    return False
 
 
 class AttributeMapper:
@@ -136,6 +164,10 @@ class AttributeMapper:
         mapping = {}
 
         for col in excel_columns:
+            if _is_operational_header(col):
+                logger.debug(f"Skipping operational column: {col}")
+                continue
+
             attr_def, score = self.find_best_match(col, ml_attributes)
 
             if attr_def and score >= self.threshold:
@@ -170,6 +202,13 @@ class AttributeMapper:
         excel_columns = list(product_attributes.keys())
         ml_attributes_list = []
         sale_terms_list = []
+        available_attribute_ids = {
+            attr_id
+            for attr in ml_attributes
+            if isinstance(attr, dict)
+            for attr_id in [attr.get("id")]
+            if isinstance(attr_id, str) and attr_id
+        }
 
         # Track which columns have been explicitly mapped
         explicitly_mapped = set()
@@ -262,6 +301,20 @@ class AttributeMapper:
 
                     else:
                         # Regular attribute mapping
+                        target_attr_id = mapping_config["id"]
+                        if (
+                            available_attribute_ids
+                            and target_attr_id not in available_attribute_ids
+                        ):
+                            logger.info(
+                                "Skipping explicit mapping '%s' -> %s (attribute not supported "
+                                "by current category)",
+                                col,
+                                target_attr_id,
+                            )
+                            explicitly_mapped.add(col)
+                            continue
+
                         # Sanitize numeric values: convert comma to dot for decimals
                         # Check if looks like a number with comma (Brazilian format)
                         if (
@@ -284,12 +337,12 @@ class AttributeMapper:
 
                         ml_attributes_list.append(
                             {
-                                "id": mapping_config["id"],
-                                "name": mapping_config.get("name", mapping_config["id"]),
+                                "id": target_attr_id,
+                                "name": mapping_config.get("name", target_attr_id),
                                 "value_name": value or mapping_config.get("value_name", ""),
                             }
                         )
-                        logger.info(f"Explicitly mapped '{col}' -> {mapping_config['id']}")
+                        logger.info(f"Explicitly mapped '{col}' -> {target_attr_id}")
 
                     explicitly_mapped.add(col)
 

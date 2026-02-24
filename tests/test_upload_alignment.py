@@ -8,6 +8,7 @@ from mercadolivre_upload.application.attribute_builder import AttributeBuilderSe
 from mercadolivre_upload.application.publish_product import PublishProductUseCase
 from mercadolivre_upload.domain.attribute_mapper import AttributeMapper
 from mercadolivre_upload.domain.attribute_metadata import AttributeMeta
+from mercadolivre_upload.domain.cache_attribute_mapper import CachedAttributeMapper
 from mercadolivre_upload.domain.fiscal.data import FiscalData
 from mercadolivre_upload.domain.product.model import Product
 from mercadolivre_upload.domain.shipping.resolver import ShippingResolver
@@ -122,6 +123,14 @@ class _FakePublisher:
         return {"id": f"{item_id}-description"}
 
 
+class _StaticAttributeCache:
+    def __init__(self, attributes: list[dict[str, Any]]):
+        self._attributes = attributes
+
+    def get_attributes(self, category_id: str) -> list[dict[str, Any]]:
+        return self._attributes
+
+
 def _build_product(attributes: dict[str, str]) -> Product:
     fiscal = FiscalData(sku="SKU-1", title="Produto teste")
     return Product(
@@ -224,6 +233,103 @@ def test_peso_fisico_auto_rule_does_not_match_fiscal_weight_headers() -> None:
     assert mapped == set()
 
 
+def test_cached_mapper_ignores_operational_and_unit_headers() -> None:
+    mapper = CachedAttributeMapper(
+        _StaticAttributeCache(
+            [
+                {
+                    "id": "WIDTH",
+                    "name": "Largura",
+                    "value_type": "number_unit",
+                    "default_unit": "cm",
+                },
+                {
+                    "id": "COLOR",
+                    "name": "Cor",
+                    "value_type": "string",
+                    "values": [
+                        {"id": "1", "name": "Azul"},
+                        {"id": "2", "name": "Verde"},
+                    ],
+                },
+                {
+                    "id": "FRAME_COLOR",
+                    "name": "Cor da armação",
+                    "value_type": "string",
+                    "values": [{"id": "10", "name": "Preto"}],
+                },
+            ]
+        ),
+        "MLB40280",
+    )
+
+    assert mapper.find_attribute_by_name("Unidade de Largura") is None
+    assert mapper.find_attribute_by_name("Varia por: Cor da armação") is None
+    assert mapper.find_attribute_by_name("Forma de envio") is None
+    assert mapper.find_attribute_by_name("Largura")["id"] == "WIDTH"
+
+
+def test_cached_mapper_splits_multi_value_enum_and_maps_first_match() -> None:
+    mapper = CachedAttributeMapper(
+        _StaticAttributeCache(
+            [
+                {
+                    "id": "COLOR",
+                    "name": "Cor",
+                    "value_type": "string",
+                    "values": [
+                        {"id": "1", "name": "Azul"},
+                        {"id": "2", "name": "Verde"},
+                    ],
+                }
+            ]
+        ),
+        "MLB40280",
+    )
+
+    mapped = mapper.map_value("COLOR", "Azul, bege, verde")
+    assert mapped["id"] == "COLOR"
+    assert mapped["value_id"] == "1"
+    assert mapped["value_name"] == "Azul"
+
+
+def test_attribute_mapper_skips_operational_header_fuzzy_mapping() -> None:
+    mapper = AttributeMapper(similarity_threshold=0.7)
+
+    mapped_attrs, _ = mapper.map_product_attributes(
+        {
+            "Forma de envio": "Mercado Envios",
+            "Formato de venda": "Unidade",
+        },
+        [{"id": "SALE_FORMAT", "name": "Formato de venda"}],
+        explicit_mappings={},
+        auto_explicit_mappings=[],
+    )
+
+    assert len(mapped_attrs) == 1
+    assert mapped_attrs[0]["id"] == "SALE_FORMAT"
+    assert mapped_attrs[0]["value_name"] == "Unidade"
+
+
+def test_attribute_mapper_skips_unsupported_explicit_attribute() -> None:
+    mapper = AttributeMapper(similarity_threshold=0.7)
+
+    mapped_attrs, _ = mapper.map_product_attributes(
+        {"Profundidade (cm)": "20"},
+        [{"id": "WIDTH", "name": "Largura"}],
+        explicit_mappings={
+            "Profundidade (cm)": {
+                "target": "attribute",
+                "id": "DEPTH",
+                "unit_suffix": " cm",
+            }
+        },
+        auto_explicit_mappings=[],
+    )
+
+    assert mapped_attrs == []
+
+
 def test_cache_mapper_map_value_is_used_for_number_unit_attributes() -> None:
     resolver = _FakeCategoryResolver(
         [
@@ -244,6 +350,41 @@ def test_cache_mapper_map_value_is_used_for_number_unit_attributes() -> None:
 
     assert {a["id"]: a["value_name"] for a in attrs}["WIDTH"] == "23 cm"
     assert cache_mapper.map_calls == 1
+
+
+def test_attribute_builder_deduplicates_unit_only_dimension_values() -> None:
+    class _DuplicateHeightCacheMapper:
+        def find_attribute_by_name(self, excel_header: str) -> dict[str, str] | None:
+            lowered = excel_header.lower()
+            if lowered == "altura":
+                return {"id": "HEIGHT"}
+            if lowered == "unidade de altura":
+                return {"id": "HEIGHT"}
+            return None
+
+        def map_value(self, attribute_id: str, excel_value: str) -> dict[str, str]:
+            if excel_value == "60":
+                return {"id": "HEIGHT", "value_name": "60 cm"}
+            return {"id": "HEIGHT", "value_name": "cm"}
+
+    resolver = _FakeCategoryResolver(
+        [
+            AttributeMeta(id="HEIGHT", name="Altura", value_type="number_unit", required=False),
+        ]
+    )
+    service = AttributeBuilderService(
+        category_resolver=resolver,
+        config={"explicit_mappings": {}},
+        min_attribute_score=0,
+    )
+    service.set_cache_mapper(_DuplicateHeightCacheMapper())  # type: ignore[arg-type]
+
+    product = _build_product({"Altura": "60", "Unidade de Altura": "cm"})
+    attrs, _, warnings, errors = service.build_attributes(product, "MLB123")
+
+    assert not warnings
+    assert not errors
+    assert attrs == [{"id": "HEIGHT", "value_name": "60 cm"}]
 
 
 def test_shipping_resolver_uses_shipping_preferences_modes() -> None:
@@ -399,6 +540,142 @@ def test_publish_flow_uses_available_listing_type_and_description_endpoint() -> 
 
     assert resolver.last_conditional_payload is not None
     assert resolver.last_conditional_payload["description"] == {"plain_text": "Desc"}
+
+
+def test_publish_blocks_on_critical_validation_warning_by_default() -> None:
+    resolver = _FakeCategoryResolver(
+        [
+            AttributeMeta(id="BRAND", name="Marca", value_type="string", required=False),
+        ]
+    )
+
+    class _CriticalWarningPublisher(_FakePublisher):
+        def validate_item(self, item: dict[str, Any]) -> dict[str, Any]:
+            self.validated_items.append(item)
+            return {
+                "cause": [
+                    {
+                        "type": "warning",
+                        "code": "item.attributes.omitted",
+                        "message": (
+                            "Attribute WIDTH with value cm was omitted. "
+                            "You can use a number followed by unit."
+                        ),
+                    }
+                ]
+            }
+
+    publisher = _CriticalWarningPublisher(
+        listing_types=[{"id": "gold_special"}],
+        sale_terms=[],
+    )
+    use_case = PublishProductUseCase(
+        category_resolver=resolver,  # type: ignore[arg-type]
+        publisher=publisher,  # type: ignore[arg-type]
+        image_uploader=_FakeImageUploader(),  # type: ignore[arg-type]
+        shipping_resolver=_FixedShippingResolver("me2"),  # type: ignore[arg-type]
+        fiscal_service=None,
+        clip_uploader=None,
+        config={
+            "core_item_fields": {
+                "defaults": {
+                    "currency_id": "BRL",
+                    "buying_mode": "buy_it_now",
+                    "listing_type_id": "gold_special",
+                    "sale_terms": [],
+                }
+            },
+            "shipping": {
+                "default_mode": "me2",
+                "modes": {
+                    "me2": {
+                        "local_pick_up": False,
+                        "logistic_type": "drop_off",
+                        "methods": [],
+                        "tags": [],
+                        "dimensions": None,
+                        "free_shipping": False,
+                        "store_pick_up": False,
+                    }
+                },
+            },
+        },
+        dry_run=False,
+        min_attribute_score=0,
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+
+    assert use_case._publish_one(_build_product({}), "MLB123") is False
+    assert publisher.created_items == []
+    assert use_case.failed == 1
+    assert any("critical validation warnings" in error for error in use_case.errors)
+
+
+def test_publish_allows_critical_warning_when_strict_gate_disabled() -> None:
+    resolver = _FakeCategoryResolver(
+        [
+            AttributeMeta(id="BRAND", name="Marca", value_type="string", required=False),
+        ]
+    )
+
+    class _CriticalWarningPublisher(_FakePublisher):
+        def validate_item(self, item: dict[str, Any]) -> dict[str, Any]:
+            self.validated_items.append(item)
+            return {
+                "cause": [
+                    {
+                        "type": "warning",
+                        "code": "item.attributes.omitted",
+                        "message": "Attribute WIDTH with value cm was omitted.",
+                    }
+                ]
+            }
+
+    publisher = _CriticalWarningPublisher(
+        listing_types=[{"id": "gold_special"}],
+        sale_terms=[],
+    )
+    use_case = PublishProductUseCase(
+        category_resolver=resolver,  # type: ignore[arg-type]
+        publisher=publisher,  # type: ignore[arg-type]
+        image_uploader=_FakeImageUploader(),  # type: ignore[arg-type]
+        shipping_resolver=_FixedShippingResolver("me2"),  # type: ignore[arg-type]
+        fiscal_service=None,
+        clip_uploader=None,
+        config={
+            "strict_attribute_warnings": False,
+            "core_item_fields": {
+                "defaults": {
+                    "currency_id": "BRL",
+                    "buying_mode": "buy_it_now",
+                    "listing_type_id": "gold_special",
+                    "sale_terms": [],
+                }
+            },
+            "shipping": {
+                "default_mode": "me2",
+                "modes": {
+                    "me2": {
+                        "local_pick_up": False,
+                        "logistic_type": "drop_off",
+                        "methods": [],
+                        "tags": [],
+                        "dimensions": None,
+                        "free_shipping": False,
+                        "store_pick_up": False,
+                    }
+                },
+            },
+        },
+        dry_run=False,
+        min_attribute_score=0,
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+
+    assert use_case._publish_one(_build_product({}), "MLB123") is True
+    assert len(publisher.created_items) == 1
 
 
 def test_auto_na_policy_fills_optional_and_skips_non_eligible(caplog) -> None:  # type: ignore[no-untyped-def]
