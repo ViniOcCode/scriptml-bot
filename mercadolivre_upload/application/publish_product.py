@@ -139,6 +139,61 @@ STRICT_WARNING_GATE_MODES = {"enforce", "report_only"}
 IMAGE_DIAGNOSTIC_GATE_MODES = {"enforce", "report_only", "disabled"}
 FLOW_BLOCKED_BEHAVIORS = {"fail", "fallback_legacy"}
 DEFAULT_MANDATORY_FREE_SHIPPING_TAGS = {"mandatory_free_shipping"}
+SHIPPING_EXPLICIT_NON_BLOCKING_CODES = {
+    "item.shipping.mandatory_free_shipping",
+}
+ROW_SHIPPING_MODE_HEADERS = (
+    "forma de envio",
+    "forma envio",
+    "modo de envio",
+    "shipping mode",
+)
+ROW_SHIPPING_COST_HEADERS = (
+    "custo de envio",
+    "custo envio",
+    "frete",
+    "shipping cost",
+)
+ROW_SHIPPING_PICKUP_HEADERS = (
+    "retirar pessoalmente",
+    "retirada pessoalmente",
+    "retirada em maos",
+    "local pick up",
+    "local pickup",
+)
+ROW_SHIPPING_MARKETPLACE_TOKENS = (
+    "mercado envios",
+    "mercado envio",
+    "mercadoenvios",
+)
+ROW_SHIPPING_CUSTOM_TOKENS = (
+    "custom",
+    "personalizado",
+    "envio personalizado",
+)
+ROW_SHIPPING_NOT_SPECIFIED_TOKENS = (
+    "a combinar",
+    "not specified",
+    "nao especificado",
+    "não especificado",
+    "sem envio",
+)
+ROW_SHIPPING_TRUE_TOKENS = ("sim", "yes", "true", "1", "aceito")
+ROW_SHIPPING_FALSE_TOKENS = ("nao", "não", "no", "false", "0", "nao aceito", "não aceito")
+ROW_SHIPPING_FREE_TRUE_TOKENS = (
+    "por conta do vendedor",
+    "vendedor",
+    "frete gratis",
+    "frete grátis",
+    "gratis",
+    "grátis",
+    *ROW_SHIPPING_TRUE_TOKENS,
+)
+ROW_SHIPPING_FREE_FALSE_TOKENS = (
+    "por conta do comprador",
+    "comprador",
+    *ROW_SHIPPING_FALSE_TOKENS,
+)
 
 
 def _normalize_attribute_tag(tag: Any) -> str:
@@ -724,6 +779,12 @@ class PublishProductUseCase:
         normalized_code = cause_code.lower()
         normalized_message = cause_message.lower()
 
+        if (
+            normalized_code in SHIPPING_EXPLICIT_NON_BLOCKING_CODES
+            or "mandatory free shipping added" in normalized_message
+        ):
+            return "unknown"
+
         if any(
             normalized_code == code or normalized_code.startswith(f"{code}.")
             for code in self.shipping_non_blocking_codes
@@ -829,6 +890,110 @@ class PublishProductUseCase:
     def _coerce_shipping_bool(value: Any) -> bool | None:
         """Coerce supported shipping booleans into strict bool values."""
         return coerce_shipping_bool(value)
+
+    @staticmethod
+    def _normalize_shipping_header_name(raw_key: Any) -> str:
+        """Normalize spreadsheet header names for shipping extraction."""
+        text = str(raw_key).replace("_", " ").strip()
+        if not text:
+            return ""
+        return PortugueseTextNormalizer.normalize(text)
+
+    @staticmethod
+    def _normalize_shipping_value(raw_value: Any) -> str:
+        """Normalize spreadsheet shipping values for deterministic matching."""
+        text = str(raw_value).strip()
+        if not text:
+            return ""
+        return PortugueseTextNormalizer.normalize(text)
+
+    @classmethod
+    def _extract_row_shipping_input(cls, row_attributes: dict[str, Any] | None) -> dict[str, Any]:
+        """Extract shipping intent from row attributes using header names."""
+        if not isinstance(row_attributes, dict) or not row_attributes:
+            return {
+                "mode_intent": None,
+                "free_shipping": None,
+                "local_pick_up": None,
+                "source_headers": {},
+                "raw_values": {},
+            }
+
+        normalized_row: dict[str, Any] = {}
+        for raw_key, raw_value in row_attributes.items():
+            normalized_key = cls._normalize_shipping_header_name(raw_key)
+            if normalized_key and normalized_key not in normalized_row:
+                normalized_row[normalized_key] = raw_value
+
+        def _pick_header_value(headers: tuple[str, ...]) -> tuple[Any | None, str | None]:
+            for header in headers:
+                value = normalized_row.get(header)
+                if value is None:
+                    continue
+                if isinstance(value, str) and not value.strip():
+                    continue
+                return value, header
+            return None, None
+
+        raw_mode, mode_header = _pick_header_value(ROW_SHIPPING_MODE_HEADERS)
+        raw_cost, cost_header = _pick_header_value(ROW_SHIPPING_COST_HEADERS)
+        raw_pickup, pickup_header = _pick_header_value(ROW_SHIPPING_PICKUP_HEADERS)
+
+        mode_intent: str | None = None
+        normalized_mode = cls._normalize_shipping_value(raw_mode) if raw_mode is not None else ""
+        if normalized_mode:
+            if "me2" in normalized_mode:
+                mode_intent = "me2"
+            elif "me1" in normalized_mode:
+                mode_intent = "me1"
+            elif any(token in normalized_mode for token in ROW_SHIPPING_CUSTOM_TOKENS):
+                mode_intent = "custom"
+            elif any(token in normalized_mode for token in ROW_SHIPPING_NOT_SPECIFIED_TOKENS):
+                mode_intent = "not_specified"
+            elif any(token in normalized_mode for token in ROW_SHIPPING_MARKETPLACE_TOKENS):
+                mode_intent = "marketplace"
+
+        free_shipping: bool | None = cls._coerce_shipping_bool(raw_cost)
+        normalized_cost = cls._normalize_shipping_value(raw_cost) if raw_cost is not None else ""
+        if free_shipping is None and normalized_cost:
+            if any(token in normalized_cost for token in ROW_SHIPPING_FREE_TRUE_TOKENS):
+                free_shipping = True
+            elif any(token in normalized_cost for token in ROW_SHIPPING_FREE_FALSE_TOKENS):
+                free_shipping = False
+
+        local_pick_up: bool | None = cls._coerce_shipping_bool(raw_pickup)
+        normalized_pickup = (
+            cls._normalize_shipping_value(raw_pickup) if raw_pickup is not None else ""
+        )
+        if local_pick_up is None and normalized_pickup:
+            if any(token in normalized_pickup for token in ROW_SHIPPING_FALSE_TOKENS):
+                local_pick_up = False
+            elif any(token in normalized_pickup for token in ROW_SHIPPING_TRUE_TOKENS):
+                local_pick_up = True
+
+        source_headers: dict[str, str] = {}
+        if mode_header:
+            source_headers["mode"] = mode_header
+        if cost_header:
+            source_headers["free_shipping"] = cost_header
+        if pickup_header:
+            source_headers["local_pick_up"] = pickup_header
+
+        raw_values = {}
+        if raw_mode is not None:
+            raw_values["mode"] = str(raw_mode)
+        if raw_cost is not None:
+            raw_values["free_shipping"] = str(raw_cost)
+        if raw_pickup is not None:
+            raw_values["local_pick_up"] = str(raw_pickup)
+
+        return {
+            "mode_intent": mode_intent,
+            "free_shipping": free_shipping,
+            "local_pick_up": local_pick_up,
+            "source_headers": source_headers,
+            "raw_values": raw_values,
+        }
 
     def _get_seller_capabilities_artifact(self) -> dict[str, Any]:
         """Read seller capability tags once and reuse within the use case instance."""
@@ -3610,6 +3775,34 @@ class PublishProductUseCase:
                             )
                             resolved_from_selection = True
 
+                        available_modes_raw = selection_payload.get("available_modes")
+                        if isinstance(available_modes_raw, list):
+                            resolved_available_modes = [
+                                str(mode).strip()
+                                for mode in available_modes_raw
+                                if str(mode).strip()
+                            ]
+
+                        logistic_type_by_mode_raw = selection_payload.get("logistic_type_by_mode")
+                        if isinstance(logistic_type_by_mode_raw, dict):
+                            for mode, logistic_type in logistic_type_by_mode_raw.items():
+                                normalized_mode = str(mode).strip()
+                                normalized_logistic = str(logistic_type).strip()
+                                if normalized_mode and normalized_logistic:
+                                    resolved_logistic_type_by_mode[normalized_mode] = (
+                                        normalized_logistic
+                                    )
+
+                        runtime_policy_by_mode_raw = selection_payload.get("runtime_policy_by_mode")
+                        if isinstance(runtime_policy_by_mode_raw, dict):
+                            for mode, raw_policy in runtime_policy_by_mode_raw.items():
+                                if not isinstance(raw_policy, dict):
+                                    continue
+                                normalized_mode = str(mode).strip()
+                                if not normalized_mode:
+                                    continue
+                                resolved_runtime_policy_by_mode[normalized_mode] = dict(raw_policy)
+
                         resolved_logistic_type_raw = selection_payload.get("logistic_type")
                         resolved_logistic_type = (
                             str(resolved_logistic_type_raw).strip()
@@ -3671,10 +3864,54 @@ class PublishProductUseCase:
                         decision_source = "shipping_resolver"
                         decision_reason = "Resolved mode from seller shipping preferences."
                         logger.info("Using shipping mode from resolver: %s", requested_mode)
+                        if resolved_mode not in resolved_available_modes:
+                            resolved_available_modes.append(resolved_mode)
+
+        row_shipping_input = self._extract_row_shipping_input(row_attributes)
+        row_mode_intent = row_shipping_input.get("mode_intent")
+        if isinstance(row_mode_intent, str) and row_mode_intent:
+            decision_source = "spreadsheet.headers"
+            if row_mode_intent == "marketplace":
+                marketplace_modes = [
+                    mode for mode in ("me2", "me1") if mode in resolved_available_modes
+                ]
+                if isinstance(resolved_mode, str) and resolved_mode in {"me1", "me2"}:
+                    requested_mode = resolved_mode
+                    decision_reason = (
+                        "Resolved Mercado Envios from spreadsheet headers using seller "
+                        "mode selection."
+                    )
+                elif marketplace_modes:
+                    requested_mode = marketplace_modes[0]
+                    decision_reason = (
+                        "Resolved Mercado Envios from spreadsheet headers using available "
+                        "seller modes."
+                    )
+                else:
+                    requested_mode = "me2"
+                    decision_reason = (
+                        "Resolved Mercado Envios from spreadsheet headers with ME2 fallback."
+                    )
+            else:
+                requested_mode = row_mode_intent
+                decision_reason = "Resolved shipping mode from spreadsheet headers."
 
         shipping_mode = requested_mode or default_mode
         fallback_applied = False
-        if modes_config and shipping_mode not in modes_config:
+        if resolved_available_modes and shipping_mode not in resolved_available_modes:
+            fallback_mode = None
+            if isinstance(resolved_mode, str) and resolved_mode in resolved_available_modes:
+                fallback_mode = resolved_mode
+            elif default_mode in resolved_available_modes:
+                fallback_mode = default_mode
+            elif resolved_available_modes:
+                fallback_mode = resolved_available_modes[0]
+            if fallback_mode != shipping_mode:
+                fallback_applied = True
+                decision_source = "shipping_resolver.available_modes_fallback"
+                decision_reason = f"Mode '{shipping_mode}' not configured; using '{fallback_mode}'."
+                shipping_mode = str(fallback_mode)
+        elif modes_config and shipping_mode not in modes_config:
             fallback_mode = (
                 default_mode
                 if default_mode in modes_config
@@ -3688,13 +3925,30 @@ class PublishProductUseCase:
 
         raw_mode_config = modes_config.get(shipping_mode, {})
         mode_config = raw_mode_config if isinstance(raw_mode_config, dict) else {}
+        runtime_policy_for_mode = resolved_runtime_policy_by_mode.get(shipping_mode, {})
+        if not runtime_policy_for_mode and shipping_mode == resolved_mode:
+            runtime_policy_for_mode = {
+                "tags": list(resolved_runtime_tags),
+                "constraints": dict(resolved_runtime_constraints),
+                "free_shipping": resolved_runtime_free_shipping,
+            }
+        runtime_tags_for_mode = self._normalize_seller_tags(runtime_policy_for_mode.get("tags"))
+        runtime_constraints_for_mode = self._normalize_shipping_constraints(
+            runtime_policy_for_mode.get("constraints")
+        )
+        runtime_free_shipping_for_mode = self._coerce_shipping_bool(
+            runtime_policy_for_mode.get("free_shipping")
+        )
+        if runtime_free_shipping_for_mode is None and shipping_mode == resolved_mode:
+            runtime_free_shipping_for_mode = resolved_runtime_free_shipping
+
         configured_tags = self._normalize_seller_tags(mode_config.get("tags", []))
         selected_tags = list(configured_tags)
         tags_source = "config.mode"
         policy_overrides: list[str] = []
 
-        if self.shipping_allow_runtime_tag_overrides and resolved_runtime_tags:
-            merged_tags = list(dict.fromkeys([*configured_tags, *resolved_runtime_tags]))
+        if self.shipping_allow_runtime_tag_overrides and runtime_tags_for_mode:
+            merged_tags = list(dict.fromkeys([*configured_tags, *runtime_tags_for_mode]))
             if merged_tags != selected_tags:
                 policy_overrides.append("runtime_tags_merged")
             selected_tags = merged_tags
@@ -3706,15 +3960,22 @@ class PublishProductUseCase:
         selected_free_shipping = (
             configured_free_shipping if configured_free_shipping is not None else False
         )
-        free_shipping_source = "config.mode"
+        free_shipping_source = "config.mode" if mode_config else "default.false"
         if (
             self.shipping_allow_runtime_free_shipping_override
-            and resolved_runtime_free_shipping is not None
+            and runtime_free_shipping_for_mode is not None
         ):
-            if selected_free_shipping != resolved_runtime_free_shipping:
+            if selected_free_shipping != runtime_free_shipping_for_mode:
                 policy_overrides.append("runtime_free_shipping_override")
-            selected_free_shipping = resolved_runtime_free_shipping
+            selected_free_shipping = runtime_free_shipping_for_mode
             free_shipping_source = "shipping_resolver.selection"
+
+        row_free_shipping = row_shipping_input.get("free_shipping")
+        if isinstance(row_free_shipping, bool):
+            if selected_free_shipping != row_free_shipping:
+                policy_overrides.append("spreadsheet_free_shipping_override")
+            selected_free_shipping = row_free_shipping
+            free_shipping_source = "spreadsheet.header"
 
         mandatory_free_shipping_detected = bool(
             self.shipping_mandatory_free_shipping_tags.intersection(selected_tags)
@@ -3741,20 +4002,39 @@ class PublishProductUseCase:
             "logistic_type": mode_config.get("logistic_type"),
             "store_pick_up": mode_config.get("store_pick_up", False),
         }
-        if resolved_logistic_type and shipping_mode == requested_mode:
+        logistic_type_source = "config.mode" if mode_config.get("logistic_type") else "default.none"
+        logistic_type_for_mode = resolved_logistic_type_by_mode.get(shipping_mode)
+        if logistic_type_for_mode:
+            config_shipping["logistic_type"] = logistic_type_for_mode
+            logistic_type_source = "shipping_resolver.selection"
+        elif resolved_logistic_type and shipping_mode == requested_mode:
             config_shipping["logistic_type"] = resolved_logistic_type
+            if resolved_logistic_type_source:
+                logistic_type_source = resolved_logistic_type_source
+        elif shipping_mode == "me1":
+            config_shipping["logistic_type"] = "default"
+            logistic_type_source = "docs.me1_default"
+        elif shipping_mode == "me2":
+            config_shipping["logistic_type"] = "drop_off"
+            logistic_type_source = "docs.me2_default"
+
+        selected_local_pick_up = self._coerce_shipping_bool(
+            config_shipping.get("local_pick_up", False)
+        )
+        if selected_local_pick_up is None:
+            selected_local_pick_up = False
+        local_pick_up_source = "config.mode" if "local_pick_up" in mode_config else "default.false"
+        row_local_pick_up = row_shipping_input.get("local_pick_up")
+        if isinstance(row_local_pick_up, bool):
+            if selected_local_pick_up != row_local_pick_up:
+                policy_overrides.append("spreadsheet_local_pick_up_override")
+            selected_local_pick_up = row_local_pick_up
+            local_pick_up_source = "spreadsheet.header"
+        config_shipping["local_pick_up"] = selected_local_pick_up
 
         # Remove None values to keep payload clean
         config_shipping = {k: v for k, v in config_shipping.items() if v is not None}
         selected_logistic_type = config_shipping.get("logistic_type")
-        logistic_type_source = "config.mode"
-        if (
-            resolved_logistic_type
-            and resolved_logistic_type_source
-            and shipping_mode == requested_mode
-            and selected_logistic_type == resolved_logistic_type
-        ):
-            logistic_type_source = resolved_logistic_type_source
 
         constraints: dict[str, Any] = {"category_id": category_id}
         if category_id:
@@ -3766,8 +4046,8 @@ class PublishProductUseCase:
                         "category_status": policy_summary.get("status"),
                     }
                 )
-        if resolved_runtime_constraints:
-            constraints["runtime"] = dict(resolved_runtime_constraints)
+        if runtime_constraints_for_mode:
+            constraints["runtime"] = dict(runtime_constraints_for_mode)
         constraints["mandatory_free_shipping_tags"] = sorted(
             self.shipping_mandatory_free_shipping_tags
         )
@@ -3783,13 +4063,21 @@ class PublishProductUseCase:
                 "default_mode": default_mode,
                 "fallback_applied": fallback_applied,
                 "mode_configured": shipping_mode in modes_config if modes_config else False,
-                "available_modes": sorted(str(mode) for mode in modes_config),
+                "available_modes": sorted(
+                    {
+                        *[str(mode) for mode in resolved_available_modes if str(mode).strip()],
+                        *[str(mode) for mode in modes_config],
+                    }
+                ),
                 "selected_logistic_type": selected_logistic_type,
                 "logistic_type_source": logistic_type_source,
                 "selected_tags": list(selected_tags),
                 "tags_source": tags_source,
                 "selected_free_shipping": selected_free_shipping,
                 "free_shipping_source": free_shipping_source,
+                "selected_local_pick_up": selected_local_pick_up,
+                "local_pick_up_source": local_pick_up_source,
+                "row_shipping_input": row_shipping_input,
                 "policy_overrides": policy_overrides,
                 "constraints": constraints,
             },
