@@ -5,8 +5,9 @@ Orchestrates domain logic and adapters to publish products.
 
 import logging
 import re
+from copy import deepcopy
 from itertools import product as cartesian_product
-from typing import Any
+from typing import Any, cast
 
 from mercadolivre_upload.api.cbt_extractor import CbtIdExtractor
 from mercadolivre_upload.application.builders.product_builder import ProductBuilder
@@ -19,6 +20,7 @@ from mercadolivre_upload.domain.validation import ValidationFeedback
 from mercadolivre_upload.shared.utils.text_utils import PortugueseTextNormalizer
 
 from .attribute_builder import AttributeBuilderService
+from .policy_snapshot import compile_policy_snapshot, compile_schema_contract
 from .ports import ClipUploaderPort, ImageUploaderPort, ItemPublisherPort, ShippingResolverPort
 
 logger = logging.getLogger(__name__)
@@ -49,6 +51,17 @@ DEFAULT_NA_SKIP_TAGS = {
     "catalog_listing_required",
     "allow_variations",
 }
+IDENTIFIER_EMPTY_TOKENS = {
+    "",
+    "-",
+    "na",
+    "n a",
+    "nao informado",
+    "not informed",
+    "none",
+    "null",
+    "sem gtin",
+}
 CRITICAL_ATTRIBUTE_WARNING_TOKENS = (
     "unknown attribute",
     "attribute missing id",
@@ -60,6 +73,62 @@ CRITICAL_VALIDATION_WARNING_TOKENS = (
     "item.attributes.invalid",
     "item.attributes.required",
 )
+SHIPPING_BLOCKING_CODE_TOKENS = (
+    "shipping.mode",
+    "shipping.logistic_type",
+    "shipping.free_shipping",
+    "shipping.not_allowed",
+    "shipping.invalid",
+)
+SHIPPING_RETRYABLE_CODE_TOKENS = (
+    "shipping.timeout",
+    "shipping.internal_error",
+    "shipping.service_unavailable",
+    "shipping.rate_limit",
+    "shipping.too_many_requests",
+)
+SHIPPING_BLOCKING_MESSAGE_TOKENS = (
+    "not allowed",
+    "mandatory",
+    "required",
+    "forbidden",
+    "unsupported",
+    "incompatible",
+    "não permitido",
+    "nao permitido",
+    "obrigat",
+    "must be",
+)
+SHIPPING_RETRYABLE_MESSAGE_TOKENS = (
+    "temporary",
+    "temporar",
+    "timeout",
+    "timed out",
+    "service unavailable",
+    "try again",
+    "internal error",
+    "rate limit",
+)
+RETRYABLE_VALIDATION_ERROR_TOKENS = (
+    "internal_error",
+    "internal.server.error",
+    "service_unavailable",
+    "temporarily_unavailable",
+    "gateway_timeout",
+    "too_many_requests",
+    "rate_limit",
+    "timeout",
+    "timed out",
+    "temporar",
+    "retry",
+)
+VALIDATION_DECISION_MODES = {"strict", "controlled"}
+USER_PRODUCTS_SELLER_TAG = "user_product_seller"
+AVAILABLE_ROUTING_FLOWS = {"legacy", "user_products"}
+IMPLEMENTED_ROUTING_FLOWS = {"legacy", "user_products"}
+STRICT_WARNING_GATE_MODES = {"enforce", "report_only"}
+IMAGE_DIAGNOSTIC_GATE_MODES = {"enforce", "report_only", "disabled"}
+FLOW_BLOCKED_BEHAVIORS = {"fail", "fallback_legacy"}
 
 
 class PublishProductUseCase:
@@ -108,8 +177,100 @@ class PublishProductUseCase:
         self.fiscal_service = fiscal_service
         self.clip_uploader = clip_uploader
         self.config = config or {}
+
+        strict_warning_gate_mode = self.config.get("strict_warning_gate_mode")
+        normalized_strict_mode: str | None = None
+        if isinstance(strict_warning_gate_mode, str) and strict_warning_gate_mode.strip():
+            normalized_strict_mode = strict_warning_gate_mode.strip().lower()
+            if normalized_strict_mode not in STRICT_WARNING_GATE_MODES:
+                logger.warning(
+                    "Invalid strict warning gate mode '%s'; falling back to enforce.",
+                    normalized_strict_mode,
+                )
+                normalized_strict_mode = "enforce"
+
         strict_warnings = self.config.get("strict_attribute_warnings")
-        self.strict_attribute_warnings = True if strict_warnings is None else bool(strict_warnings)
+        if normalized_strict_mode is not None:
+            self.strict_warning_gate_mode = normalized_strict_mode
+            self.strict_attribute_warnings = normalized_strict_mode == "enforce"
+        else:
+            self.strict_attribute_warnings = (
+                True if strict_warnings is None else bool(strict_warnings)
+            )
+            self.strict_warning_gate_mode = (
+                "enforce" if self.strict_attribute_warnings else "report_only"
+            )
+
+        raw_validation_mode = self.config.get("validation_decision_mode", "strict")
+        if isinstance(raw_validation_mode, str) and raw_validation_mode.strip():
+            validation_mode = raw_validation_mode.strip().lower()
+        else:
+            validation_mode = "strict"
+        if validation_mode not in VALIDATION_DECISION_MODES:
+            logger.warning(
+                "Invalid validation decision mode '%s'; falling back to strict.",
+                validation_mode,
+            )
+            validation_mode = "strict"
+        self.validation_decision_mode = validation_mode
+
+        flow_config = self.config.get("flow_routing", {})
+        self.flow_user_products_enabled = True
+        self.flow_blocked_behavior = "fail"
+        if isinstance(flow_config, dict):
+            raw_user_products_enabled = flow_config.get(
+                "user_products_enabled",
+                flow_config.get("enable_user_products"),
+            )
+            if raw_user_products_enabled is not None:
+                self.flow_user_products_enabled = bool(raw_user_products_enabled)
+            raw_blocked_behavior = flow_config.get(
+                "blocked_behavior",
+                flow_config.get("on_blocked"),
+            )
+            if isinstance(raw_blocked_behavior, str) and raw_blocked_behavior.strip():
+                normalized_behavior = raw_blocked_behavior.strip().lower()
+                if normalized_behavior in FLOW_BLOCKED_BEHAVIORS:
+                    self.flow_blocked_behavior = normalized_behavior
+                else:
+                    logger.warning(
+                        "Invalid flow blocked behavior '%s'; falling back to fail.",
+                        normalized_behavior,
+                    )
+
+        self.image_diagnostics_gate_mode = "enforce"
+        image_diagnostics_config = self.config.get("image_diagnostics")
+        normalized_diag_mode: str | None = None
+        if isinstance(image_diagnostics_config, dict):
+            raw_diag_mode = image_diagnostics_config.get("gate_mode")
+            if raw_diag_mode is None and "enabled" in image_diagnostics_config:
+                raw_diag_mode = (
+                    "enforce" if bool(image_diagnostics_config.get("enabled")) else "disabled"
+                )
+            if raw_diag_mode is None:
+                raw_diag_mode = image_diagnostics_config.get("mode")
+            if isinstance(raw_diag_mode, str) and raw_diag_mode.strip():
+                normalized_diag_mode = raw_diag_mode.strip().lower()
+        elif isinstance(image_diagnostics_config, str) and image_diagnostics_config.strip():
+            normalized_diag_mode = image_diagnostics_config.strip().lower()
+
+        if normalized_diag_mode in {"off", "skip"}:
+            normalized_diag_mode = "disabled"
+        elif normalized_diag_mode in {"report", "observe"}:
+            normalized_diag_mode = "report_only"
+        elif normalized_diag_mode in {"strict", "enabled", "on"}:
+            normalized_diag_mode = "enforce"
+
+        if normalized_diag_mode:
+            if normalized_diag_mode in IMAGE_DIAGNOSTIC_GATE_MODES:
+                self.image_diagnostics_gate_mode = normalized_diag_mode
+            else:
+                logger.warning(
+                    "Invalid image diagnostics gate mode '%s'; falling back to enforce.",
+                    normalized_diag_mode,
+                )
+
+        self._rollout_flags_artifact = self._build_rollout_flags_artifact()
         self.dry_run = dry_run
         self.validation_only = validation_only
         self.enable_fiscal_submission = enable_fiscal_submission
@@ -152,7 +313,22 @@ class PublishProductUseCase:
         self._pending_fiscal: list[tuple[str, FiscalData]] = []
         self._available_listing_types_cache: dict[str, list[str]] = {}
         self._category_sale_terms_cache: dict[str, dict[str, dict[str, Any]]] = {}
+        self._category_policy_cache: dict[str, dict[str, Any]] = {}
+        self._category_schema_contract_cache: dict[str, dict[str, Any]] = {}
         self._current_cause_codes: list[str] = []
+        self._current_preflight_artifact: dict[str, Any] = {
+            "identifier_gate": {"checked": False, "violations": []}
+        }
+        self._current_cause_taxonomy: list[dict[str, str]] = []
+        self._current_validation_decision: dict[str, Any] = {}
+        self._current_image_diagnostics: dict[str, Any] | None = None
+        self._current_shipping_policy: dict[str, Any] | None = None
+        self._seller_capabilities_artifact: dict[str, Any] | None = None
+        self._flow_routing_artifact: dict[str, Any] | None = None
+        self._current_flow_artifact: dict[str, Any] = {}
+        self._current_publish_category_id: str | None = None
+        self._current_publish_sku: str | None = None
+        self._current_variation_reference_attributes: list[dict[str, Any]] = []
 
     def _reset_execution_state(self) -> None:
         """Reset per-run counters and artifacts."""
@@ -163,7 +339,53 @@ class PublishProductUseCase:
         self.clip_results = []
         self.item_results = []
         self._pending_fiscal = []
+        self._category_policy_cache = {}
+        self._category_schema_contract_cache = {}
         self._current_cause_codes = []
+        self._current_preflight_artifact = {"identifier_gate": {"checked": False, "violations": []}}
+        self._current_cause_taxonomy = []
+        self._current_validation_decision = {}
+        self._current_image_diagnostics = None
+        self._current_shipping_policy = None
+        self._current_flow_artifact = {}
+        self._current_publish_category_id = None
+        self._current_publish_sku = None
+        self._current_variation_reference_attributes = []
+
+    def _build_rollout_flags_artifact(self) -> dict[str, Any]:
+        """Build static rollout feature flag snapshot for item/report metadata."""
+        return {
+            "validation_decision_mode": self.validation_decision_mode,
+            "strict_warning_gate_mode": self.strict_warning_gate_mode,
+            "strict_attribute_warnings": self.strict_attribute_warnings,
+            "image_diagnostics_gate_mode": self.image_diagnostics_gate_mode,
+            "flow_user_products_enabled": self.flow_user_products_enabled,
+            "flow_blocked_behavior": self.flow_blocked_behavior,
+        }
+
+    def _annotate_image_diagnostics_artifact(self, artifact: dict[str, Any]) -> dict[str, Any]:
+        """Attach gate decision metadata to image diagnostics artifact."""
+        normalized = dict(artifact)
+        raw_issues = normalized.get("issues", [])
+        issues = (
+            [str(issue) for issue in raw_issues if str(issue).strip()]
+            if isinstance(raw_issues, list)
+            else []
+        )
+        gate_blocks = self.image_diagnostics_gate_mode == "enforce"
+        action = "allow"
+        if self.image_diagnostics_gate_mode == "disabled":
+            action = "skip"
+        elif gate_blocks and issues:
+            action = "block"
+
+        normalized["gate_mode"] = self.image_diagnostics_gate_mode
+        normalized["gate_blocks"] = gate_blocks
+        normalized["gate_decision"] = {
+            "action": action,
+            "issue_count": len(issues),
+        }
+        return normalized
 
     @staticmethod
     def _extract_item_identity(product: Product | dict[str, Any]) -> tuple[str | None, str | None]:
@@ -224,6 +446,109 @@ class PublishProductUseCase:
         return title_str or None
 
     @staticmethod
+    def _build_resolution_artifact(context: dict[str, Any]) -> dict[str, Any]:
+        """Build serializable category resolution fields for item results."""
+        category_path = context.get("category_path")
+        if not isinstance(category_path, list):
+            category_path = []
+
+        strategy = context.get("resolution_strategy")
+        if not isinstance(strategy, str) or not strategy:
+            strategy = "unresolved"
+
+        category_input = context.get("category_input")
+        if not isinstance(category_input, str):
+            category_input = str(category_input or "").strip()
+
+        resolved_id = context.get("category_resolved_id")
+        if not isinstance(resolved_id, str) or not resolved_id:
+            resolved_id = None
+
+        return {
+            "category_input": category_input,
+            "category_resolved_id": resolved_id,
+            "category_path": list(category_path),
+            "resolution_strategy": strategy,
+        }
+
+    def _resolve_category_context(
+        self, products: list[Product | dict[str, Any]], category_name: str
+    ) -> dict[str, Any]:
+        """Resolve category with deterministic strategy metadata."""
+        category_input = str(category_name).strip()
+        resolved_id: str | None = None
+        strategy = "unresolved"
+
+        # Strategy 0: Accept direct category IDs (e.g. MLB1234)
+        if re.fullmatch(r"[A-Z]{3}\d+", category_input):
+            resolved_id = category_input
+            strategy = "direct_id"
+        else:
+            # Strategy 1: Find category by name (fast root match)
+            resolved_id = self.category_resolver.find_category(category_input)
+            if resolved_id:
+                strategy = "name_match"
+            else:
+                logger.info(
+                    "Category '%s' not found by name; falling back to predictor path match.",
+                    category_input,
+                )
+
+        # Strategy 2: Use domain discovery with product titles
+        if not resolved_id and products:
+            titles: list[str] = []
+            for product in products:
+                title = self._extract_product_title(product)
+                if title:
+                    titles.append(title)
+
+            if titles:
+                logger.info("Extracted %s titles for prediction", len(titles))
+                resolved_id = self.category_resolver.find_category_with_predictor(
+                    category_input, titles
+                )
+                if resolved_id:
+                    strategy = "predictor_path_match"
+                else:
+                    logger.info(
+                        "Predictor path matching did not resolve '%s'; "
+                        "falling back to title prediction.",
+                        category_input,
+                    )
+
+        # Strategy 3: Fallback to simple title prediction (for backwards compatibility)
+        if not resolved_id and products:
+            logger.info("Trying simple domain discovery fallback...")
+            for product in products:
+                title_str = self._extract_product_title(product)
+                if title_str:
+                    resolved_id = self.category_resolver.predict_category_from_title(title_str)
+                    if resolved_id:
+                        strategy = "title_prediction"
+                        logger.info(f"Found category from title '{title_str[:30]}...'")
+                        break
+
+        category_path: list[Any] = []
+        if resolved_id:
+            leaf_category_id = self.category_resolver.resolve_to_leaf(resolved_id)
+            if leaf_category_id != resolved_id:
+                logger.info(f"Resolved to leaf category: {leaf_category_id}")
+            resolved_id = leaf_category_id
+
+            category_data = self._get_policy_category_data(resolved_id)
+            if isinstance(category_data, dict):
+                raw_path = category_data.get("path_from_root")
+                if isinstance(raw_path, list):
+                    category_path = list(raw_path)
+
+        return {
+            "category_input": category_input,
+            "category_resolved_id": resolved_id,
+            "category_path": category_path,
+            "resolution_strategy": strategy,
+        }
+
+    @staticmethod
     def _get_critical_attribute_warnings(warnings: list[str]) -> list[str]:
         """Return attribute-processing warnings that should block publication."""
         critical: list[str] = []
@@ -243,6 +568,349 @@ class PublishProductUseCase:
                 critical.append(str(warning))
         return critical
 
+    @staticmethod
+    def _classify_validation_cause(cause: dict[str, Any]) -> str:
+        """Classify validation causes for deterministic decisioning."""
+        cause_type = str(cause.get("type", "")).strip().lower()
+        cause_code = str(cause.get("code", "")).strip().lower()
+        cause_message = str(cause.get("message", "")).strip().lower()
+        normalized_payload = f"{cause_code} {cause_message}"
+
+        if cause_type == "warning":
+            if any(token in normalized_payload for token in CRITICAL_VALIDATION_WARNING_TOKENS):
+                return "critical_warning"
+            return "informational_warning"
+
+        if any(token in normalized_payload for token in RETRYABLE_VALIDATION_ERROR_TOKENS):
+            return "retryable_error"
+        return "blocking_error"
+
+    @classmethod
+    def _build_validation_cause_taxonomy(cls, causes: list[dict[str, Any]]) -> list[dict[str, str]]:
+        """Normalize raw validation causes into a persisted taxonomy."""
+        taxonomy: list[dict[str, str]] = []
+        for cause in causes:
+            if not isinstance(cause, dict):
+                continue
+            raw_code = str(cause.get("code", "")).strip()
+            taxonomy.append(
+                {
+                    "type": str(cause.get("type", "")).strip().lower(),
+                    "code": raw_code.lower(),
+                    "message": str(cause.get("message", "")).strip(),
+                    "classification": cls._classify_validation_cause(cause),
+                }
+            )
+        return taxonomy
+
+    def _build_validation_decision(self, taxonomy: list[dict[str, str]]) -> dict[str, Any]:
+        """Resolve deterministic strict/controlled decision from taxonomy."""
+        classification_counts = {
+            "blocking_error": 0,
+            "retryable_error": 0,
+            "critical_warning": 0,
+            "informational_warning": 0,
+        }
+        classification_codes: dict[str, list[str]] = {
+            "blocking_error": [],
+            "retryable_error": [],
+            "critical_warning": [],
+            "informational_warning": [],
+        }
+
+        for cause in taxonomy:
+            classification = str(cause.get("classification", "")).strip().lower()
+            if classification not in classification_counts:
+                continue
+            classification_counts[classification] += 1
+            code = str(cause.get("code", "")).strip().lower()
+            if code and code not in classification_codes[classification]:
+                classification_codes[classification].append(code)
+
+        action = "allow"
+        reason = "no_validation_causes"
+        if classification_counts["blocking_error"] > 0:
+            action = "block"
+            reason = "blocking_error"
+        elif classification_counts["retryable_error"] > 0:
+            if self.validation_decision_mode == "controlled":
+                action = "retry"
+                reason = "retryable_error_controlled"
+            else:
+                action = "block"
+                reason = "retryable_error_strict"
+        elif classification_counts["critical_warning"] > 0:
+            if self.validation_decision_mode == "strict" and self.strict_attribute_warnings:
+                action = "block"
+                reason = "critical_warning_strict"
+            else:
+                action = "allow"
+                reason = "critical_warning_allowed"
+        elif classification_counts["informational_warning"] > 0:
+            action = "allow"
+            reason = "informational_warning"
+
+        return {
+            "mode": self.validation_decision_mode,
+            "strict_warning_gate_mode": self.strict_warning_gate_mode,
+            "strict_attribute_warnings": self.strict_attribute_warnings,
+            "action": action,
+            "reason": reason,
+            "classification_counts": classification_counts,
+            "classification_codes": classification_codes,
+        }
+
+    @staticmethod
+    def _is_shipping_cause(cause_code: str, cause_message: str) -> bool:
+        """Check whether a cause row is shipping-related."""
+        normalized_code = cause_code.lower()
+        normalized_message = cause_message.lower()
+        return (
+            "shipping" in normalized_code
+            or "shipping" in normalized_message
+            or "envio" in normalized_message
+        )
+
+    @staticmethod
+    def _classify_shipping_cause(cause_code: str, cause_message: str) -> str:
+        """Classify shipping causes into blocking/retryable/unknown buckets."""
+        normalized_code = cause_code.lower()
+        normalized_message = cause_message.lower()
+
+        if any(token in normalized_code for token in SHIPPING_BLOCKING_CODE_TOKENS):
+            return "blocking"
+        if any(token in normalized_code for token in SHIPPING_RETRYABLE_CODE_TOKENS):
+            return "retryable"
+        if any(token in normalized_message for token in SHIPPING_BLOCKING_MESSAGE_TOKENS):
+            return "blocking"
+        if any(token in normalized_message for token in SHIPPING_RETRYABLE_MESSAGE_TOKENS):
+            return "retryable"
+        return "unknown"
+
+    def _register_shipping_causes(self, causes: list[Any], *, stage: str) -> list[dict[str, str]]:
+        """Extract and store shipping-cause classification metadata for current item."""
+        decisions: list[dict[str, str]] = []
+        for raw_cause in causes:
+            if not isinstance(raw_cause, dict):
+                continue
+            cause_code = str(raw_cause.get("code", "") or "").strip()
+            cause_message = str(raw_cause.get("message", "") or "").strip()
+            if not self._is_shipping_cause(cause_code, cause_message):
+                continue
+            decision = {
+                "stage": stage,
+                "type": str(raw_cause.get("type", "") or "").strip().lower(),
+                "code": cause_code,
+                "message": cause_message,
+                "classification": self._classify_shipping_cause(cause_code, cause_message),
+            }
+            decisions.append(decision)
+
+        if decisions and self._current_shipping_policy is not None:
+            existing = self._current_shipping_policy.setdefault("cause_decisions", [])
+            if isinstance(existing, list):
+                known = {
+                    (
+                        str(row.get("stage", "")),
+                        str(row.get("type", "")),
+                        str(row.get("code", "")),
+                        str(row.get("message", "")),
+                    )
+                    for row in existing
+                    if isinstance(row, dict)
+                }
+                for decision in decisions:
+                    key = (
+                        decision["stage"],
+                        decision["type"],
+                        decision["code"],
+                        decision["message"],
+                    )
+                    if key in known:
+                        continue
+                    existing.append(decision)
+                    known.add(key)
+                self._current_shipping_policy["has_blocking_cause"] = any(
+                    isinstance(row, dict) and row.get("classification") == "blocking"
+                    for row in existing
+                )
+        return decisions
+
+    @staticmethod
+    def _normalize_seller_tags(raw_tags: Any) -> list[str]:
+        """Normalize seller tag payload from users/me style responses."""
+        normalized_tags: list[str] = []
+        if isinstance(raw_tags, list):
+            for tag in raw_tags:
+                tag_name = str(tag).strip().lower()
+                if tag_name:
+                    normalized_tags.append(tag_name)
+        elif isinstance(raw_tags, dict):
+            for tag, enabled in raw_tags.items():
+                if not enabled:
+                    continue
+                tag_name = str(tag).strip().lower()
+                if tag_name:
+                    normalized_tags.append(tag_name)
+        return list(dict.fromkeys(normalized_tags))
+
+    def _get_seller_capabilities_artifact(self) -> dict[str, Any]:
+        """Read seller capability tags once and reuse within the use case instance."""
+        if self._seller_capabilities_artifact is not None:
+            return self._seller_capabilities_artifact
+
+        seller_info: dict[str, Any] = {}
+        source = "unavailable"
+        for endpoint_name, method_name in (
+            ("publisher/get_users_me", "get_publisher_users_me"),
+            ("users/me", "get_users_me"),
+        ):
+            getter = getattr(self.publisher, method_name, None)
+            if not callable(getter):
+                continue
+            try:
+                payload = getter()
+            except Exception as error:
+                logger.warning(
+                    "Could not fetch seller capabilities from %s: %s",
+                    endpoint_name,
+                    error,
+                )
+                continue
+            if isinstance(payload, dict):
+                seller_info = payload
+                source = endpoint_name
+                break
+            logger.warning(
+                "Unexpected seller capability payload from %s: %s",
+                endpoint_name,
+                type(payload).__name__,
+            )
+
+        tags = self._normalize_seller_tags(seller_info.get("tags"))
+        has_user_products_tag = USER_PRODUCTS_SELLER_TAG in tags
+        artifact = {
+            "source": source,
+            "seller_id": seller_info.get("id"),
+            "tags": tags,
+            "has_user_product_seller_tag": has_user_products_tag,
+        }
+        self._seller_capabilities_artifact = artifact
+        return artifact
+
+    def _get_flow_routing_artifact(self) -> dict[str, Any]:
+        """Resolve deterministic publish flow routing metadata."""
+        if self._flow_routing_artifact is not None:
+            return self._flow_routing_artifact
+
+        flow_config = self.config.get("flow_routing", {})
+        mode = "auto"
+        forced_flow: str | None = None
+        if isinstance(flow_config, dict):
+            raw_mode = flow_config.get("mode")
+            if isinstance(raw_mode, str) and raw_mode.strip():
+                mode = raw_mode.strip().lower()
+            raw_forced_flow = flow_config.get("forced_flow", flow_config.get("flow"))
+            if isinstance(raw_forced_flow, str) and raw_forced_flow.strip():
+                forced_flow = raw_forced_flow.strip().lower()
+
+        if forced_flow:
+            mode = "forced"
+        if mode not in {"auto", "forced"}:
+            logger.warning("Invalid flow routing mode '%s'; falling back to auto", mode)
+            mode = "auto"
+
+        seller_capabilities = self._get_seller_capabilities_artifact()
+        seller_has_tag = bool(seller_capabilities.get("has_user_product_seller_tag"))
+        user_products_enabled = self.flow_user_products_enabled
+
+        selected_flow = "legacy"
+        reason = "Defaulting to legacy flow for backward compatibility."
+        blocked = False
+        error_message: str | None = None
+        fallback_applied = False
+        fallback_reason: str | None = None
+
+        if mode == "forced":
+            if forced_flow not in AVAILABLE_ROUTING_FLOWS:
+                blocked = True
+                error_message = (
+                    f"Forced publish flow '{forced_flow or 'unset'}' is not supported. "
+                    f"Supported values: {', '.join(sorted(AVAILABLE_ROUTING_FLOWS))}."
+                )
+                reason = "Configured forced flow is invalid."
+                selected_flow = forced_flow or "legacy"
+            elif forced_flow == "legacy":
+                selected_flow = "legacy"
+                reason = "Forced legacy flow selected by configuration."
+            else:
+                selected_flow = "user_products"
+                if not user_products_enabled:
+                    blocked = True
+                    error_message = (
+                        "Forced publish flow 'user_products' is disabled by rollout flag "
+                        "'flow_routing.user_products_enabled'."
+                    )
+                    reason = "User-products flow was disabled by rollout controls."
+                elif not seller_has_tag:
+                    blocked = True
+                    error_message = (
+                        "Forced publish flow 'user_products' requires seller tag "
+                        f"'{USER_PRODUCTS_SELLER_TAG}'."
+                    )
+                    reason = "Seller is not tagged for user-products flow."
+                elif forced_flow not in IMPLEMENTED_ROUTING_FLOWS:
+                    blocked = True
+                    error_message = (
+                        "Forced publish flow 'user_products' is not supported by this release."
+                    )
+                    reason = "User-products engine is not implemented yet."
+        else:
+            if seller_has_tag and user_products_enabled:
+                selected_flow = "user_products"
+                reason = "Seller has user_product_seller capability; using user-products flow."
+            elif seller_has_tag:
+                reason = (
+                    "Seller has user_product_seller capability, but rollout disabled "
+                    "user-products flow; using legacy flow."
+                )
+            else:
+                reason = "Seller does not have user_product_seller capability; using legacy flow."
+
+        if blocked and self.flow_blocked_behavior == "fallback_legacy":
+            fallback_applied = True
+            fallback_reason = error_message or reason
+            selected_flow = "legacy"
+            blocked = False
+            error_message = None
+            reason = (
+                "Flow routing fallback applied to legacy flow due to rollout setting "
+                "'flow_routing.blocked_behavior=fallback_legacy'."
+            )
+
+        flow_routing: dict[str, Any] = {
+            "mode": mode,
+            "selected_flow": selected_flow,
+            "seller_has_user_product_seller_tag": seller_has_tag,
+            "seller_capability_source": seller_capabilities.get("source"),
+            "reason": reason,
+            "supported_flows": sorted(IMPLEMENTED_ROUTING_FLOWS),
+            "blocked": blocked,
+            "user_products_enabled": user_products_enabled,
+            "blocked_behavior": self.flow_blocked_behavior,
+            "fallback_applied": fallback_applied,
+        }
+        if forced_flow:
+            flow_routing["forced_flow"] = forced_flow
+        if error_message:
+            flow_routing["error"] = error_message
+        if fallback_reason:
+            flow_routing["fallback_reason"] = fallback_reason
+
+        artifact = {"flow_routing": flow_routing}
+        self._flow_routing_artifact = artifact
+        return artifact
+
     def execute(
         self, products: list[Product | dict[str, Any]], category_name: str
     ) -> dict[str, Any]:
@@ -257,45 +925,43 @@ class PublishProductUseCase:
         """
         self._reset_execution_state()
 
-        category_input = str(category_name).strip()
-        category_id = None
-
-        # Strategy 0: Accept direct category IDs (e.g. MLB1234)
-        if re.fullmatch(r"[A-Z]{3}\d+", category_input):
-            category_id = category_input
-        else:
-            # Strategy 1: Find category by name (fast root match)
-            category_id = self.category_resolver.find_category(category_input)
-
-        # Strategy 2: Use domain discovery with product titles
-        if not category_id and products:
-            logger.info(
-                "Category not found by name, trying domain discovery with product titles..."
+        flow_artifact = self._get_flow_routing_artifact()
+        flow_routing = flow_artifact.get("flow_routing", {})
+        if isinstance(flow_routing, dict) and flow_routing.get("blocked"):
+            error_msg = str(
+                flow_routing.get("error", "Forced publish flow configuration is unsupported.")
             )
-
-            # Extract titles from products
-            titles = []
-            for product in products:
-                title = self._extract_product_title(product)
-                if title:
-                    titles.append(title)
-
-            if titles:
-                logger.info(f"Extracted {len(titles)} titles for prediction")
-                category_id = self.category_resolver.find_category_with_predictor(
-                    category_input, titles
+            logger.error(error_msg)
+            item_results = []
+            for index, product in enumerate(products):
+                sku, title = self._extract_item_identity(product)
+                item_results.append(
+                    {
+                        "index": index,
+                        "sku": sku,
+                        "title": title,
+                        "status": "failed",
+                        "error": error_msg,
+                        "rollout_flags": deepcopy(self._rollout_flags_artifact),
+                    }
                 )
+                item_results[-1].update(flow_artifact)
+            return {
+                "success": False,
+                "published": 0,
+                "failed": len(products),
+                "errors": [error_msg],
+                "item_results": item_results,
+                "flow_routing": flow_routing,
+                "rollout_flags": deepcopy(self._rollout_flags_artifact),
+            }
 
-        # Strategy 3: Fallback to simple title prediction (for backwards compatibility)
-        if not category_id and products:
-            logger.info("Trying simple domain discovery fallback...")
-            for product in products:
-                title_str = self._extract_product_title(product)
-                if title_str:
-                    category_id = self.category_resolver.predict_category_from_title(title_str)
-                    if category_id:
-                        logger.info(f"Found category from title '{title_str[:30]}...'")
-                        break
+        category_context = self._resolve_category_context(products, category_name)
+        resolution_artifact = self._build_resolution_artifact(category_context)
+        category_input = resolution_artifact["category_input"]
+        category_id = resolution_artifact["category_resolved_id"]
+        policy_artifact: dict[str, Any] | None = None
+        schema_contract_artifact: dict[str, Any] | None = None
 
         if not category_id:
             error_msg = f"Category not found: {category_input}"
@@ -310,21 +976,23 @@ class PublishProductUseCase:
                         "title": title,
                         "status": "failed",
                         "error": error_msg,
+                        "rollout_flags": deepcopy(self._rollout_flags_artifact),
                     }
                 )
+                item_results[-1].update(flow_artifact)
+                item_results[-1].update(resolution_artifact)
             return {
                 "success": False,
                 "published": 0,
                 "failed": len(products),
                 "errors": [error_msg],
                 "item_results": item_results,
+                "flow_routing": flow_routing,
+                "rollout_flags": deepcopy(self._rollout_flags_artifact),
             }
 
-        # Ensure we have a leaf category (no children)
-        leaf_category_id = self.category_resolver.resolve_to_leaf(category_id)
-        if leaf_category_id != category_id:
-            logger.info(f"Resolved to leaf category: {leaf_category_id}")
-            category_id = leaf_category_id
+        policy_artifact = self._get_policy_artifact(category_id)
+        schema_contract_artifact = self._get_schema_contract_artifact(category_id)
 
         is_listing_allowed = getattr(self.category_resolver, "is_listing_allowed", None)
         if callable(is_listing_allowed) and not is_listing_allowed(category_id):
@@ -340,14 +1008,23 @@ class PublishProductUseCase:
                         "title": title,
                         "status": "failed",
                         "error": error_msg,
+                        "rollout_flags": deepcopy(self._rollout_flags_artifact),
                     }
                 )
+                item_results[-1].update(flow_artifact)
+                item_results[-1].update(resolution_artifact)
+                if policy_artifact:
+                    item_results[-1].update(policy_artifact)
+                if schema_contract_artifact:
+                    item_results[-1].update(schema_contract_artifact)
             return {
                 "success": False,
                 "published": 0,
                 "failed": len(products),
                 "errors": [error_msg],
                 "item_results": item_results,
+                "flow_routing": flow_routing,
+                "rollout_flags": deepcopy(self._rollout_flags_artifact),
             }
 
         logger.info(f"Publishing {len(products)} products to category {category_id}")
@@ -356,6 +1033,15 @@ class PublishProductUseCase:
         self._initialize_cache_mapper(category_id)
 
         for index, product in enumerate(products):
+            self._current_cause_codes = []
+            self._current_preflight_artifact = {
+                "identifier_gate": {"checked": False, "violations": []}
+            }
+            self._current_cause_taxonomy = []
+            self._current_validation_decision = {}
+            self._current_image_diagnostics = None
+            self._current_shipping_policy = None
+            self._current_flow_artifact = {}
             if isinstance(product, dict):
                 source_sku, source_title = self._extract_item_identity(product)
                 try:
@@ -372,25 +1058,52 @@ class PublishProductUseCase:
                             "title": source_title,
                             "status": "failed",
                             "error": error_message,
+                            "rollout_flags": deepcopy(self._rollout_flags_artifact),
                         }
                     )
+                    self.item_results[-1].update(flow_artifact)
+                    self.item_results[-1].update(resolution_artifact)
+                    if policy_artifact:
+                        self.item_results[-1].update(policy_artifact)
+                    if schema_contract_artifact:
+                        self.item_results[-1].update(schema_contract_artifact)
                     continue
             previous_error_count = len(self.errors)
-            self._current_cause_codes = []
             success = self._publish_one(product, category_id)
             item_result: dict[str, Any] = {
                 "index": index,
                 "sku": product.sku,
                 "title": product.title,
                 "status": "success" if success else "failed",
+                "rollout_flags": deepcopy(self._rollout_flags_artifact),
             }
             if self._current_cause_codes:
                 item_result["cause_codes"] = list(dict.fromkeys(self._current_cause_codes))
+            if self._current_preflight_artifact:
+                item_result.update(self._current_preflight_artifact)
+            if self._current_cause_taxonomy:
+                item_result["cause_taxonomy"] = deepcopy(self._current_cause_taxonomy)
+            if self._current_validation_decision:
+                item_result["validation_decision"] = deepcopy(self._current_validation_decision)
+            if isinstance(self._current_image_diagnostics, dict):
+                item_result["image_diagnostics"] = deepcopy(self._current_image_diagnostics)
+            if isinstance(self._current_shipping_policy, dict):
+                item_result["shipping_policy"] = deepcopy(self._current_shipping_policy)
             new_errors = self.errors[previous_error_count:]
             if new_errors:
                 item_result["error"] = "; ".join(new_errors)
             elif not success:
                 item_result["error"] = f"{product.sku}: publish failed"
+            item_result.update(flow_artifact)
+            if self._current_flow_artifact and isinstance(item_result.get("flow_routing"), dict):
+                flow_routing_item = dict(item_result["flow_routing"])
+                flow_routing_item.update(self._current_flow_artifact)
+                item_result["flow_routing"] = flow_routing_item
+            item_result.update(resolution_artifact)
+            if policy_artifact:
+                item_result.update(policy_artifact)
+            if schema_contract_artifact:
+                item_result.update(schema_contract_artifact)
             self.item_results.append(item_result)
 
         # Batch submit fiscal information for all published products
@@ -413,6 +1126,8 @@ class PublishProductUseCase:
             "clips_failed": clip_failed,
             "clips_details": self.clip_results,
             "item_results": self.item_results,
+            "flow_routing": flow_routing,
+            "rollout_flags": deepcopy(self._rollout_flags_artifact),
         }
 
     def _build_product_from_dict(self, data: dict[str, Any]) -> Product:
@@ -542,6 +1257,18 @@ class PublishProductUseCase:
     def _publish_one(self, product: Product, category_id: str) -> bool:
         """Publish a single product."""
         logger.info(f"Publishing product: {product.sku} (title: {product.title[:50]}...)")
+        self._current_cause_codes = []
+        self._current_cause_taxonomy = []
+        self._current_validation_decision = {}
+        self._current_publish_category_id = category_id
+        self._current_publish_sku = str(product.sku).strip() if product.sku else None
+        self._current_variation_reference_attributes = []
+        selected_flow = self._resolve_selected_flow()
+        self._current_flow_artifact = {
+            "payload_builder": (
+                "user_products_pxv" if selected_flow == "user_products" else "legacy_variations"
+            )
+        }
 
         # Build attributes using attribute builder service
         (
@@ -593,7 +1320,7 @@ class PublishProductUseCase:
             logger.warning(f"No pictures for {product.sku}")
 
         # Determine shipping mode from config
-        shipping_config = self._build_shipping_config()
+        shipping_config = self._build_shipping_config(category_id=category_id)
 
         logger.debug(f"Shipping config for {product.sku}: {shipping_config}")
 
@@ -647,17 +1374,65 @@ class PublishProductUseCase:
                 for index, attr in enumerate(ml_attributes)
                 if index not in marker_indexes_to_remove
             ]
+        self._current_variation_reference_attributes = [
+            attr for attr in ml_attributes if isinstance(attr, dict)
+        ]
 
+        variation_attr_ids = set(variation_candidates.keys())
         variations: list[dict[str, Any]] = []
-        if variation_candidates:
-            variations = self._build_variations_from_candidates(
-                variation_candidates=variation_candidates,
-                quantity=product.available_quantity,
-                price=product.price,
-                picture_ids=picture_ids,
+        user_products_payload: dict[str, Any] | None = None
+        if selected_flow == "legacy":
+            if variation_candidates:
+                variations = self._build_variations_from_candidates(
+                    variation_candidates=variation_candidates,
+                    quantity=product.available_quantity,
+                    price=product.price,
+                    picture_ids=picture_ids,
+                )
+                if variations:
+                    legacy_variation_attr_ids = {
+                        attr.get("id")
+                        for variation in variations
+                        if isinstance(variation, dict)
+                        for attr in variation.get("attribute_combinations", [])
+                        if isinstance(attr, dict) and isinstance(attr.get("id"), str)
+                    }
+                    ml_attributes = [
+                        attr
+                        for attr in ml_attributes
+                        if not (
+                            isinstance(attr, dict)
+                            and isinstance(attr.get("id"), str)
+                            and attr["id"] in legacy_variation_attr_ids
+                        )
+                    ]
+        elif selected_flow == "user_products":
+            try:
+                user_products_payload = self._build_user_products_payload(
+                    product=product,
+                    ml_attributes=ml_attributes,
+                    variation_candidates=variation_candidates,
+                    quantity=product.available_quantity,
+                    price=product.price,
+                    picture_ids=picture_ids,
+                )
+            except ValueError as error:
+                message = f"User-products flow blocked: {error}"
+                logger.error(f"{product.sku}: {message}")
+                self._current_cause_codes = ["flow_routing.user_products_payload"]
+                self.errors.append(f"{product.sku}: {message}")
+                self.failed += 1
+                return False
+
+            self._current_flow_artifact.update(
+                {
+                    "selected_model": user_products_payload.get("selected_model"),
+                    "up_family_name": user_products_payload.get("family_name"),
+                    "up_variation_count": len(user_products_payload.get("variations", [])),
+                    "up_attribute_ids": user_products_payload.get("variation_attribute_ids", []),
+                }
             )
-            if variations:
-                variation_attr_ids = set(variation_candidates.keys())
+            if variation_attr_ids:
                 ml_attributes = [
                     attr
                     for attr in ml_attributes
@@ -733,8 +1508,14 @@ class PublishProductUseCase:
         channels = core_defaults.get("channels")
         if channels:
             item["channels"] = channels
-        if variations:
+        if selected_flow == "legacy" and variations:
             item["variations"] = variations
+        if selected_flow == "user_products" and user_products_payload:
+            item["family_name"] = user_products_payload["family_name"]
+            item["user_product"] = {
+                "selected_model": user_products_payload["selected_model"],
+                "variations": user_products_payload["variations"],
+            }
 
         # Log shipping section before validation
         logger.info(
@@ -772,108 +1553,244 @@ class PublishProductUseCase:
             self.failed += 1
             return False
 
+        preflight_violations = self._run_schema_contract_preflight(
+            category_id=category_id,
+            item=item,
+        )
+        if preflight_violations:
+            message = f"Schema preflight failed: {'; '.join(preflight_violations)}"
+            logger.error(f"{product.sku}: {message}")
+            self._current_cause_codes = ["schema_contract.preflight"]
+            self._current_cause_taxonomy = [
+                {
+                    "type": "error",
+                    "code": "schema_contract.preflight",
+                    "message": message,
+                    "classification": "blocking_error",
+                }
+            ]
+            self._current_validation_decision = self._build_validation_decision(
+                self._current_cause_taxonomy
+            )
+            self.errors.append(f"{product.sku}: {message}")
+            self.failed += 1
+            return False
+
+        self._current_image_diagnostics = self._run_image_diagnostic_preflight(
+            sku=product.sku,
+            title=product.title,
+            category_id=category_id,
+            picture_urls=picture_urls,
+            picture_ids=picture_ids,
+        )
+        raw_diagnostic_issues = (
+            self._current_image_diagnostics.get("issues")
+            if isinstance(self._current_image_diagnostics, dict)
+            else []
+        )
+        diagnostic_issues = (
+            [str(issue) for issue in raw_diagnostic_issues if str(issue).strip()]
+            if isinstance(raw_diagnostic_issues, list)
+            else []
+        )
+        if diagnostic_issues and self.image_diagnostics_gate_mode == "enforce":
+            message = f"Image diagnostic preflight failed: {'; '.join(diagnostic_issues)}"
+            logger.error(f"{product.sku}: {message}")
+            self._current_cause_codes = ["image_diagnostic.preflight"]
+            self._current_cause_taxonomy = [
+                {
+                    "type": "error",
+                    "code": "image_diagnostic.preflight",
+                    "message": message,
+                    "classification": "blocking_error",
+                }
+            ]
+            self._current_validation_decision = self._build_validation_decision(
+                self._current_cause_taxonomy
+            )
+            self.errors.append(f"{product.sku}: {message}")
+            self.failed += 1
+            return False
+        if diagnostic_issues:
+            logger.warning(
+                "Image diagnostic issues detected for %s but gate mode '%s' allows continuation.",
+                product.sku,
+                self.image_diagnostics_gate_mode,
+            )
+
         logger.debug(f"Full item payload for {product.sku}: {item}")
 
         # Validate
         validation_result = None
         try:
-            validation = self.publisher.validate_item(item)
+            validation = self._validate_item_for_flow(item=item, selected_flow=selected_flow)
             logger.debug(f"Validation response for {product.sku}: {validation}")
 
-            # Parse validation causes to distinguish warnings from errors
-            causes = validation.get("cause", [])
-            errors = []
-            warnings = []
-            shipping_issues = []
-            error_codes: list[str] = []
-
+            raw_causes = validation.get("cause", [])
+            causes = [cause for cause in raw_causes if isinstance(cause, dict)]
             for cause in causes:
-                cause_type = cause.get("type", "").lower()
-                cause_code = str(cause.get("code", ""))
-                cause_message = cause.get("message", "")
                 logger.debug(f"Validation cause for {product.sku}: {cause}")
+            shipping_cause_decisions = self._register_shipping_causes(causes, stage="validate")
+            cause_taxonomy = self._build_validation_cause_taxonomy(causes)
+            self._current_cause_taxonomy = cause_taxonomy
+            self._current_cause_codes = list(
+                dict.fromkeys(
+                    str(cause.get("code", "")).strip().lower()
+                    for cause in cause_taxonomy
+                    if str(cause.get("code", "")).strip()
+                )
+            )
+            self._current_validation_decision = (
+                self._build_validation_decision(cause_taxonomy) if cause_taxonomy else {}
+            )
 
-                # Check for shipping-specific issues
-                if (
-                    "shipping" in str(cause_code).lower()
-                    or "shipping" in str(cause_message).lower()
-                ):
-                    shipping_issues.append(f"{cause_code}: {cause_message}")
-
-                # Separate actual errors from warnings
-                if cause_type == "error":
-                    errors.append(f"{cause_code}: {cause_message}")
-                    if cause_code:
-                        error_codes.append(cause_code)
-                elif cause_type == "warning":
-                    warnings.append(f"{cause_code}: {cause_message}")
-
+            shipping_issues = [
+                f"{decision['code']}: {decision['message']}"
+                for decision in shipping_cause_decisions
+            ]
             # Log shipping issues
             if shipping_issues:
                 logger.info(f"Shipping validation issues for {product.sku}: {shipping_issues}")
 
-            # Log warnings (can block publishing when strict warning gate is enabled)
+            warnings = [
+                f"{cause.get('code', '')}: {cause.get('message', '')}"
+                for cause in cause_taxonomy
+                if cause.get("classification") in {"critical_warning", "informational_warning"}
+            ]
             if warnings:
                 logger.warning(f"Validation warnings for {product.sku}: {warnings}")
-                critical_validation_warnings = self._get_critical_validation_warnings(warnings)
-                if critical_validation_warnings and self.strict_attribute_warnings:
-                    summary = critical_validation_warnings[:5]
+            decision_action = str(self._current_validation_decision.get("action", "allow"))
+            classification_codes = self._current_validation_decision.get("classification_codes", {})
+            if not isinstance(classification_codes, dict):
+                classification_codes = {}
+            blocking_error_codes = classification_codes.get("blocking_error", [])
+            retryable_error_codes = classification_codes.get("retryable_error", [])
+            critical_warning_codes = classification_codes.get("critical_warning", [])
+
+            if decision_action == "block":
+                if blocking_error_codes:
+                    logger.error(
+                        "Validation failed for %s due to blocking errors: %s",
+                        product.sku,
+                        blocking_error_codes,
+                    )
+                    self.errors.append(
+                        f"{product.sku}: blocking validation errors: {blocking_error_codes}"
+                    )
+                elif retryable_error_codes:
+                    logger.error(
+                        "Strict mode blocked %s due to retryable validation errors: %s",
+                        product.sku,
+                        retryable_error_codes,
+                    )
+                    self.errors.append(
+                        f"{product.sku}: retryable validation errors blocked by strict mode: "
+                        f"{retryable_error_codes}"
+                    )
+                elif critical_warning_codes:
+                    summary = critical_warning_codes[:5]
                     logger.error(
                         "Blocking %s due to critical validation warnings (%s): %s",
                         product.sku,
-                        len(critical_validation_warnings),
+                        len(critical_warning_codes),
                         summary,
                     )
-                    self._current_cause_codes = [
-                        warning.split(":", 1)[0]
-                        for warning in critical_validation_warnings
-                        if ":" in warning
-                    ]
                     self.errors.append(
                         f"{product.sku}: critical validation warnings "
-                        f"({len(critical_validation_warnings)}): {summary}"
+                        f"({len(critical_warning_codes)}): {summary}"
                     )
-                    self.failed += 1
-                    if self.feedback:
-                        self.feedback.record_validation_result(
-                            product.sku, ml_attributes, validation
-                        )
-                    return False
-
-            # Record validation result for feedback
-            validation_result = validation
-
-            # Only fail if there are actual errors
-            if errors:
-                logger.error(f"Validation failed for {product.sku}: {errors}")
-                self._current_cause_codes = error_codes
-                self.errors.append(f"{product.sku}: {errors}")
+                else:
+                    self.errors.append(f"{product.sku}: validation blocked by decision policy")
                 self.failed += 1
-                # Record feedback
                 if self.feedback:
                     self.feedback.record_validation_result(product.sku, ml_attributes, validation)
                 return False
+
+            if decision_action == "retry":
+                logger.error(
+                    "Validation for %s returned retryable errors (controlled mode): %s",
+                    product.sku,
+                    retryable_error_codes,
+                )
+                self.errors.append(
+                    f"{product.sku}: retryable validation errors (retry suggested): "
+                    f"{retryable_error_codes}"
+                )
+                self.failed += 1
+                if self.feedback:
+                    self.feedback.record_validation_result(product.sku, ml_attributes, validation)
+                return False
+
+            blocking_shipping_causes = [
+                decision
+                for decision in shipping_cause_decisions
+                if decision.get("classification") == "blocking"
+            ]
+            if blocking_shipping_causes and decision_action == "allow":
+                summary = [f"{d['code']}: {d['message']}" for d in blocking_shipping_causes[:5]]
+                codes = [
+                    str(decision.get("code", ""))
+                    for decision in blocking_shipping_causes
+                    if str(decision.get("code", "")).strip()
+                ]
+                self._current_cause_codes = list(dict.fromkeys(codes))
+                self.errors.append(
+                    f"{product.sku}: deterministic shipping policy violation "
+                    f"({len(blocking_shipping_causes)}): {summary}"
+                )
+                self.failed += 1
+                if self.feedback:
+                    self.feedback.record_validation_result(product.sku, ml_attributes, validation)
+                return False
+
+            # Record validation result for feedback
+            validation_result = validation
         except Exception as e:
             # Try to extract error details from exception
             error_msg = str(e)
             cause_codes: list[str] = []
+            validation_exception_taxonomy: list[dict[str, str]] = []
             error_detail = None
             if hasattr(e, "response") and e.response is not None:
                 try:
                     error_detail = e.response.json()
                     error_msg = f"{error_msg} - {error_detail}"
                     # Check for shipping-specific errors
-                    causes = error_detail.get("cause", []) if isinstance(error_detail, dict) else []
+                    causes_raw = (
+                        error_detail.get("cause", []) if isinstance(error_detail, dict) else []
+                    )
+                    causes = causes_raw if isinstance(causes_raw, list) else []
+                    shipping_cause_decisions = self._register_shipping_causes(
+                        causes, stage="validate_exception"
+                    )
+                    normalized_causes = [cause for cause in causes if isinstance(cause, dict)]
+                    validation_exception_taxonomy = self._build_validation_cause_taxonomy(
+                        normalized_causes
+                    )
                     for cause in causes:
-                        cause_code = cause.get("code", "").lower()
-                        cause_message = cause.get("message", "").lower()
+                        if not isinstance(cause, dict):
+                            continue
+                        cause_code = str(cause.get("code", "")).strip()
                         if cause_code:
                             cause_codes.append(cause_code)
-                        if "shipping" in cause_code or "shipping" in cause_message:
-                            logger.error(f"Shipping validation error for {product.sku}: {cause}")
+                    for shipping_cause in shipping_cause_decisions:
+                        logger.error(
+                            "Shipping validation error for %s: [%s] %s",
+                            product.sku,
+                            shipping_cause.get("classification"),
+                            shipping_cause,
+                        )
                 except Exception:
                     error_msg = f"{error_msg} - {e.response.text[:200]}"
-            self._current_cause_codes = cause_codes
+            self._current_cause_codes = list(
+                dict.fromkeys(code.lower() for code in cause_codes if str(code).strip())
+            )
+            self._current_cause_taxonomy = validation_exception_taxonomy
+            self._current_validation_decision = (
+                self._build_validation_decision(validation_exception_taxonomy)
+                if validation_exception_taxonomy
+                else {}
+            )
             logger.error(f"Validation error for {product.sku}: {error_msg}")
             self.errors.append(f"{product.sku}: {error_msg}")
             self.failed += 1
@@ -892,7 +1809,7 @@ class PublishProductUseCase:
         published_item_id: str | None = None
         cbt_item_id: str | None = None
         try:
-            result = self.publisher.create_item(item)
+            result = self._create_item_for_flow(item=item, selected_flow=selected_flow)
             published_item_id = result.get("id")
 
             # Extract CBT parent item ID using robust extraction strategy
@@ -970,12 +1887,16 @@ class PublishProductUseCase:
             return True
         except Exception as e:
             error_msg = str(e)
+            publish_cause_codes: list[str] = []
             if hasattr(e, "response") and e.response is not None:
                 try:
                     error_detail = e.response.json()
                     error_msg = f"{error_msg} - {error_detail}"
                     # Check for shipping-specific errors
-                    causes = error_detail.get("cause", []) if isinstance(error_detail, dict) else []
+                    causes_raw = (
+                        error_detail.get("cause", []) if isinstance(error_detail, dict) else []
+                    )
+                    causes = causes_raw if isinstance(causes_raw, list) else []
                     # Record publish failure feedback
                     if self.feedback:
                         self.feedback.record_validation_result(
@@ -984,16 +1905,268 @@ class PublishProductUseCase:
                             error_detail if isinstance(error_detail, dict) else {},
                         )
                     for cause in causes:
-                        cause_code = cause.get("code", "").lower()
-                        cause_message = cause.get("message", "").lower()
-                        if "shipping" in cause_code or "shipping" in cause_message:
-                            logger.error(f"Shipping publish error for {product.sku}: {cause}")
+                        if not isinstance(cause, dict):
+                            continue
+                        cause_code = str(cause.get("code", "")).strip()
+                        if cause_code:
+                            publish_cause_codes.append(cause_code)
+                    shipping_cause_decisions = self._register_shipping_causes(
+                        causes, stage="publish_exception"
+                    )
+                    for shipping_cause in shipping_cause_decisions:
+                        logger.error(
+                            "Shipping publish error for %s: [%s] %s",
+                            product.sku,
+                            shipping_cause.get("classification"),
+                            shipping_cause,
+                        )
                 except Exception:
                     error_msg = f"{error_msg} - {e.response.text[:200]}"
+            self._current_cause_codes = list(
+                dict.fromkeys(code for code in publish_cause_codes if str(code).strip())
+            )
             logger.error(f"Publish error for {product.sku}: {error_msg}")
             self.errors.append(f"{product.sku}: {error_msg}")
             self.failed += 1
             return False
+
+    def _resolve_selected_flow(self) -> str:
+        """Resolve currently selected publish flow with legacy fallback."""
+        flow_artifact = self._get_flow_routing_artifact()
+        flow_routing = flow_artifact.get("flow_routing", {})
+        if isinstance(flow_routing, dict):
+            selected_flow = flow_routing.get("selected_flow")
+            if isinstance(selected_flow, str) and selected_flow in IMPLEMENTED_ROUTING_FLOWS:
+                return selected_flow
+        return "legacy"
+
+    def _validate_item_for_flow(
+        self, *, item: dict[str, Any], selected_flow: str
+    ) -> dict[str, Any]:
+        """Validate payload using the selected publish route."""
+        if selected_flow == "user_products":
+            validator = getattr(self.publisher, "validate_user_product_item", None)
+            if callable(validator):
+                return cast(dict[str, Any], validator(item))
+        return self.publisher.validate_item(item)
+
+    def _create_item_for_flow(self, *, item: dict[str, Any], selected_flow: str) -> dict[str, Any]:
+        """Publish payload using the selected publish route."""
+        if selected_flow == "user_products":
+            creator = getattr(self.publisher, "create_user_product_item", None)
+            if callable(creator):
+                return cast(dict[str, Any], creator(item))
+        return self.publisher.create_item(item)
+
+    @staticmethod
+    def _extract_user_products_family_name(product: Product) -> str | None:
+        """Extract user-products family name from source row attributes."""
+        aliases = {
+            "familyname",
+            "family name",
+            "familia",
+            "nome da familia",
+            "nome familia",
+        }
+        for key, raw_value in product.attributes.items():
+            normalized_key = PortugueseTextNormalizer.normalize(str(key))
+            if normalized_key not in aliases:
+                continue
+            value = str(raw_value).strip()
+            if value:
+                return value
+        return None
+
+    @staticmethod
+    def _extract_selected_model(
+        ml_attributes: list[dict[str, Any]],
+        variation_candidates: dict[str, list[dict[str, Any]]],
+    ) -> str | None:
+        """Extract deterministic MODEL value for UP flow artifacts."""
+        for attr in ml_attributes:
+            if not isinstance(attr, dict):
+                continue
+            attr_id = attr.get("id")
+            if not isinstance(attr_id, str) or attr_id.upper() != "MODEL":
+                continue
+            value_name = attr.get("value_name")
+            if isinstance(value_name, str) and value_name.strip():
+                return value_name.strip()
+            value_id = attr.get("value_id")
+            if value_id is not None and str(value_id).strip():
+                return str(value_id).strip()
+
+        for attr_id, values in variation_candidates.items():
+            if not isinstance(attr_id, str) or attr_id.upper() != "MODEL":
+                continue
+            for value in values:
+                if not isinstance(value, dict):
+                    continue
+                value_name = value.get("name")
+                if isinstance(value_name, str) and value_name.strip():
+                    return value_name.strip()
+
+        return None
+
+    def _build_user_products_payload(
+        self,
+        *,
+        product: Product,
+        ml_attributes: list[dict[str, Any]],
+        variation_candidates: dict[str, list[dict[str, Any]]],
+        quantity: int,
+        price: float,
+        picture_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Build deterministic user-products PxV payload."""
+        family_name = self._extract_user_products_family_name(product)
+        if not family_name:
+            raise ValueError(
+                "missing required field 'family_name' "
+                "(accepted headers: family_name, family name, família)."
+            )
+
+        selected_model = self._extract_selected_model(ml_attributes, variation_candidates)
+        if not selected_model:
+            raise ValueError("missing required MODEL attribute to identify selected model.")
+
+        normalized_candidates = self._normalize_variation_candidates(variation_candidates)
+        if not normalized_candidates:
+            raise ValueError("missing PxV variation candidates (allow_variations attributes).")
+        if not picture_ids:
+            raise ValueError("missing uploaded picture IDs required for PxV variations.")
+
+        combinations = list(
+            cartesian_product(*(values for _attr_id, values in normalized_candidates))
+        )
+        if len(combinations) <= 1:
+            raise ValueError("PxV requires at least two variation combinations.")
+
+        variations: list[dict[str, Any]] = []
+        for combination in combinations:
+            attributes: list[dict[str, Any]] = []
+            for (attr_id, _values), value in zip(normalized_candidates, combination, strict=True):
+                mapped = {"id": attr_id, "value_name": value["name"]}
+                value_id = value.get("id")
+                if value_id is not None:
+                    mapped["value_id"] = value_id
+                attributes.append(mapped)
+
+            variations.append(
+                {
+                    "attributes": attributes,
+                    "available_quantity": max(1, quantity),
+                    "price": price,
+                    "picture_ids": picture_ids[:10],
+                }
+            )
+
+        return {
+            "family_name": family_name,
+            "selected_model": selected_model,
+            "variation_attribute_ids": [attr_id for attr_id, _values in normalized_candidates],
+            "variations": variations,
+        }
+
+    @staticmethod
+    def _normalize_variation_candidates(
+        variation_candidates: dict[str, list[dict[str, Any]]],
+    ) -> list[tuple[str, list[dict[str, Any]]]]:
+        """Normalize and deduplicate variation candidates preserving deterministic order."""
+        normalized_candidates: list[tuple[str, list[dict[str, Any]]]] = []
+        for attr_id, values in variation_candidates.items():
+            if not isinstance(attr_id, str):
+                continue
+            normalized_attr_id = attr_id.strip()
+            if not normalized_attr_id:
+                continue
+            unique_values: list[dict[str, Any]] = []
+            seen: set[tuple[Any, Any]] = set()
+            for value in values:
+                if not isinstance(value, dict):
+                    continue
+                value_name = value.get("name")
+                if not isinstance(value_name, str):
+                    continue
+                normalized_name = value_name.strip()
+                if not normalized_name:
+                    continue
+                key = (value.get("id"), normalized_name)
+                if key in seen:
+                    continue
+                seen.add(key)
+                unique_values.append({"id": value.get("id"), "name": normalized_name})
+
+            if unique_values:
+                normalized_candidates.append((normalized_attr_id, unique_values))
+        return normalized_candidates
+
+    @staticmethod
+    def _variation_value_sort_key(value: dict[str, Any]) -> tuple[str, str]:
+        """Return deterministic sort key for variation candidate values."""
+        value_name = value.get("name")
+        value_id = value.get("id")
+        normalized_name = (
+            PortugueseTextNormalizer.normalize(str(value_name))
+            if isinstance(value_name, str)
+            else ""
+        )
+        normalized_id = str(value_id).strip() if value_id is not None else ""
+        return normalized_name, normalized_id
+
+    def _get_legacy_variation_contract(self) -> tuple[list[str], dict[str, Any]]:
+        """Return allow_variations IDs and limits for the current category."""
+        category_id = self._current_publish_category_id
+        if not category_id:
+            return [], {}
+
+        compiled = self._get_schema_contract_compiled(category_id)
+        schema_contract = compiled.get("schema_contract", {})
+        if not isinstance(schema_contract, dict):
+            return [], {}
+
+        allow_variations_raw = schema_contract.get("allow_variations_attribute_ids", [])
+        allow_variations_attribute_ids = []
+        if isinstance(allow_variations_raw, list):
+            allow_variations_attribute_ids = [
+                attr_id.strip()
+                for attr_id in allow_variations_raw
+                if isinstance(attr_id, str) and attr_id.strip()
+            ]
+
+        limits = schema_contract.get("limits", {})
+        if not isinstance(limits, dict):
+            limits = {}
+
+        return allow_variations_attribute_ids, limits
+
+    def _get_mapped_variation_candidate(self, attr_id: str) -> dict[str, Any] | None:
+        """Resolve mapped attribute payload as preferred variation candidate."""
+        for attribute in self._current_variation_reference_attributes:
+            if not isinstance(attribute, dict):
+                continue
+            raw_attr_id = attribute.get("id")
+            if not isinstance(raw_attr_id, str) or raw_attr_id != attr_id:
+                continue
+
+            value_name = attribute.get("value_name")
+            value_id = attribute.get("value_id")
+            if isinstance(value_name, str) and value_name.strip():
+                return {"id": value_id, "name": value_name.strip()}
+            if value_id is not None and str(value_id).strip():
+                normalized_value_id = str(value_id).strip()
+                return {"id": value_id, "name": normalized_value_id}
+        return None
+
+    def _build_legacy_variation_seller_sku(self, index: int) -> str | None:
+        """Build deterministic SELLER_SKU value for legacy variation attributes."""
+        base_sku = self._current_publish_sku
+        if not isinstance(base_sku, str) or not base_sku.strip():
+            return None
+        normalized_sku = re.sub(r"\s+", "-", base_sku.strip())
+        if not normalized_sku:
+            return None
+        return f"{normalized_sku}-{index:03d}"
 
     def get_stats(self) -> dict[str, Any]:
         """Get publishing statistics."""
@@ -1049,45 +2222,92 @@ class PublishProductUseCase:
         picture_ids: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         """Build variations payload from candidate values extracted during mapping."""
-        if not picture_ids:
+        normalized_candidates = self._normalize_variation_candidates(variation_candidates)
+        if not normalized_candidates:
+            return []
+
+        allow_variations_attribute_ids, limits = self._get_legacy_variation_contract()
+        candidates_by_id = dict(normalized_candidates)
+        preferred_attr_ids = [
+            attr_id for attr_id in allow_variations_attribute_ids if attr_id in candidates_by_id
+        ]
+        variation_attr_ids = preferred_attr_ids or [
+            attr_id for attr_id, _values in normalized_candidates
+        ]
+
+        grouped_candidates: list[tuple[str, list[dict[str, Any]]]] = []
+        for attr_id in variation_attr_ids:
+            values = list(candidates_by_id.get(attr_id, []))
+            if not values:
+                continue
+            values = sorted(values, key=self._variation_value_sort_key)
+            mapped_candidate = self._get_mapped_variation_candidate(attr_id)
+            if mapped_candidate is not None:
+                normalized_mapped_name = PortugueseTextNormalizer.normalize(
+                    mapped_candidate["name"]
+                )
+                preferred_index = next(
+                    (
+                        index
+                        for index, candidate in enumerate(values)
+                        if PortugueseTextNormalizer.normalize(str(candidate.get("name", "")))
+                        == normalized_mapped_name
+                    ),
+                    None,
+                )
+                if preferred_index is not None:
+                    preferred_candidate = values.pop(preferred_index)
+                    if (
+                        preferred_candidate.get("id") is None
+                        and mapped_candidate.get("id") is not None
+                    ):
+                        preferred_candidate["id"] = mapped_candidate.get("id")
+                    values.insert(0, preferred_candidate)
+                else:
+                    values.insert(0, mapped_candidate)
+            grouped_candidates.append((attr_id, values))
+
+        if not grouped_candidates:
+            return []
+
+        max_pictures = limits.get("max_pictures")
+        max_picture_count = 10
+        if isinstance(max_pictures, int) and max_pictures >= 0:
+            max_picture_count = min(max_picture_count, max_pictures)
+
+        unique_picture_ids = list(dict.fromkeys(picture_ids or []))
+        scoped_picture_ids = unique_picture_ids[:max_picture_count]
+        if not scoped_picture_ids:
             logger.warning(
-                "Variation candidates detected but no picture IDs are available; "
+                "Variation candidates detected but no scoped picture IDs are available; "
                 "skipping variations payload."
             )
             return []
 
-        normalized_candidates: list[tuple[str, list[dict[str, Any]]]] = []
-        for attr_id, values in variation_candidates.items():
-            unique_values: list[dict[str, Any]] = []
-            seen: set[tuple[Any, Any]] = set()
-            for value in values:
-                if not isinstance(value, dict):
-                    continue
-                value_name = value.get("name")
-                if not isinstance(value_name, str) or not value_name:
-                    continue
-                key = (value.get("id"), value_name)
-                if key in seen:
-                    continue
-                seen.add(key)
-                unique_values.append({"id": value.get("id"), "name": value_name})
-
-            if unique_values:
-                normalized_candidates.append((attr_id, unique_values))
-
-        if not normalized_candidates:
+        max_variations_allowed = limits.get("max_variations_allowed")
+        if (
+            isinstance(max_variations_allowed, int)
+            and max_variations_allowed >= 0
+            and max_variations_allowed < 2
+        ):
+            logger.info(
+                "Category variation limit %s prevents legacy variation payload generation.",
+                max_variations_allowed,
+            )
             return []
 
-        combinations = list(
-            cartesian_product(*(values for _attr_id, values in normalized_candidates))
-        )
+        combinations = list(cartesian_product(*(values for _attr_id, values in grouped_candidates)))
         if len(combinations) <= 1:
             return []
+        if isinstance(max_variations_allowed, int) and max_variations_allowed >= 2:
+            combinations = combinations[:max_variations_allowed]
+            if len(combinations) <= 1:
+                return []
 
         variations: list[dict[str, Any]] = []
-        for combination in combinations:
+        for index, combination in enumerate(combinations, start=1):
             attribute_combinations = []
-            for (attr_id, _values), value in zip(normalized_candidates, combination, strict=True):
+            for (attr_id, _values), value in zip(grouped_candidates, combination, strict=True):
                 mapped = {"id": attr_id, "value_name": value["name"]}
                 value_id = value.get("id")
                 if value_id is not None:
@@ -1098,8 +2318,11 @@ class PublishProductUseCase:
                 "attribute_combinations": attribute_combinations,
                 "available_quantity": max(1, quantity),
                 "price": price,
-                "picture_ids": picture_ids[:10],
+                "picture_ids": scoped_picture_ids,
             }
+            seller_sku = self._build_legacy_variation_seller_sku(index)
+            if seller_sku:
+                variation["attributes"] = [{"id": "SELLER_SKU", "value_name": seller_sku}]
 
             variations.append(variation)
 
@@ -1138,6 +2361,621 @@ class PublishProductUseCase:
 
         return [url_to_id[url] for url in picture_urls if url in url_to_id]
 
+    def _get_policy_category_data(self, category_id: str) -> dict[str, Any]:
+        """Fetch category metadata for policy compilation."""
+        getter = getattr(self.category_resolver, "get_category_data", None)
+        if callable(getter):
+            try:
+                result = getter(category_id)
+            except Exception as error:
+                logger.warning(
+                    "Could not fetch category metadata for policy snapshot %s: %s",
+                    category_id,
+                    error,
+                )
+                return {}
+            if isinstance(result, dict):
+                return result
+            logger.warning(
+                "Unexpected category metadata payload for policy snapshot %s: %s",
+                category_id,
+                type(result).__name__,
+            )
+            return {}
+
+        cached_getter = getattr(self.category_resolver, "_get_category_cached", None)
+        if callable(cached_getter):
+            try:
+                result = cached_getter(category_id)
+            except Exception as error:
+                logger.warning(
+                    "Could not fetch cached category metadata for policy snapshot %s: %s",
+                    category_id,
+                    error,
+                )
+                return {}
+            if isinstance(result, dict):
+                return result
+
+        logger.warning(
+            "Category resolver does not expose category metadata for policy snapshot %s",
+            category_id,
+        )
+        return {}
+
+    def _build_policy_attribute_rows(self, attributes: list[Any]) -> list[dict[str, Any]]:
+        """Normalize arbitrary attribute metadata payloads into dict rows."""
+        normalized_rows: list[dict[str, Any]] = []
+        for attribute in attributes:
+            if isinstance(attribute, dict):
+                attr_id = attribute.get("id")
+                if isinstance(attr_id, str) and attr_id:
+                    row: dict[str, Any] = {"id": attr_id, "tags": attribute.get("tags", {})}
+                    raw_values = attribute.get("values")
+                    normalized_values: list[dict[str, str]] = []
+                    if isinstance(raw_values, list):
+                        for raw_value in raw_values:
+                            if not isinstance(raw_value, dict):
+                                continue
+                            value_row: dict[str, str] = {}
+                            value_id = raw_value.get("id")
+                            value_name = raw_value.get("name")
+                            if value_id is not None:
+                                normalized_value_id = str(value_id).strip()
+                                if normalized_value_id:
+                                    value_row["id"] = normalized_value_id
+                            if value_name is not None:
+                                normalized_value_name = str(value_name).strip()
+                                if normalized_value_name:
+                                    value_row["name"] = normalized_value_name
+                            if value_row:
+                                normalized_values.append(value_row)
+                    if normalized_values:
+                        row["values"] = normalized_values
+                    normalized_rows.append(row)
+                continue
+
+            attr_id = getattr(attribute, "id", None)
+            if not isinstance(attr_id, str) or not attr_id:
+                continue
+            raw_tags = getattr(attribute, "tags", {})
+            if isinstance(raw_tags, set):
+                tags_payload: Any = sorted(raw_tags)
+            else:
+                tags_payload = raw_tags
+            row = {"id": attr_id, "tags": tags_payload}
+
+            raw_values = getattr(attribute, "values", None)
+            normalized_values = []
+            if isinstance(raw_values, list):
+                for raw_value in raw_values:
+                    if not isinstance(raw_value, dict):
+                        continue
+                    fallback_value_row: dict[str, str] = {}
+                    value_id = raw_value.get("id")
+                    value_name = raw_value.get("name")
+                    if value_id is not None:
+                        normalized_value_id = str(value_id).strip()
+                        if normalized_value_id:
+                            fallback_value_row["id"] = normalized_value_id
+                    if value_name is not None:
+                        normalized_value_name = str(value_name).strip()
+                        if normalized_value_name:
+                            fallback_value_row["name"] = normalized_value_name
+                    if fallback_value_row:
+                        normalized_values.append(fallback_value_row)
+            else:
+                allowed_values = getattr(attribute, "allowed_values", None)
+                if isinstance(allowed_values, set):
+                    normalized_values = [
+                        {"name": str(value).strip()}
+                        for value in sorted(allowed_values)
+                        if str(value).strip()
+                    ]
+
+            if normalized_values:
+                row["values"] = normalized_values
+            normalized_rows.append(row)
+
+        return normalized_rows
+
+    def _get_policy_attributes(self, category_id: str) -> list[dict[str, Any]]:
+        """Fetch category attributes for policy compilation."""
+        getter = getattr(self.category_resolver, "get_all_attributes", None)
+        if callable(getter):
+            try:
+                result = getter(category_id)
+            except Exception as error:
+                logger.warning(
+                    "Could not fetch category attributes for policy snapshot %s: %s",
+                    category_id,
+                    error,
+                )
+            else:
+                if isinstance(result, list):
+                    return self._build_policy_attribute_rows(result)
+                logger.warning(
+                    "Unexpected category attributes payload for policy snapshot %s: %s",
+                    category_id,
+                    type(result).__name__,
+                )
+                return []
+
+        metadata_getter = getattr(self.category_resolver, "get_attribute_metadata", None)
+        if callable(metadata_getter):
+            try:
+                result = metadata_getter(category_id)
+            except Exception as error:
+                logger.warning(
+                    "Could not fetch attribute metadata for policy snapshot %s: %s",
+                    category_id,
+                    error,
+                )
+                return []
+            if isinstance(result, list):
+                return self._build_policy_attribute_rows(result)
+            logger.warning(
+                "Unexpected attribute metadata payload for policy snapshot %s: %s",
+                category_id,
+                type(result).__name__,
+            )
+            return []
+
+        logger.warning(
+            "Category resolver does not expose attributes for policy snapshot %s",
+            category_id,
+        )
+        return []
+
+    def _get_policy_artifact(self, category_id: str) -> dict[str, Any]:
+        """Compile and cache policy hash/summary for a category."""
+        cached = self._category_policy_cache.get(category_id)
+        if cached is not None:
+            return cached
+
+        category_data = self._get_policy_category_data(category_id)
+        attributes = self._get_policy_attributes(category_id)
+        listing_types = self._get_available_listing_type_ids(category_id)
+        sale_terms = list(self._get_category_sale_terms_map(category_id).values())
+        try:
+            compiled = compile_policy_snapshot(
+                category_id=category_id,
+                category_data=category_data,
+                attributes=attributes,
+                listing_types=listing_types,
+                sale_terms=sale_terms,
+            )
+        except Exception as error:
+            logger.error("Failed to compile policy snapshot for %s: %s", category_id, error)
+            compiled = compile_policy_snapshot(
+                category_id=category_id,
+                category_data={},
+                attributes=[],
+                listing_types=[],
+                sale_terms=[],
+            )
+
+        artifact = {
+            "policy_hash": compiled["policy_hash"],
+            "policy_summary": compiled["policy_summary"],
+        }
+        self._category_policy_cache[category_id] = artifact
+        return artifact
+
+    def _get_schema_contract_compiled(self, category_id: str) -> dict[str, Any]:
+        """Compile and cache schema contract for a category."""
+        cached = self._category_schema_contract_cache.get(category_id)
+        if cached is not None:
+            return cached
+
+        category_data = self._get_policy_category_data(category_id)
+        attributes = self._get_policy_attributes(category_id)
+        sale_terms = list(self._get_category_sale_terms_map(category_id).values())
+
+        try:
+            compiled = compile_schema_contract(
+                category_id=category_id,
+                category_data=category_data,
+                attributes=attributes,
+                sale_terms=sale_terms,
+            )
+        except Exception as error:
+            logger.error("Failed to compile schema contract for %s: %s", category_id, error)
+            compiled = compile_schema_contract(
+                category_id=category_id,
+                category_data={},
+                attributes=[],
+                sale_terms=[],
+            )
+
+        summary = compiled.get("schema_contract_summary", {})
+        if isinstance(summary, dict):
+            if summary.get("required_attribute_count", 0) == 0:
+                logger.info(
+                    "Schema contract %s has no deterministic required attributes metadata.",
+                    category_id,
+                )
+            if (
+                summary.get("max_pictures") is None
+                and summary.get("max_variations_allowed") is None
+            ):
+                logger.info(
+                    "Schema contract %s has no category limits metadata for pictures/variations.",
+                    category_id,
+                )
+
+        self._category_schema_contract_cache[category_id] = compiled
+        return compiled
+
+    def _get_schema_contract_artifact(self, category_id: str) -> dict[str, Any]:
+        """Return compact schema contract metadata for reports."""
+        compiled = self._get_schema_contract_compiled(category_id)
+        artifact: dict[str, Any] = {}
+        schema_contract_hash = compiled.get("schema_contract_hash")
+        if isinstance(schema_contract_hash, str) and schema_contract_hash:
+            artifact["schema_contract_hash"] = schema_contract_hash
+        summary = compiled.get("schema_contract_summary")
+        if isinstance(summary, dict):
+            artifact["schema_contract_summary"] = summary
+        return artifact
+
+    def _run_image_diagnostic_preflight(
+        self,
+        *,
+        sku: str,
+        title: str,
+        category_id: str,
+        picture_urls: list[str],
+        picture_ids: list[str],
+    ) -> dict[str, Any]:
+        """Run optional image diagnostics before validate/publish gates."""
+        artifact: dict[str, Any] = {
+            "status": "unavailable",
+            "available": False,
+            "checked": 0,
+            "issues": [],
+            "results": [],
+        }
+
+        if self.image_diagnostics_gate_mode == "disabled":
+            artifact["status"] = "skipped"
+            artifact["message"] = (
+                "Image diagnostics gate disabled by rollout flag " "'image_diagnostics.gate_mode'."
+            )
+            return self._annotate_image_diagnostics_artifact(artifact)
+
+        diagnose_images = getattr(self.image_uploader, "diagnose_images", None)
+        if not callable(diagnose_images):
+            message = (
+                "Image diagnostics unavailable: image uploader does not expose diagnose_images."
+            )
+            logger.warning(message)
+            artifact["message"] = message
+            return self._annotate_image_diagnostics_artifact(artifact)
+
+        try:
+            diagnostic_result = diagnose_images(
+                sku=sku,
+                category_id=category_id,
+                title=title,
+                picture_urls=picture_urls,
+                picture_ids=picture_ids,
+            )
+        except Exception as error:
+            message = f"Image diagnostics preflight failed for {sku}: {error}"
+            logger.warning(message)
+            artifact["message"] = message
+            return self._annotate_image_diagnostics_artifact(artifact)
+
+        if isinstance(diagnostic_result, dict):
+            return self._annotate_image_diagnostics_artifact(diagnostic_result)
+
+        message = (
+            "Image diagnostics preflight returned unexpected payload type: "
+            f"{type(diagnostic_result).__name__}"
+        )
+        logger.warning(message)
+        artifact["message"] = message
+        return self._annotate_image_diagnostics_artifact(artifact)
+
+    @staticmethod
+    def _normalize_identifier_text(value: Any) -> str | None:
+        """Normalize a generic identifier/fallback value."""
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        normalized_text = PortugueseTextNormalizer.normalize(text)
+        if normalized_text in IDENTIFIER_EMPTY_TOKENS:
+            return None
+        return text
+
+    def _normalize_gtin_value(self, value: Any) -> str | None:
+        """Normalize GTIN into digits-only representation."""
+        text = self._normalize_identifier_text(value)
+        if text is None:
+            return None
+        digits_only = re.sub(r"\D", "", text)
+        return digits_only or None
+
+    def _collect_identifier_state(self, attributes: Any) -> dict[str, Any]:
+        """Collect and normalize GTIN/EMPTY_GTIN_REASON state from attribute payload."""
+        state: dict[str, Any] = {
+            "gtin": None,
+            "gtin_attribute_present": False,
+            "empty_gtin_reason_attribute_present": False,
+            "empty_gtin_reason_value_id": None,
+            "empty_gtin_reason_value_name": None,
+            "has_identifier_attribute": False,
+        }
+        if not isinstance(attributes, list):
+            return state
+
+        for attribute in attributes:
+            if not isinstance(attribute, dict):
+                continue
+            attribute_id = attribute.get("id")
+            if not isinstance(attribute_id, str) or not attribute_id:
+                continue
+            normalized_id = attribute_id.strip().upper()
+
+            if normalized_id == "GTIN":
+                state["gtin_attribute_present"] = True
+                candidate_raw = attribute.get("value_name")
+                if candidate_raw in (None, ""):
+                    candidate_raw = attribute.get("value_id")
+                normalized_gtin = self._normalize_gtin_value(candidate_raw)
+                if normalized_gtin:
+                    state["gtin"] = normalized_gtin
+                    attribute["value_name"] = normalized_gtin
+                    if "value_id" in attribute:
+                        attribute["value_id"] = normalized_gtin
+                continue
+
+            if normalized_id != "EMPTY_GTIN_REASON":
+                continue
+
+            state["empty_gtin_reason_attribute_present"] = True
+            normalized_reason_id = self._normalize_identifier_text(attribute.get("value_id"))
+            normalized_reason_name = self._normalize_identifier_text(attribute.get("value_name"))
+            if normalized_reason_id is not None:
+                state["empty_gtin_reason_value_id"] = normalized_reason_id
+                attribute["value_id"] = normalized_reason_id
+            if normalized_reason_name is not None:
+                state["empty_gtin_reason_value_name"] = normalized_reason_name
+                attribute["value_name"] = normalized_reason_name
+
+        state["has_identifier_attribute"] = bool(
+            state["gtin_attribute_present"] or state["empty_gtin_reason_attribute_present"]
+        )
+        return state
+
+    def _is_valid_empty_gtin_reason(
+        self,
+        *,
+        state: dict[str, Any],
+        allowed_reason_ids: set[str],
+        allowed_reason_names: set[str],
+    ) -> bool:
+        """Validate fallback reason against local schema metadata when available."""
+        reason_id = state.get("empty_gtin_reason_value_id")
+        reason_name = state.get("empty_gtin_reason_value_name")
+        has_reason = bool(reason_id or reason_name)
+        if not has_reason:
+            return False
+
+        if not allowed_reason_ids and not allowed_reason_names:
+            return True
+        if isinstance(reason_id, str) and reason_id in allowed_reason_ids:
+            return True
+        if isinstance(reason_name, str):
+            normalized_name = PortugueseTextNormalizer.normalize(reason_name)
+            if normalized_name in allowed_reason_names:
+                return True
+        return False
+
+    def _validate_identifier_state(
+        self,
+        *,
+        scope: str,
+        state: dict[str, Any],
+        gtin_required: bool,
+        fallback_reason_available: bool,
+        enforce_identifier_coverage: bool,
+        allowed_reason_ids: set[str],
+        allowed_reason_names: set[str],
+    ) -> list[str]:
+        """Validate identifier coherence for item/variation scope."""
+        violations: list[str] = []
+        gtin = state.get("gtin")
+        has_gtin = isinstance(gtin, str) and bool(gtin)
+        has_reason = bool(
+            state.get("empty_gtin_reason_value_id") or state.get("empty_gtin_reason_value_name")
+        )
+
+        if has_gtin and isinstance(gtin, str) and not (8 <= len(gtin) <= 14):
+            violations.append(f"{scope} GTIN must contain between 8 and 14 digits")
+
+        if enforce_identifier_coverage and not has_gtin and not has_reason:
+            violations.append(f"{scope} missing GTIN/EMPTY_GTIN_REASON identifier coverage")
+            return violations
+
+        if gtin_required and not has_gtin:
+            if fallback_reason_available:
+                if not has_reason:
+                    violations.append(f"{scope} missing GTIN; EMPTY_GTIN_REASON is required")
+                    return violations
+                if not self._is_valid_empty_gtin_reason(
+                    state=state,
+                    allowed_reason_ids=allowed_reason_ids,
+                    allowed_reason_names=allowed_reason_names,
+                ):
+                    violations.append(f"{scope} has invalid EMPTY_GTIN_REASON metadata")
+            else:
+                violations.append(f"{scope} missing GTIN required by schema contract")
+            return violations
+
+        if has_reason and not self._is_valid_empty_gtin_reason(
+            state=state,
+            allowed_reason_ids=allowed_reason_ids,
+            allowed_reason_names=allowed_reason_names,
+        ):
+            violations.append(f"{scope} has invalid EMPTY_GTIN_REASON metadata")
+
+        return violations
+
+    def _run_identifier_preflight_checks(
+        self,
+        *,
+        schema_contract: dict[str, Any],
+        item: dict[str, Any],
+    ) -> tuple[list[str], dict[str, Any]]:
+        """Run deterministic identifier preflight checks and return report artifact."""
+        identifier_contract = schema_contract.get("identifier_contract", {})
+        if not isinstance(identifier_contract, dict):
+            identifier_contract = {}
+
+        gtin_required = bool(identifier_contract.get("gtin_required"))
+        empty_gtin_reason_attribute_id = identifier_contract.get("empty_gtin_reason_attribute_id")
+        fallback_reason_available = isinstance(empty_gtin_reason_attribute_id, str) and bool(
+            empty_gtin_reason_attribute_id
+        )
+        allowed_reason_ids = {
+            str(value).strip()
+            for value in identifier_contract.get("empty_gtin_reason_allowed_value_ids", [])
+            if str(value).strip()
+        }
+        allowed_reason_names = {
+            PortugueseTextNormalizer.normalize(str(value))
+            for value in identifier_contract.get("empty_gtin_reason_allowed_value_names", [])
+            if str(value).strip()
+        }
+
+        item_state = self._collect_identifier_state(item.get("attributes"))
+        variations = item.get("variations", [])
+        variation_states: list[dict[str, Any]] = []
+        if isinstance(variations, list):
+            for variation in variations:
+                attrs = variation.get("attributes") if isinstance(variation, dict) else None
+                variation_states.append(self._collect_identifier_state(attrs))
+
+        variation_identifier_present = any(
+            bool(state.get("has_identifier_attribute")) for state in variation_states
+        )
+
+        identifier_violations: list[str] = []
+        if variation_identifier_present:
+            for index, state in enumerate(variation_states, start=1):
+                identifier_violations.extend(
+                    self._validate_identifier_state(
+                        scope=f"Variation {index}",
+                        state=state,
+                        gtin_required=gtin_required,
+                        fallback_reason_available=fallback_reason_available,
+                        enforce_identifier_coverage=True,
+                        allowed_reason_ids=allowed_reason_ids,
+                        allowed_reason_names=allowed_reason_names,
+                    )
+                )
+        else:
+            identifier_violations.extend(
+                self._validate_identifier_state(
+                    scope="Item",
+                    state=item_state,
+                    gtin_required=gtin_required,
+                    fallback_reason_available=fallback_reason_available,
+                    enforce_identifier_coverage=False,
+                    allowed_reason_ids=allowed_reason_ids,
+                    allowed_reason_names=allowed_reason_names,
+                )
+            )
+
+        artifact = {
+            "checked": True,
+            "gtin_required": gtin_required,
+            "fallback_reason_available": fallback_reason_available,
+            "variation_count": len(variations) if isinstance(variations, list) else 0,
+            "variation_identifier_present": variation_identifier_present,
+            "item_has_gtin": bool(item_state.get("gtin")),
+            "item_has_empty_gtin_reason": bool(
+                item_state.get("empty_gtin_reason_value_id")
+                or item_state.get("empty_gtin_reason_value_name")
+            ),
+            "violations": identifier_violations,
+        }
+        return identifier_violations, artifact
+
+    def _run_schema_contract_preflight(
+        self,
+        *,
+        category_id: str,
+        item: dict[str, Any],
+    ) -> list[str]:
+        """Run deterministic preflight checks using compiled schema metadata."""
+        compiled = self._get_schema_contract_compiled(category_id)
+        schema_contract = compiled.get("schema_contract", {})
+        if not isinstance(schema_contract, dict):
+            self._current_preflight_artifact = {
+                "identifier_gate": {"checked": False, "violations": []}
+            }
+            return []
+
+        violations: list[str] = []
+        identifier_violations, identifier_artifact = self._run_identifier_preflight_checks(
+            schema_contract=schema_contract,
+            item=item,
+        )
+        self._current_preflight_artifact = {"identifier_gate": identifier_artifact}
+
+        required_ids_raw = schema_contract.get("required_attribute_ids", [])
+        required_ids = {attr_id for attr_id in required_ids_raw if isinstance(attr_id, str)}
+        required_ids.discard("")
+        required_ids.discard("GTIN")
+        if required_ids:
+            provided_ids = {
+                attr.get("id")
+                for attr in item.get("attributes", [])
+                if isinstance(attr, dict) and isinstance(attr.get("id"), str)
+            }
+            missing = sorted(attr_id for attr_id in required_ids if attr_id not in provided_ids)
+            if missing:
+                violations.append(f"Missing required attributes: {', '.join(missing)}")
+
+        limits = schema_contract.get("limits", {})
+        if isinstance(limits, dict):
+            pictures = item.get("pictures", [])
+            picture_count = len(pictures) if isinstance(pictures, list) else 0
+            max_pictures = limits.get("max_pictures")
+            if isinstance(max_pictures, int) and max_pictures >= 0 and picture_count > max_pictures:
+                violations.append(
+                    f"Pictures count {picture_count} exceeds category max {max_pictures}"
+                )
+
+            variations = item.get("variations", [])
+            if not isinstance(variations, list):
+                variations = []
+            if not variations:
+                user_product = item.get("user_product", {})
+                if isinstance(user_product, dict):
+                    user_product_variations = user_product.get("variations", [])
+                    if isinstance(user_product_variations, list):
+                        variations = user_product_variations
+            variation_count = len(variations)
+            max_variations_allowed = limits.get("max_variations_allowed")
+            if (
+                isinstance(max_variations_allowed, int)
+                and max_variations_allowed >= 0
+                and variation_count > max_variations_allowed
+            ):
+                violations.append(
+                    "Variations count "
+                    f"{variation_count} exceeds category max {max_variations_allowed}"
+                )
+
+        violations.extend(identifier_violations)
+        return violations
+
     def _get_available_listing_type_ids(self, category_id: str) -> list[str]:
         """Fetch available listing types for current seller and category."""
         cached = self._available_listing_types_cache.get(category_id)
@@ -1146,12 +2984,18 @@ class PublishProductUseCase:
 
         getter = getattr(self.publisher, "get_available_listing_types", None)
         if not callable(getter):
+            logger.warning(
+                "Publisher does not expose available listing types for category %s",
+                category_id,
+            )
+            self._available_listing_types_cache[category_id] = []
             return []
 
         try:
             listing_types = getter(category_id)
         except Exception as e:
             logger.warning(f"Could not fetch available listing types for {category_id}: {e}")
+            self._available_listing_types_cache[category_id] = []
             return []
 
         listing_type_ids: list[str] = []
@@ -1221,12 +3065,18 @@ class PublishProductUseCase:
 
         getter = getattr(self.publisher, "get_category_sale_terms", None)
         if not callable(getter):
+            logger.warning(
+                "Publisher does not expose category sale terms for category %s",
+                category_id,
+            )
+            self._category_sale_terms_cache[category_id] = {}
             return {}
 
         try:
             sale_terms = getter(category_id)
         except Exception as e:
             logger.warning(f"Could not fetch category sale terms for {category_id}: {e}")
+            self._category_sale_terms_cache[category_id] = {}
             return {}
 
         mapped_sale_terms: dict[str, dict[str, Any]] = {}
@@ -1485,7 +3335,7 @@ class PublishProductUseCase:
         except Exception as e:
             logger.warning(f"Could not publish description for {sku} ({item_id}): {e}")
 
-    def _build_shipping_config(self) -> dict[str, Any]:
+    def _build_shipping_config(self, category_id: str | None = None) -> dict[str, Any]:
         """Build shipping configuration from config.
 
         Uses shipping configuration from config file as the single source of truth.
@@ -1504,21 +3354,56 @@ class PublishProductUseCase:
         Returns:
             Shipping configuration dictionary
         """
-        shipping_config = self.config.get("shipping", {})
-        default_mode = shipping_config.get("default_mode", "not_specified")
-        modes_config = shipping_config.get("modes", {})
+        raw_shipping_config = self.config.get("shipping", {})
+        shipping_config = raw_shipping_config if isinstance(raw_shipping_config, dict) else {}
+        default_mode_raw = shipping_config.get("default_mode", "not_specified")
+        default_mode = str(default_mode_raw).strip() or "not_specified"
+        raw_modes = shipping_config.get("modes", {})
+        modes_config = raw_modes if isinstance(raw_modes, dict) else {}
 
-        # Determine shipping mode
-        shipping_mode = default_mode
+        requested_mode = default_mode
+        decision_source = "config.default_mode"
+        decision_reason = "Using configured default mode."
+
         if self.shipping_resolver:
-            shipping_mode = self.shipping_resolver.get_best_shipping_mode()
-            logger.info(f"Using shipping mode: {shipping_mode}")
+            try:
+                resolved_mode_raw = self.shipping_resolver.get_best_shipping_mode()
+            except Exception as error:
+                logger.warning(
+                    "Shipping resolver failed; using default mode %s: %s",
+                    default_mode,
+                    error,
+                )
+                decision_reason = "Shipping resolver failed; using default mode."
+            else:
+                resolved_mode = (
+                    str(resolved_mode_raw).strip() if resolved_mode_raw is not None else ""
+                )
+                if resolved_mode:
+                    requested_mode = resolved_mode
+                    decision_source = "shipping_resolver"
+                    decision_reason = "Resolved mode from seller shipping preferences."
+                    logger.info("Using shipping mode from resolver: %s", requested_mode)
 
-        # Get mode-specific config
-        mode_config = modes_config.get(shipping_mode, {})
+        shipping_mode = requested_mode or default_mode
+        fallback_applied = False
+        if modes_config and shipping_mode not in modes_config:
+            fallback_mode = (
+                default_mode
+                if default_mode in modes_config
+                else str(next(iter(modes_config), shipping_mode))
+            )
+            if fallback_mode != shipping_mode:
+                fallback_applied = True
+                decision_source = "config.modes_fallback"
+                decision_reason = f"Mode '{shipping_mode}' not configured; using '{fallback_mode}'."
+                shipping_mode = fallback_mode
+
+        raw_mode_config = modes_config.get(shipping_mode, {})
+        mode_config = raw_mode_config if isinstance(raw_mode_config, dict) else {}
 
         # Build complete shipping config matching ML API format
-        config_shipping: dict[str, any] = {  # type: ignore[valid-type]
+        config_shipping: dict[str, Any] = {
             "mode": shipping_mode,
             "methods": mode_config.get("methods", []),
             "tags": mode_config.get("tags", []),
@@ -1531,6 +3416,33 @@ class PublishProductUseCase:
 
         # Remove None values to keep payload clean
         config_shipping = {k: v for k, v in config_shipping.items() if v is not None}
+
+        constraints: dict[str, Any] = {"category_id": category_id}
+        if category_id:
+            policy_summary = self._get_policy_artifact(category_id).get("policy_summary")
+            if isinstance(policy_summary, dict):
+                constraints.update(
+                    {
+                        "listing_allowed": policy_summary.get("listing_allowed"),
+                        "category_status": policy_summary.get("status"),
+                    }
+                )
+
+        self._current_shipping_policy = {
+            "decision": {
+                "source": decision_source,
+                "reason": decision_reason,
+                "requested_mode": requested_mode,
+                "selected_mode": shipping_mode,
+                "default_mode": default_mode,
+                "fallback_applied": fallback_applied,
+                "mode_configured": shipping_mode in modes_config if modes_config else False,
+                "available_modes": sorted(str(mode) for mode in modes_config),
+                "constraints": constraints,
+            },
+            "payload": dict(config_shipping),
+            "cause_decisions": [],
+        }
 
         logger.info(f"Shipping config for {shipping_mode} mode: {config_shipping}")
         return config_shipping

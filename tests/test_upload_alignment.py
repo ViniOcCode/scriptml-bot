@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from mercadolivre_upload.application.attribute_builder import AttributeBuilderService
 from mercadolivre_upload.application.publish_product import PublishProductUseCase
 from mercadolivre_upload.domain.attribute_mapper import AttributeMapper
@@ -19,10 +21,28 @@ class _FakeCategoryResolver:
         self,
         metadata: list[AttributeMeta],
         conditional_attrs: list[dict[str, Any]] | None = None,
+        all_attributes: list[dict[str, Any]] | None = None,
+        settings: dict[str, Any] | None = None,
     ):
         self._metadata = metadata
         self._conditional_attrs = conditional_attrs or []
         self.last_conditional_payload: dict[str, Any] | None = None
+        if all_attributes is None:
+            normalized_attributes: list[dict[str, Any]] = []
+            for meta in metadata:
+                attribute_row: dict[str, Any] = {"id": meta.id, "tags": sorted(meta.tags)}
+                if isinstance(meta.allowed_values, set) and meta.allowed_values:
+                    attribute_row["values"] = [
+                        {"name": value} for value in sorted(meta.allowed_values)
+                    ]
+                normalized_attributes.append(attribute_row)
+            self._all_attributes = normalized_attributes
+        else:
+            self._all_attributes = all_attributes
+        base_settings = {"status": "enabled", "listing_allowed": True}
+        if isinstance(settings, dict):
+            base_settings.update(settings)
+        self._settings = base_settings
 
     def get_attribute_metadata(self, category_id: str) -> list[AttributeMeta]:
         return self._metadata
@@ -32,6 +52,17 @@ class _FakeCategoryResolver:
     ) -> list[dict[str, Any]]:
         self.last_conditional_payload = attributes
         return self._conditional_attrs
+
+    def get_category_data(self, category_id: str) -> dict[str, Any]:
+        return {
+            "id": category_id,
+            "status": "enabled",
+            "settings": dict(self._settings),
+        }
+
+    def get_all_attributes(self, category_id: str) -> list[dict[str, Any]]:
+        del category_id
+        return list(self._all_attributes)
 
 
 class _FakeCacheMapper:
@@ -239,7 +270,7 @@ def test_peso_fisico_auto_rule_does_not_match_fiscal_weight_headers() -> None:
     assert mapped == set()
 
 
-def test_cached_mapper_ignores_operational_and_unit_headers() -> None:
+def test_cached_mapper_ignores_operational_and_unit_headers_but_maps_varia_por_hint() -> None:
     mapper = CachedAttributeMapper(
         _StaticAttributeCache(
             [
@@ -270,7 +301,8 @@ def test_cached_mapper_ignores_operational_and_unit_headers() -> None:
     )
 
     assert mapper.find_attribute_by_name("Unidade de Largura") is None
-    assert mapper.find_attribute_by_name("Varia por: Cor da armação") is None
+    assert mapper.extract_variation_hint("Varia por: Cor da armação") == "cor da armacao"
+    assert mapper.find_attribute_by_name("Varia por: Cor da armação")["id"] == "FRAME_COLOR"
     assert mapper.find_attribute_by_name("Forma de envio") is None
     assert mapper.find_attribute_by_name("Largura")["id"] == "WIDTH"
 
@@ -337,6 +369,28 @@ def test_attribute_mapper_skips_operational_header_fuzzy_mapping() -> None:
     assert len(mapped_attrs) == 1
     assert mapped_attrs[0]["id"] == "SALE_FORMAT"
     assert mapped_attrs[0]["value_name"] == "Unidade"
+
+
+def test_attribute_mapper_maps_varia_por_header_and_extracts_variation_candidates() -> None:
+    mapper = AttributeMapper(similarity_threshold=0.7)
+
+    mapped_attrs, _ = mapper.map_product_attributes(
+        {"Varia por: Cor": "Azul, Verde"},
+        [{"id": "COLOR", "name": "Cor"}],
+        explicit_mappings={},
+        auto_explicit_mappings=[],
+    )
+
+    assert mapped_attrs[0] == {
+        "id": "COLOR",
+        "name": "Cor",
+        "value_name": "Azul, Verde",
+    }
+    assert mapped_attrs[1] == {
+        "_variation_candidates": {
+            "COLOR": [{"id": None, "name": "Azul"}, {"id": None, "name": "Verde"}]
+        }
+    }
 
 
 def test_listing_type_explicit_mapping_uses_gold_pro_for_premium() -> None:
@@ -679,6 +733,233 @@ def test_publish_builds_variations_from_marked_candidates() -> None:
     assert all(attr["id"] != "COLOR" for attr in created_item["attributes"])
 
 
+def test_publish_builds_variations_from_varia_por_cache_hint() -> None:
+    resolver = _FakeCategoryResolver(
+        [
+            AttributeMeta(id="COLOR", name="Cor", value_type="string", required=False),
+        ]
+    )
+    publisher = _FakePublisher(listing_types=[{"id": "gold_special"}], sale_terms=[])
+    use_case = PublishProductUseCase(
+        category_resolver=resolver,  # type: ignore[arg-type]
+        publisher=publisher,  # type: ignore[arg-type]
+        image_uploader=_FakeImageUploader(),  # type: ignore[arg-type]
+        shipping_resolver=_FixedShippingResolver("me2"),  # type: ignore[arg-type]
+        fiscal_service=None,
+        clip_uploader=None,
+        config={
+            "core_item_fields": {
+                "defaults": {
+                    "currency_id": "BRL",
+                    "buying_mode": "buy_it_now",
+                    "listing_type_id": "gold_special",
+                    "sale_terms": [],
+                }
+            },
+            "shipping": {
+                "default_mode": "me2",
+                "modes": {
+                    "me2": {
+                        "local_pick_up": False,
+                        "logistic_type": "drop_off",
+                        "methods": [],
+                        "tags": [],
+                        "dimensions": None,
+                        "free_shipping": False,
+                        "store_pick_up": False,
+                    }
+                },
+            },
+        },
+        dry_run=False,
+        min_attribute_score=0,
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+
+    cache_mapper = CachedAttributeMapper(
+        _StaticAttributeCache(
+            [
+                {
+                    "id": "COLOR",
+                    "name": "Cor",
+                    "value_type": "string",
+                    "values": [
+                        {"id": "1", "name": "Azul"},
+                        {"id": "2", "name": "Verde"},
+                    ],
+                }
+            ]
+        ),
+        "MLB123",
+    )
+    use_case._attribute_builder.set_cache_mapper(cache_mapper)  # type: ignore[attr-defined]
+
+    assert use_case._publish_one(_build_product({"Varia por: Cor": "Azul, Verde"}), "MLB123")
+    created_item = publisher.created_items[0]
+    assert [v["attribute_combinations"][0]["value_name"] for v in created_item["variations"]] == [
+        "Azul",
+        "Verde",
+    ]
+    assert all(attr["id"] != "COLOR" for attr in created_item["attributes"])
+
+
+def test_publish_legacy_variations_prefer_contract_allow_variations_ids() -> None:
+    resolver = _FakeCategoryResolver(
+        [
+            AttributeMeta(id="COLOR", name="Cor", value_type="string", required=False),
+            AttributeMeta(id="SIZE", name="Tamanho", value_type="string", required=False),
+        ],
+        all_attributes=[
+            {"id": "COLOR", "tags": {}},
+            {"id": "SIZE", "tags": {"allow_variations": True}},
+        ],
+    )
+    publisher = _FakePublisher(listing_types=[{"id": "gold_special"}], sale_terms=[])
+    use_case = PublishProductUseCase(
+        category_resolver=resolver,  # type: ignore[arg-type]
+        publisher=publisher,  # type: ignore[arg-type]
+        image_uploader=_FakeImageUploader(),  # type: ignore[arg-type]
+        shipping_resolver=_FixedShippingResolver("me2"),  # type: ignore[arg-type]
+        fiscal_service=None,
+        clip_uploader=None,
+        config={
+            "core_item_fields": {
+                "defaults": {
+                    "currency_id": "BRL",
+                    "buying_mode": "buy_it_now",
+                    "listing_type_id": "gold_special",
+                    "sale_terms": [],
+                }
+            },
+            "shipping": {
+                "default_mode": "me2",
+                "modes": {
+                    "me2": {
+                        "local_pick_up": False,
+                        "logistic_type": "drop_off",
+                        "methods": [],
+                        "tags": [],
+                        "dimensions": None,
+                        "free_shipping": False,
+                        "store_pick_up": False,
+                    }
+                },
+            },
+        },
+        dry_run=False,
+        min_attribute_score=0,
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+
+    class _VariationMarkerBuilder:
+        def build_attributes(
+            self,
+            product: Product,
+            category_id: str,
+        ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], list[str]]:
+            del product, category_id
+            return (
+                [
+                    {"id": "COLOR", "value_name": "Azul"},
+                    {"id": "SIZE", "value_name": "M"},
+                    {
+                        "_variation_candidates": {
+                            "COLOR": [
+                                {"id": "1", "name": "Azul"},
+                                {"id": "2", "name": "Verde"},
+                            ]
+                        }
+                    },
+                    {
+                        "_variation_candidates": {
+                            "SIZE": [
+                                {"id": "10", "name": "M"},
+                                {"id": "11", "name": "G"},
+                            ]
+                        }
+                    },
+                ],
+                [],
+                [],
+                [],
+            )
+
+        def set_cache_mapper(self, cache_mapper: Any) -> None:  # pragma: no cover - compat hook
+            del cache_mapper
+
+    use_case._attribute_builder = _VariationMarkerBuilder()  # type: ignore[assignment]
+
+    assert use_case._publish_one(_build_product({}), "MLB123")
+    created_item = publisher.created_items[0]
+    assert len(created_item["variations"]) == 2
+    assert all(
+        [attr["id"] for attr in variation["attribute_combinations"]] == ["SIZE"]
+        for variation in created_item["variations"]
+    )
+    assert any(attr["id"] == "COLOR" for attr in created_item["attributes"])
+    assert all(attr["id"] != "SIZE" for attr in created_item["attributes"])
+
+
+def test_publish_legacy_variations_apply_limits_picture_cap_and_seller_sku() -> None:
+    resolver = _FakeCategoryResolver(
+        [
+            AttributeMeta(id="COLOR", name="Cor", value_type="string", required=False),
+        ],
+        all_attributes=[{"id": "COLOR", "tags": {"allow_variations": True}}],
+        settings={"max_variations_allowed": 2, "max_pictures_per_item": 1},
+    )
+    publisher = _FakePublisher(listing_types=[{"id": "gold_special"}], sale_terms=[])
+    use_case = PublishProductUseCase(
+        category_resolver=resolver,  # type: ignore[arg-type]
+        publisher=publisher,  # type: ignore[arg-type]
+        image_uploader=_FakeImageUploader(),  # type: ignore[arg-type]
+        shipping_resolver=_FixedShippingResolver("me2"),  # type: ignore[arg-type]
+        fiscal_service=None,
+        clip_uploader=None,
+        config={
+            "core_item_fields": {
+                "defaults": {
+                    "currency_id": "BRL",
+                    "buying_mode": "buy_it_now",
+                    "listing_type_id": "gold_special",
+                    "sale_terms": [],
+                }
+            }
+        },
+        dry_run=False,
+        min_attribute_score=0,
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+
+    use_case._current_publish_category_id = "MLB123"
+    use_case._current_publish_sku = "SKU-1"
+    use_case._current_variation_reference_attributes = [{"id": "COLOR", "value_name": "Azul"}]
+
+    variations = use_case._build_variations_from_candidates(
+        variation_candidates={
+            "COLOR": [
+                {"id": "2", "name": "Verde"},
+                {"id": "1", "name": "Azul"},
+                {"id": "3", "name": "Preto"},
+            ]
+        },
+        quantity=1,
+        price=10.0,
+        picture_ids=["PIC-1", "PIC-2", "PIC-3"],
+    )
+
+    assert len(variations) == 2
+    assert variations[0]["attribute_combinations"][0]["value_name"] == "Azul"
+    assert all(variation["picture_ids"] == ["PIC-1"] for variation in variations)
+    assert [variation["attributes"][0]["value_name"] for variation in variations] == [
+        "SKU-1-001",
+        "SKU-1-002",
+    ]
+
+
 def test_publish_blocks_on_critical_validation_warning_by_default() -> None:
     resolver = _FakeCategoryResolver(
         [
@@ -747,6 +1028,9 @@ def test_publish_blocks_on_critical_validation_warning_by_default() -> None:
     assert publisher.created_items == []
     assert use_case.failed == 1
     assert any("critical validation warnings" in error for error in use_case.errors)
+    assert use_case._current_cause_taxonomy[0]["classification"] == "critical_warning"
+    assert use_case._current_validation_decision["action"] == "block"
+    assert use_case._current_validation_decision["mode"] == "strict"
 
 
 def test_publish_allows_critical_warning_when_strict_gate_disabled() -> None:
@@ -813,6 +1097,77 @@ def test_publish_allows_critical_warning_when_strict_gate_disabled() -> None:
 
     assert use_case._publish_one(_build_product({}), "MLB123") is True
     assert len(publisher.created_items) == 1
+    assert use_case._current_cause_taxonomy[0]["classification"] == "critical_warning"
+    assert use_case._current_validation_decision["action"] == "allow"
+
+
+def test_publish_allows_critical_warning_in_controlled_mode() -> None:
+    resolver = _FakeCategoryResolver(
+        [
+            AttributeMeta(id="BRAND", name="Marca", value_type="string", required=False),
+        ]
+    )
+
+    class _CriticalWarningPublisher(_FakePublisher):
+        def validate_item(self, item: dict[str, Any]) -> dict[str, Any]:
+            self.validated_items.append(item)
+            return {
+                "cause": [
+                    {
+                        "type": "warning",
+                        "code": "item.attributes.omitted",
+                        "message": "Attribute WIDTH with value cm was omitted.",
+                    }
+                ]
+            }
+
+    publisher = _CriticalWarningPublisher(
+        listing_types=[{"id": "gold_special"}],
+        sale_terms=[],
+    )
+    use_case = PublishProductUseCase(
+        category_resolver=resolver,  # type: ignore[arg-type]
+        publisher=publisher,  # type: ignore[arg-type]
+        image_uploader=_FakeImageUploader(),  # type: ignore[arg-type]
+        shipping_resolver=_FixedShippingResolver("me2"),  # type: ignore[arg-type]
+        fiscal_service=None,
+        clip_uploader=None,
+        config={
+            "validation_decision_mode": "controlled",
+            "core_item_fields": {
+                "defaults": {
+                    "currency_id": "BRL",
+                    "buying_mode": "buy_it_now",
+                    "listing_type_id": "gold_special",
+                    "sale_terms": [],
+                }
+            },
+            "shipping": {
+                "default_mode": "me2",
+                "modes": {
+                    "me2": {
+                        "local_pick_up": False,
+                        "logistic_type": "drop_off",
+                        "methods": [],
+                        "tags": [],
+                        "dimensions": None,
+                        "free_shipping": False,
+                        "store_pick_up": False,
+                    }
+                },
+            },
+        },
+        dry_run=False,
+        min_attribute_score=0,
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+
+    assert use_case._publish_one(_build_product({}), "MLB123") is True
+    assert len(publisher.created_items) == 1
+    assert use_case._current_cause_taxonomy[0]["classification"] == "critical_warning"
+    assert use_case._current_validation_decision["action"] == "allow"
+    assert use_case._current_validation_decision["mode"] == "controlled"
 
 
 def test_auto_na_policy_fills_optional_and_skips_non_eligible(caplog) -> None:  # type: ignore[no-untyped-def]
@@ -894,6 +1249,231 @@ def test_build_product_reads_descricao_header() -> None:
     )
 
     assert product.description == "Descrição vinda da planilha"
+
+
+@pytest.mark.parametrize(
+    ("row", "expected"),
+    [
+        (
+            {
+                "Título do anúncio": "Notebook Gamer",
+                "Preço": "4999,90",
+                "Estoque disponível": "2",
+                "Condição": "Novo",
+                "Código interno": "SKU-NOTE-01",
+                "Descrição": "Linha premium",
+            },
+            {
+                "sku": "SKU-NOTE-01",
+                "title": "Notebook gamer",
+                "price": 4999.9,
+                "quantity": 2,
+                "condition": "new",
+                "description": "Linha premium",
+            },
+        ),
+        (
+            {
+                "Title": "Camiseta Dry Fit",
+                "Price": "79.5",
+                "Stock": "12",
+                "Condition": "used",
+                "Code": "SKU-CAM-12",
+            },
+            {
+                "sku": "SKU-CAM-12",
+                "title": "Camiseta dry fit",
+                "price": 79.5,
+                "quantity": 12,
+                "condition": "used",
+                "description": "",
+            },
+        ),
+        (
+            {
+                "Título do livro": "Título incorreto",
+                "Título do anúncio": "Fone Bluetooth",
+                "Preço unitário": "129,99",
+                "Quantidade em estoque": "7",
+                "Condição": "1",
+                "SKU": "SKU-FONE-7",
+                "Descrição completa": "Com cancelamento de ruído",
+                "Varia por: Cor": "Preto, Branco",
+            },
+            {
+                "sku": "SKU-FONE-7",
+                "title": "Fone bluetooth",
+                "price": 129.99,
+                "quantity": 7,
+                "condition": "used",
+                "description": "Com cancelamento de ruído",
+            },
+        ),
+    ],
+)
+def test_build_product_handles_messy_header_variants_matrix(
+    row: dict[str, Any], expected: dict[str, Any]
+) -> None:
+    use_case = object.__new__(PublishProductUseCase)
+
+    product = PublishProductUseCase._build_product_from_dict(use_case, row)
+
+    assert product.sku == expected["sku"]
+    assert product.title == expected["title"]
+    assert product.price == expected["price"]
+    assert product.available_quantity == expected["quantity"]
+    assert product.condition == expected["condition"]
+    assert product.description == expected["description"]
+    if "Varia por: Cor" in row:
+        assert product.attributes["Varia por: Cor"] == "Preto, Branco"
+
+
+def test_execute_variation_heavy_row_surfaces_preflight_artifacts() -> None:
+    class _ResolverWithExecute(_FakeCategoryResolver):
+        def resolve_to_leaf(self, category_id: str) -> str:
+            return category_id
+
+        def find_category(self, _name: str) -> str | None:
+            return None
+
+        def find_category_with_predictor(
+            self,
+            _category_name: str,
+            _product_titles: list[str],
+            _site_id: str = "MLB",
+        ) -> str | None:
+            return None
+
+        def predict_category_from_title(self, _title: str, _site_id: str = "MLB") -> str | None:
+            return None
+
+        def is_listing_allowed(self, _category_id: str) -> bool:
+            return True
+
+    class _WarningPublisher(_FakePublisher):
+        def validate_item(self, item: dict[str, Any]) -> dict[str, Any]:
+            self.validated_items.append(item)
+            return {
+                "cause": [
+                    {
+                        "type": "warning",
+                        "code": "item.title.normalized",
+                        "message": "Title normalized for publish matrix",
+                    }
+                ]
+            }
+
+    class _DiagnosticImageUploader(_FakeImageUploader):
+        def diagnose_images(
+            self,
+            *,
+            sku: str,
+            category_id: str,
+            title: str | None,
+            picture_urls: list[str],
+            picture_ids: list[str] | None = None,
+        ) -> dict[str, Any]:
+            del sku, category_id, title, picture_ids
+            return {
+                "status": "passed",
+                "available": True,
+                "checked": len(picture_urls),
+                "issues": [],
+                "results": [],
+            }
+
+    resolver = _ResolverWithExecute(
+        [
+            AttributeMeta(id="COLOR", name="Cor", value_type="string", required=False),
+            AttributeMeta(id="GTIN", name="GTIN", value_type="string", required=False),
+        ]
+    )
+    publisher = _WarningPublisher(listing_types=[{"id": "gold_special"}], sale_terms=[])
+    use_case = PublishProductUseCase(
+        category_resolver=resolver,  # type: ignore[arg-type]
+        publisher=publisher,  # type: ignore[arg-type]
+        image_uploader=_DiagnosticImageUploader(),  # type: ignore[arg-type]
+        shipping_resolver=_FixedShippingResolver("me2"),  # type: ignore[arg-type]
+        fiscal_service=None,
+        clip_uploader=None,
+        config={
+            "core_item_fields": {
+                "defaults": {
+                    "currency_id": "BRL",
+                    "buying_mode": "buy_it_now",
+                    "listing_type_id": "gold_special",
+                    "sale_terms": [],
+                }
+            },
+            "shipping": {
+                "default_mode": "me2",
+                "modes": {
+                    "me2": {
+                        "local_pick_up": False,
+                        "logistic_type": "drop_off",
+                        "methods": [],
+                        "tags": [],
+                        "dimensions": None,
+                        "free_shipping": False,
+                        "store_pick_up": False,
+                    }
+                },
+            },
+        },
+        dry_run=False,
+        validation_only=True,
+        min_attribute_score=0,
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+
+    cache_mapper = CachedAttributeMapper(
+        _StaticAttributeCache(
+            [
+                {
+                    "id": "COLOR",
+                    "name": "Cor",
+                    "value_type": "string",
+                    "values": [
+                        {"id": "1", "name": "Azul"},
+                        {"id": "2", "name": "Verde"},
+                    ],
+                }
+            ]
+        ),
+        "MLB123",
+    )
+    use_case._attribute_builder.set_cache_mapper(cache_mapper)  # type: ignore[attr-defined]
+
+    row = {
+        "Título do anúncio": "Camiseta Esportiva",
+        "Preço de venda": "59,90",
+        "Estoque atual": "4",
+        "Condição": "Novo",
+        "Código interno": "SKU-CAM-1",
+        "Descrição completa": "Tecido dry fit",
+        "Varia por: Cor": "Azul, Verde",
+        "EAN / GTIN": "7891234567895",
+    }
+
+    result = use_case.execute([row], "MLB123")
+
+    assert result["success"] is True
+    assert result["validated"] == 1
+    item_result = result["item_results"][0]
+    assert item_result["resolution_strategy"] == "direct_id"
+    assert item_result["category_resolved_id"] == "MLB123"
+    assert item_result["identifier_gate"]["checked"] is True
+    assert item_result["image_diagnostics"]["status"] == "passed"
+    assert item_result["shipping_policy"]["decision"]["selected_mode"] == "me2"
+    assert item_result["validation_decision"]["action"] == "allow"
+
+    validated_item = publisher.validated_items[0]
+    variation_values = sorted(
+        variation["attribute_combinations"][0]["value_name"]
+        for variation in validated_item["variations"]
+    )
+    assert variation_values == ["Azul", "Verde"]
 
 
 def test_gtin_source_priority_scores_universal_code_higher_than_isbn() -> None:
