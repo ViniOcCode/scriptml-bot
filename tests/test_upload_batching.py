@@ -44,6 +44,7 @@ def _make_item_result(
     category_resolved_id: str | None = None,
     category_path: list[dict[str, object]] | None = None,
     resolution_strategy: str | None = None,
+    category_resolution_decision: dict[str, object] | None = None,
 ) -> dict[str, object]:
     result: dict[str, object] = {
         "index": index,
@@ -85,6 +86,8 @@ def _make_item_result(
         result["category_path"] = category_path
     if resolution_strategy is not None:
         result["resolution_strategy"] = resolution_strategy
+    if category_resolution_decision is not None:
+        result["category_resolution_decision"] = category_resolution_decision
     return result
 
 
@@ -155,6 +158,16 @@ def test_upload_batches_and_writes_reports(tmp_path, monkeypatch):
                     category_resolved_id="MLB-CAT",
                     category_path=[{"id": "MLB-CAT", "name": "Root"}],
                     resolution_strategy="direct_id",
+                    category_resolution_decision={
+                        "category_input": "MLB-CAT",
+                        "category_resolved_id": "MLB-CAT",
+                        "strategy": "direct_id",
+                        "predictor_attempted": False,
+                        "predictor_titles_count": 0,
+                        "predictor_matched": False,
+                        "fallback_attempted": False,
+                        "fallback_reason": None,
+                    },
                 ),
                 _make_item_result(1, "SKU002", "success"),
                 _make_item_result(2, "SKU003", "success"),
@@ -176,6 +189,26 @@ def test_upload_batches_and_writes_reports(tmp_path, monkeypatch):
                     validation_decision={"mode": "strict", "action": "block"},
                 ),
             ],
+            "category_resolution": {
+                "decision": {
+                    "category_input": "MLB-CAT",
+                    "category_resolved_id": "MLB-CAT",
+                    "strategy": "direct_id",
+                    "predictor_attempted": False,
+                    "predictor_titles_count": 0,
+                    "predictor_matched": False,
+                    "fallback_attempted": False,
+                    "fallback_reason": None,
+                },
+                "strategy_counts": {
+                    "direct_id": 5,
+                    "predictor_path_match": 0,
+                    "name_match": 0,
+                    "unresolved": 0,
+                },
+                "fallback_counts": {"attempted": 0, "resolved": 0, "unresolved": 0},
+                "predictor_counts": {"attempted": 0, "matched": 0, "unmatched": 0},
+            },
         },
         {
             "published": 4,
@@ -191,6 +224,26 @@ def test_upload_batches_and_writes_reports(tmp_path, monkeypatch):
                 _make_item_result(3, "SKU009", "failed", "SKU009: API error"),
                 _make_item_result(4, "SKU010", "success"),
             ],
+            "category_resolution": {
+                "decision": {
+                    "category_input": "MLB-CAT",
+                    "category_resolved_id": "MLB-CAT",
+                    "strategy": "predictor_path_match",
+                    "predictor_attempted": True,
+                    "predictor_titles_count": 5,
+                    "predictor_matched": True,
+                    "fallback_attempted": False,
+                    "fallback_reason": None,
+                },
+                "strategy_counts": {
+                    "direct_id": 0,
+                    "predictor_path_match": 5,
+                    "name_match": 0,
+                    "unresolved": 0,
+                },
+                "fallback_counts": {"attempted": 0, "resolved": 0, "unresolved": 0},
+                "predictor_counts": {"attempted": 5, "matched": 5, "unmatched": 0},
+            },
         },
     ]
     monkeypatch.setattr(
@@ -256,6 +309,23 @@ def test_upload_batches_and_writes_reports(tmp_path, monkeypatch):
         "success": [],
         "failed": [{"code": "body.invalid_fields", "count": 1}],
     }
+    assert summary_data["category_resolution"]["strategy_counts"] == {
+        "direct_id": 5,
+        "predictor_path_match": 5,
+        "name_match": 0,
+        "unresolved": 0,
+    }
+    assert summary_data["category_resolution"]["fallback_counts"] == {
+        "attempted": 0,
+        "resolved": 0,
+        "unresolved": 0,
+    }
+    assert summary_data["category_resolution"]["predictor_counts"] == {
+        "attempted": 5,
+        "matched": 5,
+        "unmatched": 0,
+    }
+    assert len(summary_data["category_resolution"]["decisions"]) == 2
     assert len(summary_data["batches"]) == 2
     assert len(summary_data["items"]) == 10
     assert summary_data["items"][0]["policy_hash"] == "hash-cat"
@@ -272,6 +342,7 @@ def test_upload_batches_and_writes_reports(tmp_path, monkeypatch):
     assert summary_data["items"][0]["flow_routing"]["up_family_name"] == "Linha Alpha"
     assert summary_data["items"][0]["image_diagnostics"]["status"] == "passed"
     assert summary_data["items"][0]["rollout_flags"]["strict_warning_gate_mode"] == "enforce"
+    assert summary_data["items"][0]["category_resolution_decision"]["strategy"] == "direct_id"
     assert summary_data["rollout_flags"]["image_diagnostics_gate_mode"] == "enforce"
     assert summary_data["items"][0]["shipping_policy"]["decision"]["source"] == "shipping_resolver"
     success_without_explicit_evidence = next(
@@ -283,6 +354,7 @@ def test_upload_batches_and_writes_reports(tmp_path, monkeypatch):
     assert success_without_explicit_evidence["schema_contract_summary"] == {}
     assert success_without_explicit_evidence["cause_taxonomy"] == []
     assert success_without_explicit_evidence["validation_decision"]["action"] == "allow"
+    assert success_without_explicit_evidence["category_resolution_decision"] == {}
     assert isinstance(success_without_explicit_evidence["flow_routing"], dict)
     failed_item = next(item for item in summary_data["items"] if item["sku"] == "SKU005")
     assert failed_item["cause_codes"] == ["body.invalid_fields"]

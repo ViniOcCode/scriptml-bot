@@ -567,12 +567,96 @@ class PublishProductUseCase:
         if not isinstance(resolved_id, str) or not resolved_id:
             resolved_id = None
 
+        predictor_titles_count_raw = context.get("predictor_titles_count")
+        predictor_titles_count = 0
+        if isinstance(predictor_titles_count_raw, int) and predictor_titles_count_raw > 0:
+            predictor_titles_count = predictor_titles_count_raw
+
+        fallback_reason = context.get("fallback_reason")
+        if not isinstance(fallback_reason, str) or not fallback_reason.strip():
+            fallback_reason = None
+
+        decision_artifact = {
+            "category_input": category_input,
+            "category_resolved_id": resolved_id,
+            "strategy": strategy,
+            "predictor_attempted": bool(context.get("predictor_attempted")),
+            "predictor_titles_count": predictor_titles_count,
+            "predictor_matched": bool(context.get("predictor_matched")),
+            "fallback_attempted": bool(context.get("fallback_attempted")),
+            "fallback_reason": fallback_reason,
+        }
+
         return {
             "category_input": category_input,
             "category_resolved_id": resolved_id,
             "category_path": list(category_path),
             "resolution_strategy": strategy,
+            "category_resolution_decision": decision_artifact,
         }
+
+    @staticmethod
+    def _build_category_resolution_observability(
+        resolution_artifact: dict[str, Any], product_count: int
+    ) -> dict[str, Any]:
+        """Build deterministic counters and decision metadata for category resolution."""
+        strategy = (
+            str(resolution_artifact.get("resolution_strategy") or "unresolved").strip()
+            or "unresolved"
+        )
+        decision = resolution_artifact.get("category_resolution_decision")
+        if not isinstance(decision, dict):
+            decision = {}
+
+        item_count = product_count if product_count > 0 else 0
+        strategy_counts: dict[str, int] = {
+            "direct_id": 0,
+            "predictor_path_match": 0,
+            "name_match": 0,
+            "unresolved": 0,
+        }
+        strategy_counts[strategy] = strategy_counts.get(strategy, 0) + item_count
+
+        fallback_attempted = bool(decision.get("fallback_attempted"))
+        predictor_attempted = bool(decision.get("predictor_attempted"))
+        predictor_matched = bool(decision.get("predictor_matched"))
+
+        fallback_counts = {
+            "attempted": item_count if fallback_attempted else 0,
+            "resolved": item_count if fallback_attempted and strategy != "unresolved" else 0,
+            "unresolved": item_count if fallback_attempted and strategy == "unresolved" else 0,
+        }
+        predictor_counts = {
+            "attempted": item_count if predictor_attempted else 0,
+            "matched": item_count if predictor_attempted and predictor_matched else 0,
+            "unmatched": item_count if predictor_attempted and not predictor_matched else 0,
+        }
+
+        return {
+            "decision": dict(decision),
+            "strategy_counts": strategy_counts,
+            "fallback_counts": fallback_counts,
+            "predictor_counts": predictor_counts,
+        }
+
+    @staticmethod
+    def _log_category_resolution_observability(observability: dict[str, Any]) -> None:
+        """Emit category-resolution decision metadata and counters to logs."""
+        decision = observability.get("decision")
+        if not isinstance(decision, dict):
+            decision = {}
+        logger.info(
+            "Category resolution decision: strategy=%s predictor_attempted=%s "
+            "predictor_matched=%s fallback_attempted=%s fallback_reason=%s "
+            "strategy_counts=%s fallback_counts=%s",
+            decision.get("strategy", "unresolved"),
+            decision.get("predictor_attempted", False),
+            decision.get("predictor_matched", False),
+            decision.get("fallback_attempted", False),
+            decision.get("fallback_reason"),
+            observability.get("strategy_counts", {}),
+            observability.get("fallback_counts", {}),
+        )
 
     def _resolve_category_context(
         self, products: list[Product | dict[str, Any]], category_name: str
@@ -581,55 +665,50 @@ class PublishProductUseCase:
         category_input = str(category_name).strip()
         resolved_id: str | None = None
         strategy = "unresolved"
+        titles: list[str] = []
+        predictor_attempted = False
+        predictor_matched = False
+        fallback_attempted = False
+        fallback_reason: str | None = None
 
-        # Strategy 0: Accept direct category IDs (e.g. MLB1234)
-        if re.fullmatch(r"[A-Z]{3}\d+", category_input):
-            resolved_id = category_input
-            strategy = "direct_id"
-        else:
-            # Strategy 1: Find category by name (fast root match)
-            resolved_id = self.category_resolver.find_category(category_input)
-            if resolved_id:
-                strategy = "name_match"
-            else:
-                logger.info(
-                    "Category '%s' not found by name; falling back to predictor path match.",
-                    category_input,
-                )
-
-        # Strategy 2: Use domain discovery with product titles
-        if not resolved_id and products:
-            titles: list[str] = []
+        if products:
             for product in products:
                 title = self._extract_product_title(product)
                 if title:
                     titles.append(title)
 
-            if titles:
-                logger.info("Extracted %s titles for prediction", len(titles))
-                resolved_id = self.category_resolver.find_category_with_predictor(
-                    category_input, titles
+        # Strategy 0: Accept direct category IDs (e.g. MLB1234)
+        if re.fullmatch(r"[A-Z]{3}\d+", category_input):
+            resolved_id = category_input
+            strategy = "direct_id"
+        # Strategy 1: Predictor-first title matching against category hint
+        elif titles:
+            predictor_attempted = True
+            logger.info("Extracted %s titles for predictor-first resolution", len(titles))
+            resolved_id = self.category_resolver.find_category_with_predictor(
+                category_input, titles
+            )
+            if resolved_id:
+                strategy = "predictor_path_match"
+                predictor_matched = True
+            else:
+                fallback_reason = "predictor_no_match"
+                logger.info(
+                    "Predictor path matching did not resolve '%s'; returning unresolved context.",
+                    category_input,
                 )
-                if resolved_id:
-                    strategy = "predictor_path_match"
-                else:
-                    logger.info(
-                        "Predictor path matching did not resolve '%s'; "
-                        "falling back to title prediction.",
-                        category_input,
-                    )
-
-        # Strategy 3: Fallback to simple title prediction (for backwards compatibility)
-        if not resolved_id and products:
-            logger.info("Trying simple domain discovery fallback...")
-            for product in products:
-                title_str = self._extract_product_title(product)
-                if title_str:
-                    resolved_id = self.category_resolver.predict_category_from_title(title_str)
-                    if resolved_id:
-                        strategy = "title_prediction"
-                        logger.info(f"Found category from title '{title_str[:30]}...'")
-                        break
+        else:
+            # Fallback for non-title flows: resolve by category name.
+            fallback_attempted = True
+            fallback_reason = "missing_titles_for_predictor"
+            resolved_id = self.category_resolver.find_category(category_input)
+            if resolved_id:
+                strategy = "name_match"
+            else:
+                logger.info(
+                    "Category '%s' not found by name and no usable titles were provided.",
+                    category_input,
+                )
 
         category_path: list[Any] = []
         if resolved_id:
@@ -649,6 +728,11 @@ class PublishProductUseCase:
             "category_resolved_id": resolved_id,
             "category_path": category_path,
             "resolution_strategy": strategy,
+            "predictor_attempted": predictor_attempted,
+            "predictor_titles_count": len(titles),
+            "predictor_matched": predictor_matched,
+            "fallback_attempted": fallback_attempted,
+            "fallback_reason": fallback_reason,
         }
 
     @staticmethod
@@ -1169,6 +1253,24 @@ class PublishProductUseCase:
         flow_artifact = self._get_flow_routing_artifact()
         flow_routing = flow_artifact.get("flow_routing", {})
         if isinstance(flow_routing, dict) and flow_routing.get("blocked"):
+            blocked_resolution_artifact = self._build_resolution_artifact(
+                {
+                    "category_input": str(category_name).strip(),
+                    "category_resolved_id": None,
+                    "category_path": [],
+                    "resolution_strategy": "unresolved",
+                    "predictor_attempted": False,
+                    "predictor_titles_count": 0,
+                    "predictor_matched": False,
+                    "fallback_attempted": False,
+                    "fallback_reason": "flow_routing_blocked",
+                }
+            )
+            category_resolution_artifact = self._build_category_resolution_observability(
+                blocked_resolution_artifact,
+                len(products),
+            )
+            self._log_category_resolution_observability(category_resolution_artifact)
             error_msg = str(
                 flow_routing.get("error", "Forced publish flow configuration is unsupported.")
             )
@@ -1187,6 +1289,7 @@ class PublishProductUseCase:
                     }
                 )
                 item_results[-1].update(flow_artifact)
+                item_results[-1].update(blocked_resolution_artifact)
             return {
                 "success": False,
                 "published": 0,
@@ -1195,10 +1298,16 @@ class PublishProductUseCase:
                 "item_results": item_results,
                 "flow_routing": flow_routing,
                 "rollout_flags": deepcopy(self._rollout_flags_artifact),
+                "category_resolution": deepcopy(category_resolution_artifact),
             }
 
         category_context = self._resolve_category_context(products, category_name)
         resolution_artifact = self._build_resolution_artifact(category_context)
+        category_resolution_artifact = self._build_category_resolution_observability(
+            resolution_artifact,
+            len(products),
+        )
+        self._log_category_resolution_observability(category_resolution_artifact)
         category_input = resolution_artifact["category_input"]
         category_id = resolution_artifact["category_resolved_id"]
         policy_artifact: dict[str, Any] | None = None
@@ -1230,6 +1339,7 @@ class PublishProductUseCase:
                 "item_results": item_results,
                 "flow_routing": flow_routing,
                 "rollout_flags": deepcopy(self._rollout_flags_artifact),
+                "category_resolution": deepcopy(category_resolution_artifact),
             }
 
         policy_artifact = self._get_policy_artifact(category_id)
@@ -1266,6 +1376,7 @@ class PublishProductUseCase:
                 "item_results": item_results,
                 "flow_routing": flow_routing,
                 "rollout_flags": deepcopy(self._rollout_flags_artifact),
+                "category_resolution": deepcopy(category_resolution_artifact),
             }
 
         logger.info(f"Publishing {len(products)} products to category {category_id}")
@@ -1383,6 +1494,7 @@ class PublishProductUseCase:
             "item_results": self.item_results,
             "flow_routing": flow_routing,
             "rollout_flags": deepcopy(self._rollout_flags_artifact),
+            "category_resolution": deepcopy(category_resolution_artifact),
         }
 
     def _build_product_from_dict(self, data: dict[str, Any]) -> Product:
@@ -1575,7 +1687,10 @@ class PublishProductUseCase:
             logger.warning(f"No pictures for {product.sku}")
 
         # Determine shipping mode from config
-        shipping_config = self._build_shipping_config(category_id=category_id)
+        shipping_config = self._build_shipping_config(
+            category_id=category_id,
+            row_attributes=product.attributes,
+        )
 
         logger.debug(f"Shipping config for {product.sku}: {shipping_config}")
 
@@ -3715,11 +3830,15 @@ class PublishProductUseCase:
         except Exception as e:
             logger.warning(f"Could not publish description for {sku} ({item_id}): {e}")
 
-    def _build_shipping_config(self, category_id: str | None = None) -> dict[str, Any]:
+    def _build_shipping_config(
+        self,
+        category_id: str | None = None,
+        row_attributes: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Build shipping configuration from config.
 
-        Uses shipping configuration from config file as the single source of truth.
-        Builds complete shipping payload matching ML API format:
+        Uses runtime seller capabilities and spreadsheet header values to build
+        an ML API-compatible shipping payload:
         {
             "mode": "me2",
             "methods": [],
@@ -3744,11 +3863,15 @@ class PublishProductUseCase:
         requested_mode = default_mode
         decision_source = "config.default_mode"
         decision_reason = "Using configured default mode."
+        resolved_mode: str | None = None
         resolved_logistic_type: str | None = None
         resolved_logistic_type_source: str | None = None
         resolved_runtime_tags: list[str] = []
         resolved_runtime_constraints: dict[str, Any] = {}
         resolved_runtime_free_shipping: bool | None = None
+        resolved_available_modes: list[str] = []
+        resolved_logistic_type_by_mode: dict[str, str] = {}
+        resolved_runtime_policy_by_mode: dict[str, dict[str, Any]] = {}
 
         if self.shipping_resolver:
             resolved_from_selection = False

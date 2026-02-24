@@ -160,6 +160,12 @@ def _ensure_observability_evidence(
     else:
         normalized["rollout_flags"] = {}
 
+    category_resolution_decision = normalized.get("category_resolution_decision")
+    if isinstance(category_resolution_decision, dict):
+        normalized["category_resolution_decision"] = dict(category_resolution_decision)
+    else:
+        normalized["category_resolution_decision"] = {}
+
     return normalized
 
 
@@ -189,6 +195,56 @@ def _top_codes_by_status(
     counters: dict[str, dict[str, int]], limit: int = 5
 ) -> dict[str, list[dict[str, Any]]]:
     return {status: _top_code_entries(counter, limit=limit) for status, counter in counters.items()}
+
+
+def _empty_category_resolution_summary() -> dict[str, Any]:
+    return {
+        "strategy_counts": {
+            "direct_id": 0,
+            "predictor_path_match": 0,
+            "name_match": 0,
+            "unresolved": 0,
+        },
+        "fallback_counts": {"attempted": 0, "resolved": 0, "unresolved": 0},
+        "predictor_counts": {"attempted": 0, "matched": 0, "unmatched": 0},
+        "decisions": [],
+    }
+
+
+def _merge_counter_values(counter: dict[str, int], raw_values: Any) -> None:
+    if not isinstance(raw_values, dict):
+        return
+    for key, raw_count in raw_values.items():
+        key_text = str(key).strip()
+        if not key_text:
+            continue
+        try:
+            count = int(raw_count)
+        except (TypeError, ValueError):
+            continue
+        counter[key_text] = counter.get(key_text, 0) + count
+
+
+def _merge_category_resolution_summary(summary: dict[str, Any], raw_resolution: Any) -> None:
+    if not isinstance(raw_resolution, dict):
+        return
+
+    strategy_counts = summary.get("strategy_counts")
+    if isinstance(strategy_counts, dict):
+        _merge_counter_values(strategy_counts, raw_resolution.get("strategy_counts"))
+
+    fallback_counts = summary.get("fallback_counts")
+    if isinstance(fallback_counts, dict):
+        _merge_counter_values(fallback_counts, raw_resolution.get("fallback_counts"))
+
+    predictor_counts = summary.get("predictor_counts")
+    if isinstance(predictor_counts, dict):
+        _merge_counter_values(predictor_counts, raw_resolution.get("predictor_counts"))
+
+    decision = raw_resolution.get("decision")
+    decisions = summary.get("decisions")
+    if isinstance(decision, dict) and isinstance(decisions, list):
+        decisions.append(dict(decision))
 
 
 def load_config() -> dict[str, Any]:
@@ -348,6 +404,7 @@ def upload(
     cause_code_counts: dict[str, int] = {}
     warning_code_counts: dict[str, dict[str, int]] = {"success": {}, "failed": {}}
     error_code_counts: dict[str, dict[str, int]] = {"success": {}, "failed": {}}
+    category_resolution_summary = _empty_category_resolution_summary()
 
     for start in range(0, total_products, batch_size):
         batch_index = (start // batch_size) + 1
@@ -381,6 +438,10 @@ def upload(
         for group_category, indexed_rows in grouped_products.items():
             rows_for_category = [row for _, row in indexed_rows]
             results = use_case.execute(rows_for_category, group_category)  # type: ignore[arg-type]
+            _merge_category_resolution_summary(
+                category_resolution_summary,
+                results.get("category_resolution"),
+            )
             raw_group_flow_routing = results.get("flow_routing")
             group_flow_routing = (
                 dict(raw_group_flow_routing) if isinstance(raw_group_flow_routing, dict) else None
@@ -451,6 +512,11 @@ def upload(
                         item,
                         grouped_results[target_index].get("category_input"),
                     )
+                    category_resolution_decision = item.get("category_resolution_decision")
+                    if isinstance(category_resolution_decision, dict):
+                        mapped_item["category_resolution_decision"] = dict(
+                            category_resolution_decision
+                        )
                     policy_hash = item.get("policy_hash")
                     if isinstance(policy_hash, str) and policy_hash:
                         mapped_item["policy_hash"] = policy_hash
@@ -537,6 +603,9 @@ def upload(
                 item_result,
                 item_result.get("category_input"),
             )
+            category_resolution_decision = item_result.get("category_resolution_decision")
+            if isinstance(category_resolution_decision, dict):
+                normalized["category_resolution_decision"] = dict(category_resolution_decision)
             policy_hash = item_result.get("policy_hash")
             if isinstance(policy_hash, str) and policy_hash:
                 normalized["policy_hash"] = policy_hash
@@ -679,6 +748,7 @@ def upload(
         "top_cause_codes": _top_code_entries(cause_code_counts),
         "top_warning_codes_by_status": _top_codes_by_status(warning_code_counts),
         "top_error_codes_by_status": _top_codes_by_status(error_code_counts),
+        "category_resolution": category_resolution_summary,
         "rollout_flags": rollout_flags_snapshot,
         "batches": batch_summaries,
         "items": all_item_results,

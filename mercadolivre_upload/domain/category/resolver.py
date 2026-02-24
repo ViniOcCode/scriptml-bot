@@ -516,16 +516,16 @@ class CategoryResolver:
             return None
 
         normalized_site = self._normalize_site_id(site_id)
+        cache_key = TextNormalizer.normalize(title) or title
 
         # Check prediction cache
         if self._prediction_cache:
-            cached = self._prediction_cache.get(title, normalized_site)
-            if cached:
+            cached = self._prediction_cache.get(cache_key, normalized_site)
+            if cached is not None:
                 predictions = cached
             else:
                 predictions = self._call_domain_discovery(title, normalized_site)
-                if predictions:
-                    self._prediction_cache.set(title, predictions, normalized_site)
+                self._prediction_cache.set(cache_key, predictions, normalized_site)
         else:
             predictions = self._call_domain_discovery(title, normalized_site)
 
@@ -571,19 +571,22 @@ class CategoryResolver:
         logger.warning(f"Domain discovery returned empty for: '{title}'")
         return None
 
-    def _call_domain_discovery(self, title: str, site_id: str) -> list[dict[str, Any]]:
+    def _call_domain_discovery(
+        self, title: str, site_id: str, limit: int = 3
+    ) -> list[dict[str, Any]]:
         """Call domain discovery API.
 
         Args:
             title: Product title
             site_id: Site ID
+            limit: Maximum number of predictions to request
 
         Returns:
             List of predictions
         """
         try:
             logger.info(f"Calling domain discovery for: '{title[:60]}...'")
-            predictions = self._api.predict_category(title, site_id)
+            predictions = self._api.predict_category(title, site_id, limit=limit)
             logger.debug(f"Domain discovery response: {predictions}")
             return predictions if isinstance(predictions, list) else []
         except Exception as e:
@@ -624,26 +627,36 @@ class CategoryResolver:
 
         # Limit number of predictions to avoid rate limits
         titles_to_check = product_titles[: self._max_predictions]
-        best_match: tuple[str, tuple[Any, ...]] | None = None
+        batch_predictions: dict[str, list[dict[str, Any]]] = {}
 
-        for title_index, title in enumerate(titles_to_check):
-            if not title or len(title) < 3:
+        for title in titles_to_check:
+            title_str = title.strip() if isinstance(title, str) else ""
+            if len(title_str) < 3:
                 continue
 
+            normalized_title = TextNormalizer.normalize(title_str)
+            if not normalized_title:
+                continue
+
+            if normalized_title in batch_predictions:
+                predictions = batch_predictions[normalized_title]
             # Get predictions (cached or fresh)
-            if self._prediction_cache:
-                cached = self._prediction_cache.get(title, normalized_site)
-                if cached:
+            elif self._prediction_cache:
+                cached = self._prediction_cache.get(normalized_title, normalized_site)
+                if cached is not None:
                     predictions = cached
                 else:
-                    predictions = self._call_domain_discovery(title, normalized_site)
-                    if predictions:
-                        self._prediction_cache.set(title, predictions, normalized_site)
+                    predictions = self._call_domain_discovery(title_str, normalized_site, limit=3)
+                    self._prediction_cache.set(normalized_title, predictions, normalized_site)
             else:
-                predictions = self._call_domain_discovery(title, normalized_site)
+                predictions = self._call_domain_discovery(title_str, normalized_site, limit=3)
+
+            batch_predictions[normalized_title] = predictions
 
             if not predictions:
                 continue
+
+            title_best_match: tuple[str, tuple[Any, ...]] | None = None
 
             # Check top 3 predictions
             for prediction_rank, prediction in enumerate(predictions[:3]):
@@ -659,7 +672,7 @@ class CategoryResolver:
                 confidence = self._safe_float(
                     prediction.get("confidence", prediction.get("score")), 0.0
                 )
-                depth_hint = prediction_rank + title_index
+                depth_hint = prediction_rank
 
                 # Get category details to check path
                 category_data = self._get_category_cached(predicted_id)
@@ -690,10 +703,10 @@ class CategoryResolver:
                     if score is None:
                         continue
 
-                    candidate_score = (*score, confidence, -prediction_rank, -title_index)
-                    best_match = self._pick_best_candidate(
-                        best_match,
-                        (node_id, candidate_score),
+                    candidate_score = (*score, confidence, -prediction_rank)
+                    title_best_match = self._pick_best_candidate(
+                        title_best_match,
+                        (predicted_id, candidate_score),
                     )
 
                 # Also check predicted category name itself
@@ -709,17 +722,20 @@ class CategoryResolver:
                         min_similarity=0.8,
                     )
                     if score is not None:
-                        candidate_score = (*score, confidence, -prediction_rank, -title_index)
-                        best_match = self._pick_best_candidate(
-                            best_match,
+                        candidate_score = (*score, confidence, -prediction_rank)
+                        title_best_match = self._pick_best_candidate(
+                            title_best_match,
                             (predicted_id, candidate_score),
                         )
 
-        if best_match:
-            logger.info(
-                f"Found matching category from predictor: " f"{best_match[0]} for '{category_name}'"
-            )
-            return best_match[0]
+            if title_best_match:
+                logger.info(
+                    "Found matching category from predictor: %s for '%s' using title '%s'",
+                    title_best_match[0],
+                    category_name,
+                    title_str,
+                )
+                return title_best_match[0]
 
         logger.info(f"No prediction matched category '{category_name}' deterministically")
         return None
