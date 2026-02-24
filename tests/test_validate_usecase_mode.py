@@ -25,28 +25,145 @@ class _ValidationResolver:
     ) -> list[dict[str, Any]]:
         return []
 
+    def get_category_data(self, category_id: str) -> dict[str, Any]:
+        return {
+            "id": category_id,
+            "status": "enabled",
+            "settings": {"status": "enabled", "listing_allowed": True},
+        }
+
+    def get_all_attributes(self, _category_id: str) -> list[dict[str, Any]]:
+        return [
+            {"id": "BRAND", "tags": {}},
+            {"id": "MODEL", "tags": {"allow_variations": True}},
+        ]
+
 
 class _ValidationPublisher:
-    def __init__(self, causes: list[dict[str, Any]] | None = None):
+    def __init__(
+        self,
+        causes: list[dict[str, Any]] | None = None,
+        users_me: dict[str, Any] | None = None,
+    ):
         self.causes = causes or []
+        self.listing_type_calls = 0
+        self.sale_terms_calls = 0
         self.validated_items: list[dict[str, Any]] = []
         self.created_items: list[dict[str, Any]] = []
+        self.validated_user_product_items: list[dict[str, Any]] = []
+        self.created_user_product_items: list[dict[str, Any]] = []
+        self.listing_types = [{"id": "gold_special"}, {"id": "free"}]
+        self.sale_terms = [{"id": "WARRANTY_TYPE", "tags": {"required": True}}]
+        self.users_me = users_me or {"id": 1234, "tags": []}
+
+    def get_available_listing_types(self, _category_id: str) -> list[dict[str, Any]]:
+        self.listing_type_calls += 1
+        return list(self.listing_types)
+
+    def get_category_sale_terms(self, _category_id: str) -> list[dict[str, Any]]:
+        self.sale_terms_calls += 1
+        return list(self.sale_terms)
 
     def validate_item(self, item: dict[str, Any]) -> dict[str, Any]:
         self.validated_items.append(item)
         return {"cause": self.causes}
 
+    def validate_user_product_item(self, item: dict[str, Any]) -> dict[str, Any]:
+        self.validated_user_product_items.append(item)
+        return self.validate_item(item)
+
     def create_item(self, item: dict[str, Any]) -> dict[str, Any]:
         self.created_items.append(item)
         return {"id": "MLB1234567890"}
 
+    def create_user_product_item(self, item: dict[str, Any]) -> dict[str, Any]:
+        self.created_user_product_items.append(item)
+        return self.create_item(item)
+
+    def get_users_me(self) -> dict[str, Any]:
+        return dict(self.users_me)
+
 
 class _ImageUploader:
+    def __init__(
+        self,
+        image_urls: list[str] | None = None,
+        diagnostic_result: dict[str, Any] | None = None,
+    ):
+        self.image_urls = image_urls or ["https://example.com/image.jpg"]
+        self.diagnostic_result = diagnostic_result
+
     def upload_images(self, _sku: str) -> list[str]:
-        return ["https://example.com/image.jpg"]
+        return list(self.image_urls)
+
+    def get_uploaded_images(self) -> list[dict[str, str]]:
+        return [
+            {"url": image_url, "id": f"PIC-{index + 1}"}
+            for index, image_url in enumerate(self.image_urls)
+        ]
+
+    def diagnose_images(
+        self,
+        *,
+        sku: str,
+        category_id: str,
+        title: str | None,
+        picture_urls: list[str],
+        picture_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        del sku, category_id, title, picture_ids
+        if self.diagnostic_result is None:
+            return {
+                "status": "unavailable",
+                "available": False,
+                "checked": 0,
+                "issues": [],
+                "results": [],
+                "message": "Image diagnostics unavailable in test uploader.",
+            }
+        result = dict(self.diagnostic_result)
+        result.setdefault("checked", len(picture_urls))
+        result.setdefault("results", [])
+        result.setdefault("issues", [])
+        return result
 
 
-def _build_product() -> Product:
+class _FixedShippingResolver:
+    def __init__(self, mode: str):
+        self.mode = mode
+
+    def get_best_shipping_mode(self) -> str:
+        return self.mode
+
+
+class _SchemaContractResolver(_ValidationResolver):
+    def __init__(
+        self,
+        *,
+        all_attributes: list[dict[str, Any]] | None = None,
+        settings: dict[str, Any] | None = None,
+    ):
+        if all_attributes is None:
+            self._all_attributes = super().get_all_attributes("MLB1234")
+        else:
+            self._all_attributes = all_attributes
+        merged_settings = {"status": "enabled", "listing_allowed": True}
+        if isinstance(settings, dict):
+            merged_settings.update(settings)
+        self._settings = merged_settings
+
+    def get_category_data(self, category_id: str) -> dict[str, Any]:
+        return {
+            "id": category_id,
+            "status": "enabled",
+            "settings": dict(self._settings),
+        }
+
+    def get_all_attributes(self, _category_id: str) -> list[dict[str, Any]]:
+        return list(self._all_attributes)
+
+
+def _build_product(attributes: dict[str, Any] | None = None) -> Product:
     title = "Produto teste"
     return Product(
         sku="SKU-1",
@@ -56,7 +173,7 @@ def _build_product() -> Product:
         available_quantity=1,
         condition="new",
         fiscal=FiscalData(sku="SKU-1", title=title),
-        attributes={},
+        attributes=attributes or {},
     )
 
 
@@ -70,6 +187,16 @@ def _base_config() -> dict[str, Any]:
                 "sale_terms": [],
             }
         }
+    }
+
+
+def _shipping_config() -> dict[str, Any]:
+    return {
+        "default_mode": "not_specified",
+        "modes": {
+            "not_specified": {"local_pick_up": True, "free_shipping": False},
+            "me2": {"local_pick_up": False, "free_shipping": False, "logistic_type": "drop_off"},
+        },
     }
 
 
@@ -93,7 +220,23 @@ def test_validation_only_mode_validates_without_publishing() -> None:
     assert result["failed"] == 0
     assert len(publisher.validated_items) == 1
     assert publisher.created_items == []
-    assert result["item_results"][0]["status"] == "success"
+    item_result = result["item_results"][0]
+    assert item_result["status"] == "success"
+    assert isinstance(item_result.get("policy_hash"), str)
+    assert len(item_result["policy_hash"]) == 64
+    assert item_result["policy_summary"]["category_id"] == "MLB1234"
+    assert item_result["policy_summary"]["listing_type_count"] == 2
+    assert isinstance(item_result.get("schema_contract_hash"), str)
+    assert len(item_result["schema_contract_hash"]) == 64
+    assert item_result["schema_contract_summary"]["category_id"] == "MLB1234"
+    assert item_result["category_input"] == "MLB1234"
+    assert item_result["category_resolved_id"] == "MLB1234"
+    assert item_result["resolution_strategy"] == "direct_id"
+    assert item_result["category_path"] == []
+    rollout_flags = item_result["rollout_flags"]
+    assert rollout_flags["strict_warning_gate_mode"] == "enforce"
+    assert rollout_flags["image_diagnostics_gate_mode"] == "enforce"
+    assert rollout_flags["flow_user_products_enabled"] is True
 
 
 def test_validation_only_mode_surfaces_validation_cause_codes() -> None:
@@ -123,5 +266,797 @@ def test_validation_only_mode_surfaces_validation_cause_codes() -> None:
     assert result["failed"] == 1
     assert len(publisher.validated_items) == 1
     assert publisher.created_items == []
-    assert result["item_results"][0]["status"] == "failed"
-    assert result["item_results"][0]["cause_codes"] == ["body.invalid_fields"]
+    item_result = result["item_results"][0]
+    assert item_result["status"] == "failed"
+    assert item_result["cause_codes"] == ["body.invalid_fields"]
+    assert item_result["cause_taxonomy"][0]["classification"] == "blocking_error"
+    assert item_result["validation_decision"]["action"] == "block"
+    assert item_result["validation_decision"]["mode"] == "strict"
+    assert isinstance(item_result.get("policy_hash"), str)
+
+
+def test_validation_only_mode_persists_informational_warning_taxonomy() -> None:
+    publisher = _ValidationPublisher(
+        causes=[
+            {
+                "type": "warning",
+                "code": "item.pictures.without_main",
+                "message": "Main picture is recommended for better conversion.",
+            }
+        ]
+    )
+    use_case = PublishProductUseCase(
+        category_resolver=_ValidationResolver(),  # type: ignore[arg-type]
+        publisher=publisher,  # type: ignore[arg-type]
+        image_uploader=_ImageUploader(),  # type: ignore[arg-type]
+        config=_base_config(),
+        validation_only=True,
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+
+    result = use_case.execute([_build_product()], "MLB1234")
+
+    assert result["success"] is True
+    item_result = result["item_results"][0]
+    assert item_result["status"] == "success"
+    assert item_result["cause_codes"] == ["item.pictures.without_main"]
+    assert item_result["cause_taxonomy"][0]["classification"] == "informational_warning"
+    assert item_result["validation_decision"]["action"] == "allow"
+
+
+def test_validation_only_mode_marks_retryable_error_in_controlled_mode() -> None:
+    publisher = _ValidationPublisher(
+        causes=[
+            {
+                "type": "error",
+                "code": "item.internal_error",
+                "message": "Temporary internal error, try again.",
+            }
+        ]
+    )
+    config = _base_config()
+    config["validation_decision_mode"] = "controlled"
+    use_case = PublishProductUseCase(
+        category_resolver=_ValidationResolver(),  # type: ignore[arg-type]
+        publisher=publisher,  # type: ignore[arg-type]
+        image_uploader=_ImageUploader(),  # type: ignore[arg-type]
+        config=config,
+        validation_only=True,
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+
+    result = use_case.execute([_build_product()], "MLB1234")
+
+    assert result["success"] is False
+    item_result = result["item_results"][0]
+    assert item_result["status"] == "failed"
+    assert item_result["cause_taxonomy"][0]["classification"] == "retryable_error"
+    assert item_result["validation_decision"]["action"] == "retry"
+    assert item_result["validation_decision"]["mode"] == "controlled"
+
+
+def test_validation_only_mode_exposes_shipping_policy_metadata() -> None:
+    publisher = _ValidationPublisher()
+    config = _base_config()
+    config["shipping"] = _shipping_config()
+    use_case = PublishProductUseCase(
+        category_resolver=_ValidationResolver(),  # type: ignore[arg-type]
+        publisher=publisher,  # type: ignore[arg-type]
+        image_uploader=_ImageUploader(),  # type: ignore[arg-type]
+        shipping_resolver=_FixedShippingResolver("me2"),  # type: ignore[arg-type]
+        config=config,
+        validation_only=True,
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+
+    result = use_case.execute([_build_product()], "MLB1234")
+
+    item_result = result["item_results"][0]
+    assert item_result["shipping_policy"]["decision"]["source"] == "shipping_resolver"
+    assert item_result["shipping_policy"]["decision"]["selected_mode"] == "me2"
+    assert item_result["shipping_policy"]["payload"]["mode"] == "me2"
+
+
+def test_validation_only_blocks_deterministic_shipping_policy_warning() -> None:
+    publisher = _ValidationPublisher(
+        causes=[
+            {
+                "type": "warning",
+                "code": "shipping.mode.not_allowed",
+                "message": "Shipping mode me2 is not allowed for this seller.",
+            }
+        ]
+    )
+    config = _base_config()
+    config["shipping"] = _shipping_config()
+    use_case = PublishProductUseCase(
+        category_resolver=_ValidationResolver(),  # type: ignore[arg-type]
+        publisher=publisher,  # type: ignore[arg-type]
+        image_uploader=_ImageUploader(),  # type: ignore[arg-type]
+        shipping_resolver=_FixedShippingResolver("me2"),  # type: ignore[arg-type]
+        config=config,
+        validation_only=True,
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+
+    result = use_case.execute([_build_product()], "MLB1234")
+
+    assert result["success"] is False
+    assert result["failed"] == 1
+    item_result = result["item_results"][0]
+    assert item_result["cause_codes"] == ["shipping.mode.not_allowed"]
+    assert "deterministic shipping policy violation" in item_result["error"]
+    assert item_result["shipping_policy"]["cause_decisions"][0]["classification"] == "blocking"
+
+
+def test_validation_only_keeps_retryable_shipping_warning_non_blocking() -> None:
+    publisher = _ValidationPublisher(
+        causes=[
+            {
+                "type": "warning",
+                "code": "shipping.service_unavailable",
+                "message": "Shipping service unavailable, try again later.",
+            }
+        ]
+    )
+    config = _base_config()
+    config["shipping"] = _shipping_config()
+    use_case = PublishProductUseCase(
+        category_resolver=_ValidationResolver(),  # type: ignore[arg-type]
+        publisher=publisher,  # type: ignore[arg-type]
+        image_uploader=_ImageUploader(),  # type: ignore[arg-type]
+        shipping_resolver=_FixedShippingResolver("me2"),  # type: ignore[arg-type]
+        config=config,
+        validation_only=True,
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+
+    result = use_case.execute([_build_product()], "MLB1234")
+
+    assert result["success"] is True
+    item_result = result["item_results"][0]
+    assert item_result["shipping_policy"]["cause_decisions"][0]["classification"] == "retryable"
+
+
+def test_shipping_policy_falls_back_when_resolved_mode_is_not_configured() -> None:
+    publisher = _ValidationPublisher()
+    config = _base_config()
+    config["shipping"] = _shipping_config()
+    use_case = PublishProductUseCase(
+        category_resolver=_ValidationResolver(),  # type: ignore[arg-type]
+        publisher=publisher,  # type: ignore[arg-type]
+        image_uploader=_ImageUploader(),  # type: ignore[arg-type]
+        shipping_resolver=_FixedShippingResolver("custom_mode"),  # type: ignore[arg-type]
+        config=config,
+        validation_only=True,
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+
+    result = use_case.execute([_build_product()], "MLB1234")
+
+    item_result = result["item_results"][0]
+    decision = item_result["shipping_policy"]["decision"]
+    assert decision["source"] == "config.modes_fallback"
+    assert decision["fallback_applied"] is True
+    assert item_result["shipping_policy"]["payload"]["mode"] == "not_specified"
+
+
+def test_validation_only_mode_reuses_policy_snapshot_for_same_category() -> None:
+    publisher = _ValidationPublisher()
+    use_case = PublishProductUseCase(
+        category_resolver=_ValidationResolver(),  # type: ignore[arg-type]
+        publisher=publisher,  # type: ignore[arg-type]
+        image_uploader=_ImageUploader(),  # type: ignore[arg-type]
+        config=_base_config(),
+        validation_only=True,
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+
+    result = use_case.execute([_build_product(), _build_product()], "MLB1234")
+
+    assert len({item["policy_hash"] for item in result["item_results"]}) == 1
+    assert len({item["schema_contract_hash"] for item in result["item_results"]}) == 1
+    assert publisher.listing_type_calls == 1
+    assert publisher.sale_terms_calls == 1
+
+
+def test_validation_only_mode_blocks_preflight_for_missing_required_contract_attributes() -> None:
+    publisher = _ValidationPublisher()
+    resolver = _SchemaContractResolver(
+        all_attributes=[
+            {"id": "BRAND", "tags": {"required": True}},
+            {"id": "MODEL", "tags": {"allow_variations": True}},
+        ]
+    )
+    use_case = PublishProductUseCase(
+        category_resolver=resolver,  # type: ignore[arg-type]
+        publisher=publisher,  # type: ignore[arg-type]
+        image_uploader=_ImageUploader(),  # type: ignore[arg-type]
+        config=_base_config(),
+        validation_only=True,
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+
+    result = use_case.execute([_build_product()], "MLB1234")
+
+    assert result["success"] is False
+    assert result["validated"] == 0
+    assert result["failed"] == 1
+    assert publisher.validated_items == []
+    assert "Missing required attributes: BRAND" in result["errors"][0]
+    assert result["item_results"][0]["cause_codes"] == ["schema_contract.preflight"]
+
+
+def test_validation_only_mode_blocks_preflight_for_picture_limit() -> None:
+    publisher = _ValidationPublisher()
+    resolver = _SchemaContractResolver(settings={"max_pictures_per_item": 1})
+    use_case = PublishProductUseCase(
+        category_resolver=resolver,  # type: ignore[arg-type]
+        publisher=publisher,  # type: ignore[arg-type]
+        image_uploader=_ImageUploader(
+            image_urls=[
+                "https://example.com/image-1.jpg",
+                "https://example.com/image-2.jpg",
+            ]
+        ),  # type: ignore[arg-type]
+        config=_base_config(),
+        validation_only=True,
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+
+    result = use_case.execute([_build_product()], "MLB1234")
+
+    assert result["success"] is False
+    assert result["validated"] == 0
+    assert result["failed"] == 1
+    assert publisher.validated_items == []
+    assert "Pictures count 2 exceeds category max 1" in result["errors"][0]
+
+
+def test_validation_only_mode_blocks_preflight_for_image_diagnostic_issues() -> None:
+    publisher = _ValidationPublisher()
+    use_case = PublishProductUseCase(
+        category_resolver=_ValidationResolver(),  # type: ignore[arg-type]
+        publisher=publisher,  # type: ignore[arg-type]
+        image_uploader=_ImageUploader(
+            diagnostic_result={
+                "status": "failed",
+                "available": True,
+                "checked": 1,
+                "issues": ["Picture 1 diagnostic issues: text_logo"],
+                "results": [
+                    {
+                        "index": 0,
+                        "status": "issues",
+                        "detections": ["text_logo"],
+                    }
+                ],
+            }
+        ),  # type: ignore[arg-type]
+        config=_base_config(),
+        validation_only=True,
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+
+    result = use_case.execute([_build_product()], "MLB1234")
+
+    assert result["success"] is False
+    assert result["validated"] == 0
+    assert result["failed"] == 1
+    assert publisher.validated_items == []
+    assert "Image diagnostic preflight failed" in result["errors"][0]
+    item_result = result["item_results"][0]
+    assert item_result["cause_codes"] == ["image_diagnostic.preflight"]
+    assert item_result["image_diagnostics"]["status"] == "failed"
+    assert item_result["image_diagnostics"]["gate_mode"] == "enforce"
+    assert item_result["image_diagnostics"]["gate_decision"]["action"] == "block"
+
+
+def test_validation_only_mode_continues_when_image_diagnostics_unavailable() -> None:
+    publisher = _ValidationPublisher()
+    use_case = PublishProductUseCase(
+        category_resolver=_ValidationResolver(),  # type: ignore[arg-type]
+        publisher=publisher,  # type: ignore[arg-type]
+        image_uploader=_ImageUploader(
+            diagnostic_result={
+                "status": "unavailable",
+                "available": False,
+                "checked": 0,
+                "issues": [],
+                "results": [],
+                "message": "Image diagnostics endpoint unavailable (status 404).",
+            }
+        ),  # type: ignore[arg-type]
+        config=_base_config(),
+        validation_only=True,
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+
+    result = use_case.execute([_build_product()], "MLB1234")
+
+    assert result["success"] is True
+    assert result["validated"] == 1
+    assert result["failed"] == 0
+    assert len(publisher.validated_items) == 1
+    assert result["item_results"][0]["image_diagnostics"]["status"] == "unavailable"
+    assert result["item_results"][0]["image_diagnostics"]["gate_mode"] == "enforce"
+    assert result["item_results"][0]["image_diagnostics"]["gate_decision"]["action"] == "allow"
+
+
+def test_validation_only_mode_allows_image_diagnostics_issues_in_report_only_mode() -> None:
+    publisher = _ValidationPublisher()
+    config = _base_config()
+    config["image_diagnostics"] = {"gate_mode": "report_only"}
+    use_case = PublishProductUseCase(
+        category_resolver=_ValidationResolver(),  # type: ignore[arg-type]
+        publisher=publisher,  # type: ignore[arg-type]
+        image_uploader=_ImageUploader(
+            diagnostic_result={
+                "status": "failed",
+                "available": True,
+                "checked": 1,
+                "issues": ["Picture 1 diagnostic issues: text_logo"],
+                "results": [
+                    {
+                        "index": 0,
+                        "status": "issues",
+                        "detections": ["text_logo"],
+                    }
+                ],
+            }
+        ),  # type: ignore[arg-type]
+        config=config,
+        validation_only=True,
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+
+    result = use_case.execute([_build_product()], "MLB1234")
+
+    assert result["success"] is True
+    assert result["validated"] == 1
+    assert result["failed"] == 0
+    assert len(publisher.validated_items) == 1
+    item_result = result["item_results"][0]
+    assert item_result["image_diagnostics"]["status"] == "failed"
+    assert item_result["image_diagnostics"]["gate_mode"] == "report_only"
+    assert item_result["image_diagnostics"]["gate_decision"]["action"] == "allow"
+    assert item_result["rollout_flags"]["image_diagnostics_gate_mode"] == "report_only"
+
+
+def test_validation_only_mode_skips_legacy_variations_when_limit_is_tight() -> None:
+    class _VariationMarkerBuilder:
+        def build_attributes(
+            self,
+            _product: Product,
+            _category_id: str,
+        ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], list[str]]:
+            return (
+                [
+                    {"id": "BRAND", "value_name": "Marca X"},
+                    {"id": "COLOR", "value_name": "Azul"},
+                    {
+                        "_variation_candidates": {
+                            "COLOR": [
+                                {"id": "1", "name": "Azul"},
+                                {"id": "2", "name": "Verde"},
+                            ]
+                        }
+                    },
+                ],
+                [],
+                [],
+                [],
+            )
+
+        def set_cache_mapper(self, cache_mapper: Any) -> None:  # pragma: no cover - compat hook
+            del cache_mapper
+
+    publisher = _ValidationPublisher()
+    resolver = _SchemaContractResolver(settings={"max_variations_allowed": 1})
+    use_case = PublishProductUseCase(
+        category_resolver=resolver,  # type: ignore[arg-type]
+        publisher=publisher,  # type: ignore[arg-type]
+        image_uploader=_ImageUploader(),  # type: ignore[arg-type]
+        config=_base_config(),
+        validation_only=True,
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+    use_case._attribute_builder = _VariationMarkerBuilder()  # type: ignore[assignment]
+
+    result = use_case.execute([_build_product()], "MLB1234")
+
+    assert result["success"] is True
+    assert result["validated"] == 1
+    assert result["failed"] == 0
+    validated_item = publisher.validated_items[0]
+    assert "variations" not in validated_item
+    assert any(attr["id"] == "COLOR" for attr in validated_item["attributes"])
+
+
+def test_validation_only_mode_normalizes_gtin_and_surfaces_identifier_gate() -> None:
+    class _IdentifierBuilder:
+        def build_attributes(
+            self,
+            _product: Product,
+            _category_id: str,
+        ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], list[str]]:
+            return ([{"id": "GTIN", "value_name": " 1234-5678 9012 "}], [], [], [])
+
+        def set_cache_mapper(self, cache_mapper: Any) -> None:  # pragma: no cover - compat hook
+            del cache_mapper
+
+    publisher = _ValidationPublisher()
+    resolver = _SchemaContractResolver(all_attributes=[{"id": "GTIN", "tags": {"required": True}}])
+    use_case = PublishProductUseCase(
+        category_resolver=resolver,  # type: ignore[arg-type]
+        publisher=publisher,  # type: ignore[arg-type]
+        image_uploader=_ImageUploader(),  # type: ignore[arg-type]
+        config=_base_config(),
+        validation_only=True,
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+    use_case._attribute_builder = _IdentifierBuilder()  # type: ignore[assignment]
+
+    result = use_case.execute([_build_product()], "MLB1234")
+
+    assert result["success"] is True
+    attrs_by_id = {
+        attr["id"]: attr
+        for attr in publisher.validated_items[0]["attributes"]
+        if isinstance(attr, dict) and isinstance(attr.get("id"), str)
+    }
+    assert attrs_by_id["GTIN"]["value_name"] == "123456789012"
+    identifier_gate = result["item_results"][0]["identifier_gate"]
+    assert identifier_gate["checked"] is True
+    assert identifier_gate["gtin_required"] is True
+    assert identifier_gate["violations"] == []
+
+
+def test_validation_only_mode_accepts_valid_empty_gtin_reason_when_gtin_required() -> None:
+    class _FallbackReasonBuilder:
+        def build_attributes(
+            self,
+            _product: Product,
+            _category_id: str,
+        ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], list[str]]:
+            return (
+                [{"id": "EMPTY_GTIN_REASON", "value_id": "17055158", "value_name": "Outro motivo"}],
+                [],
+                [],
+                [],
+            )
+
+        def set_cache_mapper(self, cache_mapper: Any) -> None:  # pragma: no cover - compat hook
+            del cache_mapper
+
+    publisher = _ValidationPublisher()
+    resolver = _SchemaContractResolver(
+        all_attributes=[
+            {"id": "GTIN", "tags": {"required": True}},
+            {
+                "id": "EMPTY_GTIN_REASON",
+                "tags": {},
+                "values": [{"id": "17055158", "name": "Outro motivo"}],
+            },
+        ]
+    )
+    use_case = PublishProductUseCase(
+        category_resolver=resolver,  # type: ignore[arg-type]
+        publisher=publisher,  # type: ignore[arg-type]
+        image_uploader=_ImageUploader(),  # type: ignore[arg-type]
+        config=_base_config(),
+        validation_only=True,
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+    use_case._attribute_builder = _FallbackReasonBuilder()  # type: ignore[assignment]
+
+    result = use_case.execute([_build_product()], "MLB1234")
+
+    assert result["success"] is True
+    assert len(publisher.validated_items) == 1
+    identifier_gate = result["item_results"][0]["identifier_gate"]
+    assert identifier_gate["item_has_gtin"] is False
+    assert identifier_gate["item_has_empty_gtin_reason"] is True
+    assert identifier_gate["violations"] == []
+
+
+def test_validation_only_mode_blocks_invalid_empty_gtin_reason_metadata() -> None:
+    class _InvalidFallbackReasonBuilder:
+        def build_attributes(
+            self,
+            _product: Product,
+            _category_id: str,
+        ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], list[str]]:
+            return (
+                [{"id": "EMPTY_GTIN_REASON", "value_id": "999999", "value_name": "Inválido"}],
+                [],
+                [],
+                [],
+            )
+
+        def set_cache_mapper(self, cache_mapper: Any) -> None:  # pragma: no cover - compat hook
+            del cache_mapper
+
+    publisher = _ValidationPublisher()
+    resolver = _SchemaContractResolver(
+        all_attributes=[
+            {"id": "GTIN", "tags": {"required": True}},
+            {
+                "id": "EMPTY_GTIN_REASON",
+                "tags": {},
+                "values": [{"id": "17055158", "name": "Outro motivo"}],
+            },
+        ]
+    )
+    use_case = PublishProductUseCase(
+        category_resolver=resolver,  # type: ignore[arg-type]
+        publisher=publisher,  # type: ignore[arg-type]
+        image_uploader=_ImageUploader(),  # type: ignore[arg-type]
+        config=_base_config(),
+        validation_only=True,
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+    use_case._attribute_builder = _InvalidFallbackReasonBuilder()  # type: ignore[assignment]
+
+    result = use_case.execute([_build_product()], "MLB1234")
+
+    assert result["success"] is False
+    assert publisher.validated_items == []
+    assert "Item has invalid EMPTY_GTIN_REASON metadata" in result["errors"][0]
+    assert result["item_results"][0]["cause_codes"] == ["schema_contract.preflight"]
+    assert result["item_results"][0]["identifier_gate"]["violations"] == [
+        "Item has invalid EMPTY_GTIN_REASON metadata"
+    ]
+
+
+def test_validation_only_mode_blocks_variation_identifier_incoherence() -> None:
+    class _VariationIdentifierBuilder:
+        def build_attributes(
+            self,
+            _product: Product,
+            _category_id: str,
+        ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], list[str]]:
+            return (
+                [
+                    {"id": "BRAND", "value_name": "Marca X"},
+                    {
+                        "_variation_candidates": {
+                            "COLOR": [{"id": "1", "name": "Azul"}, {"id": "2", "name": "Verde"}]
+                        }
+                    },
+                ],
+                [],
+                [],
+                [],
+            )
+
+        def set_cache_mapper(self, cache_mapper: Any) -> None:  # pragma: no cover - compat hook
+            del cache_mapper
+
+    publisher = _ValidationPublisher()
+    use_case = PublishProductUseCase(
+        category_resolver=_SchemaContractResolver(),  # type: ignore[arg-type]
+        publisher=publisher,  # type: ignore[arg-type]
+        image_uploader=_ImageUploader(),  # type: ignore[arg-type]
+        config=_base_config(),
+        validation_only=True,
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+    use_case._attribute_builder = _VariationIdentifierBuilder()  # type: ignore[assignment]
+
+    def _fake_build_variations_from_candidates(  # type: ignore[no-untyped-def]
+        *,
+        variation_candidates,
+        quantity,
+        price,
+        picture_ids=None,
+    ):
+        del variation_candidates, quantity, price, picture_ids
+        return [
+            {
+                "attribute_combinations": [{"id": "COLOR", "value_name": "Azul"}],
+                "available_quantity": 1,
+                "price": 10.0,
+                "picture_ids": ["PIC-1"],
+                "attributes": [{"id": "GTIN", "value_name": "1234-5678"}],
+            },
+            {
+                "attribute_combinations": [{"id": "COLOR", "value_name": "Verde"}],
+                "available_quantity": 1,
+                "price": 10.0,
+                "picture_ids": ["PIC-1"],
+                "attributes": [],
+            },
+        ]
+
+    use_case._build_variations_from_candidates = _fake_build_variations_from_candidates
+
+    result = use_case.execute([_build_product()], "MLB1234")
+
+    assert result["success"] is False
+    assert publisher.validated_items == []
+    assert "Variation 2 missing GTIN/EMPTY_GTIN_REASON identifier coverage" in result["errors"][0]
+    assert result["item_results"][0]["identifier_gate"]["variation_identifier_present"] is True
+
+
+def test_validation_only_mode_includes_auto_flow_routing_metadata() -> None:
+    publisher = _ValidationPublisher(users_me={"id": 1234, "tags": []})
+    use_case = PublishProductUseCase(
+        category_resolver=_ValidationResolver(),  # type: ignore[arg-type]
+        publisher=publisher,  # type: ignore[arg-type]
+        image_uploader=_ImageUploader(),  # type: ignore[arg-type]
+        config=_base_config(),
+        validation_only=True,
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+
+    result = use_case.execute([_build_product()], "MLB1234")
+
+    routing = result["item_results"][0]["flow_routing"]
+    assert routing["mode"] == "auto"
+    assert routing["selected_flow"] == "legacy"
+    assert routing["seller_has_user_product_seller_tag"] is False
+    assert routing["seller_capability_source"] == "users/me"
+    assert routing["blocked"] is False
+    assert "using legacy flow" in routing["reason"]
+
+
+def test_flow_routing_prefers_publisher_users_me_when_available() -> None:
+    class _PreferredPublisher(_ValidationPublisher):
+        def get_publisher_users_me(self) -> dict[str, Any]:
+            return {"id": 4321, "tags": ["user_product_seller"]}
+
+        def get_users_me(self) -> dict[str, Any]:
+            return {"id": 4321, "tags": []}
+
+    publisher = _PreferredPublisher()
+    use_case = PublishProductUseCase(
+        category_resolver=_ValidationResolver(),  # type: ignore[arg-type]
+        publisher=publisher,  # type: ignore[arg-type]
+        image_uploader=_ImageUploader(),  # type: ignore[arg-type]
+        config=_base_config(),
+        validation_only=True,
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+
+    result = use_case.execute([_build_product()], "MLB1234")
+
+    routing = result["item_results"][0]["flow_routing"]
+    assert routing["seller_capability_source"] == "publisher/get_users_me"
+    assert routing["seller_has_user_product_seller_tag"] is True
+    assert routing["selected_flow"] == "user_products"
+
+
+def test_forced_user_products_flow_falls_back_to_legacy_when_configured() -> None:
+    publisher = _ValidationPublisher(users_me={"id": 1234, "tags": []})
+    config = _base_config()
+    config["flow_routing"] = {
+        "mode": "forced",
+        "forced_flow": "user_products",
+        "blocked_behavior": "fallback_legacy",
+    }
+    use_case = PublishProductUseCase(
+        category_resolver=_ValidationResolver(),  # type: ignore[arg-type]
+        publisher=publisher,  # type: ignore[arg-type]
+        image_uploader=_ImageUploader(),  # type: ignore[arg-type]
+        config=config,
+        validation_only=True,
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+
+    result = use_case.execute([_build_product()], "MLB1234")
+
+    assert result["success"] is True
+    assert result["validated"] == 1
+    assert result["failed"] == 0
+    assert len(publisher.validated_items) == 1
+    assert publisher.validated_user_product_items == []
+    routing = result["item_results"][0]["flow_routing"]
+    assert routing["selected_flow"] == "legacy"
+    assert routing["fallback_applied"] is True
+    assert routing["blocked"] is False
+    assert "requires seller tag" in routing["fallback_reason"]
+    assert result["item_results"][0]["rollout_flags"]["flow_blocked_behavior"] == "fallback_legacy"
+
+
+def test_forced_user_products_flow_fails_fast_when_family_name_is_missing() -> None:
+    publisher = _ValidationPublisher(users_me={"id": 1234, "tags": ["user_product_seller"]})
+    config = _base_config()
+    config["flow_routing"] = {"mode": "forced", "forced_flow": "user_products"}
+    use_case = PublishProductUseCase(
+        category_resolver=_ValidationResolver(),  # type: ignore[arg-type]
+        publisher=publisher,  # type: ignore[arg-type]
+        image_uploader=_ImageUploader(),  # type: ignore[arg-type]
+        config=config,
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+
+    result = use_case.execute([_build_product()], "MLB1234")
+
+    assert result["success"] is False
+    assert result["published"] == 0
+    assert result["failed"] == 1
+    assert publisher.validated_items == []
+    assert publisher.created_items == []
+    routing = result["item_results"][0]["flow_routing"]
+    assert routing["mode"] == "forced"
+    assert routing["selected_flow"] == "user_products"
+    assert routing["blocked"] is False
+    assert "missing required field 'family_name'" in result["errors"][0]
+
+
+def test_user_products_flow_builds_distinct_pxv_payload_and_artifacts() -> None:
+    class _VariationMarkerBuilder:
+        def build_attributes(
+            self,
+            _product: Product,
+            _category_id: str,
+        ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], list[str]]:
+            return (
+                [
+                    {"id": "MODEL", "value_name": "Model X"},
+                    {"id": "COLOR", "value_name": "Azul"},
+                    {
+                        "_variation_candidates": {
+                            "COLOR": [
+                                {"id": "1", "name": "Azul"},
+                                {"id": "2", "name": "Verde"},
+                            ]
+                        }
+                    },
+                ],
+                [],
+                [],
+                [],
+            )
+
+        def set_cache_mapper(self, cache_mapper: Any) -> None:  # pragma: no cover - compat hook
+            del cache_mapper
+
+    publisher = _ValidationPublisher(users_me={"id": 1234, "tags": ["user_product_seller"]})
+    config = _base_config()
+    config["flow_routing"] = {"mode": "forced", "forced_flow": "user_products"}
+    use_case = PublishProductUseCase(
+        category_resolver=_ValidationResolver(),  # type: ignore[arg-type]
+        publisher=publisher,  # type: ignore[arg-type]
+        image_uploader=_ImageUploader(),  # type: ignore[arg-type]
+        config=config,
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+    use_case._attribute_builder = _VariationMarkerBuilder()  # type: ignore[assignment]
+
+    result = use_case.execute([_build_product({"family_name": "Linha Alpha"})], "MLB1234")
+
+    assert result["success"] is True
+    assert publisher.created_user_product_items
+    created_item = publisher.created_user_product_items[0]
+    assert "variations" not in created_item
+    assert created_item["family_name"] == "Linha Alpha"
+    assert created_item["user_product"]["selected_model"] == "Model X"
+    assert len(created_item["user_product"]["variations"]) == 2
+    routing = result["item_results"][0]["flow_routing"]
+    assert routing["selected_model"] == "Model X"
+    assert routing["up_family_name"] == "Linha Alpha"
+    assert routing["up_variation_count"] == 2

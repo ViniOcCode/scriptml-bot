@@ -17,6 +17,7 @@ ValueIndex = dict[str, dict[str, ValueDef]]
 MLPayload = dict[str, Any]
 
 _STOPWORDS = {"de", "do", "da", "dos", "das", "e"}
+_VARIATION_HINT_PREFIX = "varia por"
 _BLOCKED_HEADER_PREFIXES = (
     "unidade de altura",
     "unidade de largura",
@@ -24,7 +25,6 @@ _BLOCKED_HEADER_PREFIXES = (
     "unidade de profundidade",
     "unidade de peso",
     "unidade de tempo de garantia",
-    "varia por",
 )
 _BLOCKED_HEADER_EXACT = {
     "forma de envio",
@@ -179,7 +179,10 @@ class CachedAttributeMapper:
             return None
 
         normalized_header = PortugueseTextNormalizer.normalize(excel_header)
-        if self._is_blocked_header(normalized_header):
+        variation_hint = self._extract_variation_hint_from_normalized(normalized_header)
+        if variation_hint:
+            normalized_header = variation_hint
+        elif self._is_blocked_header(normalized_header):
             return None
 
         # Exact match on normalized name
@@ -212,6 +215,11 @@ class CachedAttributeMapper:
                 best_match = attr
 
         return best_match
+
+    def extract_variation_hint(self, excel_header: str) -> str | None:
+        """Extract normalized variation attribute hint from a header."""
+        normalized_header = PortugueseTextNormalizer.normalize(excel_header)
+        return self._extract_variation_hint_from_normalized(normalized_header)
 
     def map_value(self, attribute_id: str, excel_value: str) -> MLPayload:
         """Map Excel cell value to ML API value payload.
@@ -469,7 +477,16 @@ class CachedAttributeMapper:
         """Return whether a header is operational metadata, not a product attribute."""
         if normalized_header in _BLOCKED_HEADER_EXACT:
             return True
+        if normalized_header == _VARIATION_HINT_PREFIX:
+            return True
         return any(normalized_header.startswith(prefix) for prefix in _BLOCKED_HEADER_PREFIXES)
+
+    def _extract_variation_hint_from_normalized(self, normalized_header: str) -> str | None:
+        """Extract normalized variation hint from a normalized header."""
+        if not normalized_header.startswith(_VARIATION_HINT_PREFIX):
+            return None
+        hint = normalized_header[len(_VARIATION_HINT_PREFIX) :].strip()
+        return hint or None
 
     def _match_candidate_to_allowed_value(
         self, candidate: str, value_map: dict[str, ValueDef]
