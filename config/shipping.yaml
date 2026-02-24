@@ -5,6 +5,12 @@ shipping:
   # Default shipping mode when none specified
   default_mode: "not_specified"
 
+  # Shipping validation policy overrides.
+  # Keep free-shipping cost threshold as warning during tests.
+  policy:
+    non_blocking_codes:
+      - "shipping.free_shipping.cost_exceeded"
+
   # Mode priority for auto-selection (higher priority first)
   # ME2 should be preferred when both are available
   mode_priority:

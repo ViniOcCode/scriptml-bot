@@ -393,6 +393,62 @@ def test_attribute_mapper_maps_varia_por_header_and_extracts_variation_candidate
     }
 
 
+def test_attribute_builder_keeps_boolean_attributes_with_same_no_value() -> None:
+    resolver = _FakeCategoryResolver(
+        [
+            AttributeMeta(
+                id="INCLUDES_FRAME",
+                name="Inclui armação",
+                value_type="boolean",
+                required=False,
+                allowed_values={"Não", "Sim"},
+                relevance=1.0,
+            ),
+            AttributeMeta(
+                id="WITH_GLASS",
+                name="Com vidro",
+                value_type="boolean",
+                required=False,
+                allowed_values={"Não", "Sim"},
+                relevance=1.0,
+            ),
+            AttributeMeta(
+                id="WITH_PHRASES",
+                name="Com frases",
+                value_type="boolean",
+                required=False,
+                allowed_values={"Não", "Sim"},
+                relevance=1.0,
+            ),
+        ]
+    )
+    service = AttributeBuilderService(
+        category_resolver=resolver,
+        config={
+            "explicit_mappings": {
+                "Armação": {"target": "attribute", "id": "INCLUDES_FRAME"},
+                "Vidro": {"target": "attribute", "id": "WITH_GLASS"},
+                "Frases": {"target": "attribute", "id": "WITH_PHRASES"},
+            }
+        },
+        min_attribute_score=50,
+    )
+
+    attrs, sale_terms, warnings, errors = service.build_attributes(
+        _build_product({"Armação": "Não", "Vidro": "Não", "Frases": "Não"}),
+        "MLB40280",
+    )
+
+    assert not sale_terms
+    assert not warnings
+    assert not errors
+    assert {attr["id"]: attr["value_name"] for attr in attrs} == {
+        "INCLUDES_FRAME": "Não",
+        "WITH_GLASS": "Não",
+        "WITH_PHRASES": "Não",
+    }
+
+
 def test_listing_type_explicit_mapping_uses_gold_pro_for_premium() -> None:
     mapper = AttributeMapper(similarity_threshold=0.7)
 
@@ -1190,6 +1246,13 @@ def test_auto_na_policy_fills_optional_and_skips_non_eligible(caplog) -> None:  
                 required=False,
                 tags={"catalog_listing_required"},
             ),
+            AttributeMeta(
+                id="SELLER_SKU",
+                name="SKU vendedor",
+                value_type="string",
+                required=False,
+                tags={"variation_attribute"},
+            ),
             AttributeMeta(id="SIZE", name="Tamanho", value_type="string", required=False),
         ],
         conditional_attrs=[{"id": "SIZE"}],
@@ -1227,6 +1290,7 @@ def test_auto_na_policy_fills_optional_and_skips_non_eligible(caplog) -> None:  
     assert attrs_by_id["COLOR"] == {"id": "COLOR", "value_id": "-1", "value_name": None}
     assert "MODEL" not in attrs_by_id
     assert "GTIN" not in attrs_by_id
+    assert "SELLER_SKU" not in attrs_by_id
     assert "SIZE" not in attrs_by_id
     assert "ISBN" not in attrs_by_id
     assert resolver.last_conditional_payload is not None
