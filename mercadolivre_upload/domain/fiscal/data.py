@@ -15,6 +15,8 @@ from typing import Any
 
 import yaml
 
+from mercadolivre_upload.shared.utils.config_loader import load_yaml_config
+
 logger = logging.getLogger(__name__)
 
 
@@ -55,11 +57,9 @@ def _load_fiscal_config() -> dict[str, Any]:
         Full fiscal configuration dictionary
     """
     try:
-        config_path = Path("config/fiscal_config.yaml")
-        with open(config_path, encoding="utf-8") as f:
-            return yaml.safe_load(f) or {}
-    except Exception as e:
-        logger.warning(f"Could not load fiscal config: {e}. Using empty config.")
+        return load_yaml_config(Path("config/fiscal_config.yaml"))
+    except (OSError, yaml.YAMLError) as exc:
+        logger.warning("Could not load fiscal config: %s. Using empty config.", exc)
         return {}
 
 

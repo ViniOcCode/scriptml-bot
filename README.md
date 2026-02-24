@@ -4,11 +4,11 @@ A CLI tool to prepare, validate and publish product listings to Mercado Libre fr
 
 ## Quick start
 
-- Install (development):
+- Install (development, same dependency set used by CI):
 
   ```bash
   uv pip install -e ".[dev]"
-  # or
+  # runtime-only alternative:
   uv pip install -r requirements.txt
   ```
 
@@ -63,6 +63,7 @@ A CLI tool to prepare, validate and publish product listings to Mercado Libre fr
   uv run ruff check .
   uv run black --check --diff .
   uv run mypy mercadolivre_upload/
+  uv run bandit -q -c pyproject.toml -r mercadolivre_upload
   uv run pre-commit run --all-files
   ```
 

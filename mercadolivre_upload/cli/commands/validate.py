@@ -2,7 +2,6 @@
 
 import json
 import logging
-import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -12,10 +11,20 @@ from rich.console import Console
 from rich.panel import Panel
 
 from mercadolivre_upload.adapters.spreadsheet.parser import SpreadsheetParser
+from mercadolivre_upload.cli.commands.common import (
+    coerce_path_option,
+    merge_category_resolution_fields,
+    parse_products_or_exit,
+)
 from mercadolivre_upload.cli.commands.upload import (
     _ensure_observability_evidence,
+    _extract_cause_codes,
+    _extract_decision_classified_codes,
     _extract_row_category,
     _extract_row_identity,
+    _increment_code_counter,
+    _is_error_classification,
+    _is_warning_classification,
     _top_code_entries,
     _top_codes_by_status,
     build_publish_use_case,
@@ -27,53 +36,6 @@ console = Console()
 err_console = Console(stderr=True)
 
 app = typer.Typer(name="validate", help="Validate products without publishing")
-
-_CAUSE_CODE_PATTERN = re.compile(r"\b[a-z]+(?:[._-][a-z0-9]+)+\b")
-
-
-def _extract_cause_codes(error: str | None) -> list[str]:
-    if not error:
-        return []
-    return list(dict.fromkeys(_CAUSE_CODE_PATTERN.findall(error.lower())))
-
-
-def _is_warning_classification(classification: str) -> bool:
-    return classification in {"critical_warning", "informational_warning"}
-
-
-def _is_error_classification(classification: str) -> bool:
-    return classification in {"blocking_error", "retryable_error"}
-
-
-def _increment_code_counter(counter: dict[str, int], code: str) -> None:
-    normalized = code.strip().lower()
-    if not normalized:
-        return
-    counter[normalized] = counter.get(normalized, 0) + 1
-
-
-def _merge_category_resolution_fields(
-    target: dict[str, Any], source: dict[str, Any], default_input: str | None = None
-) -> None:
-    category_input = source.get("category_input")
-    if not isinstance(category_input, str) or not category_input:
-        category_input = default_input
-    target["category_input"] = category_input
-
-    category_resolved_id = source.get("category_resolved_id")
-    if isinstance(category_resolved_id, str) and category_resolved_id:
-        target["category_resolved_id"] = category_resolved_id
-    else:
-        target["category_resolved_id"] = None
-
-    category_path = source.get("category_path")
-    target["category_path"] = list(category_path) if isinstance(category_path, list) else []
-
-    resolution_strategy = source.get("resolution_strategy")
-    if isinstance(resolution_strategy, str) and resolution_strategy:
-        target["resolution_strategy"] = resolution_strategy
-    else:
-        target["resolution_strategy"] = "unresolved"
 
 
 @app.callback(invoke_without_command=True)
@@ -89,15 +51,8 @@ def validate(
     """Validate products against Mercado Livre APIs without publishing."""
     console.print(Panel.fit("Pre-Validation", style="yellow"))
 
-    if isinstance(cache_dir, typer.models.OptionInfo):
-        cache_dir = Path("cache/categories")
-    elif not isinstance(cache_dir, Path):
-        cache_dir = Path(cache_dir)
-
-    if isinstance(report_dir, typer.models.OptionInfo):
-        report_dir = Path("cache/reports")
-    elif not isinstance(report_dir, Path):
-        report_dir = Path(report_dir)
+    cache_dir = coerce_path_option(cache_dir, default=Path("cache/categories"))
+    report_dir = coerce_path_option(report_dir, default=Path("cache/reports"))
 
     if batch_size < 1:
         err_console.print("[red]batch-size must be greater than zero[/red]")
@@ -112,12 +67,8 @@ def validate(
     )
     parser = SpreadsheetParser()
 
-    try:
-        products = parser.parse(excel)
-        console.print(f"Found {len(products)} products")
-    except (FileNotFoundError, ValueError) as e:
-        err_console.print(f"[red]Error parsing Excel: {e}[/red]")
-        raise typer.Exit(1) from e
+    products = parse_products_or_exit(parser=parser, excel=excel, err_console=err_console)
+    console.print(f"Found {len(products)} products")
 
     total_items = len(products)
     total_batches = (total_items + batch_size - 1) // batch_size if total_items else 0
@@ -149,7 +100,7 @@ def validate(
                 "error": "Missing item result from validation use case",
                 "cause_codes": [],
             }
-            _merge_category_resolution_fields(base_item, {}, input_category)
+            merge_category_resolution_fields(base_item, {}, input_category)
             item_results.append(base_item)
 
         grouped_products: dict[str, list[tuple[int, dict[str, Any]]]] = {}
@@ -186,7 +137,7 @@ def validate(
                     "error": "Missing item result from validation use case",
                     "cause_codes": [],
                 }
-                _merge_category_resolution_fields(base_item, {}, row_input_category)
+                merge_category_resolution_fields(base_item, {}, row_input_category)
                 grouped_results.append(base_item)
 
             raw_item_results = results.get("item_results", [])
@@ -231,7 +182,7 @@ def validate(
                         grouped_results[target_index]["validation_decision"] = dict(
                             validation_decision
                         )
-                    _merge_category_resolution_fields(
+                    merge_category_resolution_fields(
                         grouped_results[target_index],
                         item,
                         grouped_results[target_index].get("category_input"),
@@ -323,6 +274,15 @@ def validate(
                             warning_codes_for_row.add(code)
                         elif cause_type == "error":
                             error_codes_for_row.add(code)
+
+            if not warning_codes_for_row and not error_codes_for_row:
+                decision_warning_codes, decision_error_codes = _extract_decision_classified_codes(
+                    normalized_item.get("validation_decision")
+                )
+                warning_codes_for_row.update(decision_warning_codes)
+                error_codes_for_row.update(decision_error_codes)
+                all_codes_for_row.update(decision_warning_codes)
+                all_codes_for_row.update(decision_error_codes)
 
             if not warning_codes_for_row and not error_codes_for_row:
                 if status_bucket == "valid":
