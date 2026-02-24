@@ -46,6 +46,7 @@ def _make_item_result(
     category_resolved_id: str | None = None,
     category_path: list[dict[str, object]] | None = None,
     resolution_strategy: str | None = None,
+    category_resolution_decision: dict[str, object] | None = None,
 ) -> dict[str, object]:
     result: dict[str, object] = {
         "index": index,
@@ -87,6 +88,8 @@ def _make_item_result(
         result["category_path"] = category_path
     if resolution_strategy is not None:
         result["resolution_strategy"] = resolution_strategy
+    if category_resolution_decision is not None:
+        result["category_resolution_decision"] = category_resolution_decision
     return result
 
 
@@ -159,9 +162,39 @@ def test_validate_groups_by_row_category_and_writes_summary(tmp_path, monkeypatc
                     category_resolved_id="MLB1000",
                     category_path=[{"id": "MLB1000", "name": "Cat 1000"}],
                     resolution_strategy="direct_id",
+                    category_resolution_decision={
+                        "category_input": "MLB1000",
+                        "category_resolved_id": "MLB1000",
+                        "strategy": "direct_id",
+                        "predictor_attempted": False,
+                        "predictor_titles_count": 0,
+                        "predictor_matched": False,
+                        "fallback_attempted": False,
+                        "fallback_reason": None,
+                    },
                 ),
                 _make_item_result(1, "SKU002", status="success"),
             ],
+            "category_resolution": {
+                "decision": {
+                    "category_input": "MLB1000",
+                    "category_resolved_id": "MLB1000",
+                    "strategy": "direct_id",
+                    "predictor_attempted": False,
+                    "predictor_titles_count": 0,
+                    "predictor_matched": False,
+                    "fallback_attempted": False,
+                    "fallback_reason": None,
+                },
+                "strategy_counts": {
+                    "direct_id": 2,
+                    "predictor_path_match": 0,
+                    "name_match": 0,
+                    "unresolved": 0,
+                },
+                "fallback_counts": {"attempted": 0, "resolved": 0, "unresolved": 0},
+                "predictor_counts": {"attempted": 0, "matched": 0, "unmatched": 0},
+            },
         },
         {
             "validated": 1,
@@ -169,6 +202,26 @@ def test_validate_groups_by_row_category_and_writes_summary(tmp_path, monkeypatc
             "failed": 0,
             "errors": [],
             "item_results": [_make_item_result(0, "SKU003", status="success")],
+            "category_resolution": {
+                "decision": {
+                    "category_input": "MLB2000",
+                    "category_resolved_id": "MLB2000",
+                    "strategy": "predictor_path_match",
+                    "predictor_attempted": True,
+                    "predictor_titles_count": 1,
+                    "predictor_matched": True,
+                    "fallback_attempted": False,
+                    "fallback_reason": None,
+                },
+                "strategy_counts": {
+                    "direct_id": 0,
+                    "predictor_path_match": 1,
+                    "name_match": 0,
+                    "unresolved": 0,
+                },
+                "fallback_counts": {"attempted": 0, "resolved": 0, "unresolved": 0},
+                "predictor_counts": {"attempted": 1, "matched": 1, "unmatched": 0},
+            },
         },
     ]
     build_use_case_mock = MagicMock(return_value=use_case_instance)
@@ -218,6 +271,23 @@ def test_validate_groups_by_row_category_and_writes_summary(tmp_path, monkeypatc
         "failed": [],
     }
     assert summary["top_error_codes_by_status"] == {"valid": [], "failed": []}
+    assert summary["category_resolution"]["strategy_counts"] == {
+        "direct_id": 2,
+        "predictor_path_match": 1,
+        "name_match": 0,
+        "unresolved": 0,
+    }
+    assert summary["category_resolution"]["fallback_counts"] == {
+        "attempted": 0,
+        "resolved": 0,
+        "unresolved": 0,
+    }
+    assert summary["category_resolution"]["predictor_counts"] == {
+        "attempted": 1,
+        "matched": 1,
+        "unmatched": 0,
+    }
+    assert len(summary["category_resolution"]["decisions"]) == 2
     assert len(summary["items"]) == 3
     assert {item["status"] for item in summary["items"]} == {"valid"}
     assert summary["items"][0]["cause_taxonomy"][0]["classification"] == "informational_warning"
@@ -235,6 +305,7 @@ def test_validate_groups_by_row_category_and_writes_summary(tmp_path, monkeypatc
     assert summary["items"][0]["flow_routing"]["up_family_name"] == "Linha Alpha"
     assert summary["items"][0]["image_diagnostics"]["status"] == "passed"
     assert summary["items"][0]["rollout_flags"]["strict_warning_gate_mode"] == "enforce"
+    assert summary["items"][0]["category_resolution_decision"]["strategy"] == "direct_id"
     assert summary["items"][0]["shipping_policy"]["decision"]["source"] == "shipping_resolver"
     assert summary["rollout_flags"]["image_diagnostics_gate_mode"] == "enforce"
     success_without_explicit_evidence = next(
@@ -246,6 +317,7 @@ def test_validate_groups_by_row_category_and_writes_summary(tmp_path, monkeypatc
     assert success_without_explicit_evidence["schema_contract_summary"] == {}
     assert success_without_explicit_evidence["cause_taxonomy"] == []
     assert success_without_explicit_evidence["validation_decision"]["action"] == "allow"
+    assert success_without_explicit_evidence["category_resolution_decision"] == {}
     assert isinstance(success_without_explicit_evidence["flow_routing"], dict)
 
 
