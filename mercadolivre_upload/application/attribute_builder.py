@@ -17,6 +17,7 @@ from mercadolivre_upload.domain.validation import (
     StructuralValidator,
     ValidationFeedback,
 )
+from mercadolivre_upload.shared.utils.text_utils import PortugueseTextNormalizer
 
 logger = logging.getLogger(__name__)
 _UNIT_ONLY_VALUE_PATTERN = re.compile(r"^(cm|mm|m|kg|g|mg|ml|l|oz|in)$", re.IGNORECASE)
@@ -201,7 +202,9 @@ class AttributeBuilderService:
 
             attr = self._cache_mapper.find_attribute_by_name(header)
             if attr and attr.get("id"):
-                payload = self._cache_mapper.map_value(str(attr["id"]), str(value))
+                attr_id = str(attr["id"])
+                payload = self._cache_mapper.map_value(attr_id, str(value))
+                payload["_source_column"] = header
                 if (
                     isinstance(attr.get("values"), list)
                     and attr.get("values")
@@ -211,6 +214,11 @@ class AttributeBuilderService:
                     logger.debug("Skipping cache mapped value with no allowed match: %s", header)
                     continue
                 mapped.append(payload)
+                tags = attr.get("tags", {})
+                if isinstance(tags, dict) and tags.get("allow_variations"):
+                    variation_values = self._cache_mapper.map_all_values(attr_id, str(value))
+                    if len(variation_values) > 1:
+                        mapped.append({"_variation_candidates": {attr_id: variation_values}})
                 mapped_headers.add(header)
                 logger.debug(f"Cache mapped: {header} -> {attr['id']}")
 
@@ -254,6 +262,16 @@ class AttributeBuilderService:
             score += 4
         if isinstance(attr.get("values"), list) and attr.get("values"):
             score += 2
+        if attr.get("id") == "GTIN":
+            source_column = attr.get("_source_column")
+            priority_config = self.config.get("gtin_source_priority", [])
+            if isinstance(source_column, str) and isinstance(priority_config, list):
+                normalized_source = PortugueseTextNormalizer.normalize(source_column)
+                for index, priority_column in enumerate(priority_config):
+                    normalized_priority = PortugueseTextNormalizer.normalize(str(priority_column))
+                    if normalized_source == normalized_priority:
+                        score += max(0, 10 - index)
+                        break
         if value_text:
             score += 1
             if any(char.isdigit() for char in value_text):

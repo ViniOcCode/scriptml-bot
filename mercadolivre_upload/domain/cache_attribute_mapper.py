@@ -279,48 +279,11 @@ class CachedAttributeMapper:
 
         # Handle attributes that expose allowed values (even when value_type is string).
         if attribute_id in self._value_index:
-            value_map = self._value_index[attribute_id]
-            candidate_values = self._build_value_candidates(excel_value)
-
-            # Try exact match first
-            for candidate in candidate_values:
-                normalized_candidate = PortugueseTextNormalizer.normalize(candidate)
-                if normalized_candidate in value_map:
-                    matched_value = value_map[normalized_candidate]
-                    value_id = matched_value.get("id")
-                    value_name = matched_value.get("name")
-                    return {
-                        "id": attribute_id,
-                        "name": attr_name,
-                        "value_id": value_id,
-                        "value_name": value_name,
-                        "values": [{"id": value_id, "name": value_name, "struct": None}],
-                    }
-
-            # Try partial/fuzzy matching
-            best_match: ValueDef | None = None
-            best_score = 0.0
-
-            for candidate in candidate_values:
-                normalized_candidate = PortugueseTextNormalizer.normalize(candidate)
-                for normalized_value, value_def in value_map.items():
-                    if (
-                        normalized_candidate in normalized_value
-                        or normalized_value in normalized_candidate
-                    ):
-                        score = 0.9
-                    else:
-                        score = PortugueseTextNormalizer.similarity(
-                            candidate, value_def.get("name", "")
-                        )
-
-                    if score > best_score:
-                        best_score = score
-                        best_match = value_def
-
-            if best_match and best_score >= 0.8:
-                value_id = best_match.get("id")
-                value_name = best_match.get("name")
+            matched_values = self.map_all_values(attribute_id, excel_value)
+            if matched_values:
+                first_match = matched_values[0]
+                value_id = first_match.get("id")
+                value_name = first_match.get("name")
                 return {
                     "id": attribute_id,
                     "name": attr_name,
@@ -346,6 +309,43 @@ class CachedAttributeMapper:
             "value_name": excel_value,
             "values": [{"id": None, "name": excel_value, "struct": None}],
         }
+
+    def map_all_values(self, attribute_id: str, excel_value: str) -> list[ValueDef]:
+        """Return all allowed values matched from a potentially multi-value cell."""
+        value_map = self._value_index.get(attribute_id)
+        if not value_map:
+            return []
+
+        raw_value = str(excel_value).strip()
+        if not raw_value:
+            return []
+
+        parts = [part.strip() for part in re.split(r"[,;/|]", raw_value) if part.strip()]
+        search_candidates = parts if len(parts) > 1 else [raw_value]
+        fallback_to_raw = len(parts) > 1
+
+        matched: list[ValueDef] = []
+        seen: set[tuple[Any, Any]] = set()
+
+        for candidate in search_candidates:
+            value_def = self._match_candidate_to_allowed_value(candidate, value_map)
+            if not value_def:
+                continue
+            key = (value_def.get("id"), value_def.get("name"))
+            if key in seen:
+                continue
+            seen.add(key)
+            matched.append(value_def)
+
+        if matched:
+            return matched
+
+        if fallback_to_raw:
+            value_def = self._match_candidate_to_allowed_value(raw_value, value_map)
+            if value_def:
+                return [value_def]
+
+        return []
 
     def map_product_attributes(self, product_attributes: dict[str, str]) -> list[MLPayload]:
         """Map all product attributes from Excel to ML API format.
@@ -470,6 +470,30 @@ class CachedAttributeMapper:
         if normalized_header in _BLOCKED_HEADER_EXACT:
             return True
         return any(normalized_header.startswith(prefix) for prefix in _BLOCKED_HEADER_PREFIXES)
+
+    def _match_candidate_to_allowed_value(
+        self, candidate: str, value_map: dict[str, ValueDef]
+    ) -> ValueDef | None:
+        """Match a candidate string to the best allowed value."""
+        normalized_candidate = PortugueseTextNormalizer.normalize(candidate)
+        if normalized_candidate in value_map:
+            return value_map[normalized_candidate]
+
+        best_match: ValueDef | None = None
+        best_score = 0.0
+        for normalized_value, value_def in value_map.items():
+            if normalized_candidate in normalized_value or normalized_value in normalized_candidate:
+                score = 0.9
+            else:
+                score = PortugueseTextNormalizer.similarity(candidate, value_def.get("name", ""))
+            if score > best_score:
+                best_score = score
+                best_match = value_def
+
+        if best_match and best_score >= 0.8:
+            return best_match
+
+        return None
 
     def _build_value_candidates(self, excel_value: str) -> list[str]:
         """Build candidate values for enum matching from potentially multi-value cells."""
