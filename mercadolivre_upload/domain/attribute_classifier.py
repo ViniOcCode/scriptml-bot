@@ -132,9 +132,3 @@ class AttributeClassifier:
     def is_technical(self, attr: AttributeMeta) -> bool:
         """Check if attribute is technical (specification)."""
         return self.classify(attr) == CLASS_TECHNICAL
-
-
-def classify_attribute(attr: AttributeMeta) -> str:
-    """Convenience function to classify a single attribute."""
-    classifier = AttributeClassifier()
-    return classifier.classify(attr)

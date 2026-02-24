@@ -212,10 +212,7 @@ class TestAuthCommand:
         mock_auth = MagicMock()
         mock_auth_class.return_value = mock_auth
 
-        status_mock = MagicMock()
-        status_mock.authenticated = True
-        status_mock.user_id = "user123"
-        mock_auth.get_auth_status.return_value = status_mock
+        mock_auth.get_auth_status.return_value = {"authenticated": True, "user_id": "user123"}
 
         result = runner.invoke(app, ["auth"])
 
@@ -229,9 +226,7 @@ class TestAuthCommand:
         mock_auth = MagicMock()
         mock_auth_class.return_value = mock_auth
 
-        status_mock = MagicMock()
-        status_mock.authenticated = False
-        mock_auth.get_auth_status.return_value = status_mock
+        mock_auth.get_auth_status.return_value = {"authenticated": False, "user_id": None}
 
         result = runner.invoke(app, ["auth"])
 
