@@ -418,6 +418,41 @@ def test_validation_only_mode_exposes_selection_logistic_type_metadata() -> None
     assert item_result["shipping_policy"]["payload"]["logistic_type"] == "fulfillment"
 
 
+def test_validation_only_mode_applies_row_shipping_headers() -> None:
+    publisher = _ValidationPublisher()
+    config = _base_config()
+    use_case = PublishProductUseCase(
+        category_resolver=_ValidationResolver(),  # type: ignore[arg-type]
+        publisher=publisher,  # type: ignore[arg-type]
+        image_uploader=_ImageUploader(),  # type: ignore[arg-type]
+        shipping_resolver=_FixedShippingResolver("me2"),  # type: ignore[arg-type]
+        config=config,
+        validation_only=True,
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+
+    product = _build_product(
+        {
+            "Forma de envio": "Mercado Envios",
+            "Custo de envio": "Por conta do comprador",
+            "Retirar pessoalmente": "Não aceito",
+        }
+    )
+    result = use_case.execute([product], "MLB1234")
+
+    item_result = result["item_results"][0]
+    decision = item_result["shipping_policy"]["decision"]
+    payload = item_result["shipping_policy"]["payload"]
+    assert decision["source"] == "spreadsheet.headers"
+    assert decision["row_shipping_input"]["mode_intent"] == "marketplace"
+    assert decision["free_shipping_source"] == "spreadsheet.header"
+    assert decision["local_pick_up_source"] == "spreadsheet.header"
+    assert payload["mode"] == "me2"
+    assert payload["free_shipping"] is False
+    assert payload["local_pick_up"] is False
+
+
 def test_validation_only_mode_enforces_mandatory_free_shipping_tag_from_selection() -> None:
     publisher = _ValidationPublisher()
     config = _base_config()
@@ -483,6 +518,36 @@ def test_validation_only_mode_allows_free_shipping_override_to_disable_enforceme
     assert decision["constraints"]["mandatory_free_shipping_detected"] is True
     assert decision["constraints"]["mandatory_free_shipping_enforced"] is False
     assert item_result["shipping_policy"]["payload"]["free_shipping"] is False
+
+
+def test_validation_only_treats_mandatory_free_shipping_added_as_non_blocking_warning() -> None:
+    publisher = _ValidationPublisher(
+        causes=[
+            {
+                "type": "warning",
+                "code": "item.shipping.mandatory_free_shipping",
+                "message": "Mandatory free shipping added",
+            }
+        ]
+    )
+    config = _base_config()
+    use_case = PublishProductUseCase(
+        category_resolver=_ValidationResolver(),  # type: ignore[arg-type]
+        publisher=publisher,  # type: ignore[arg-type]
+        image_uploader=_ImageUploader(),  # type: ignore[arg-type]
+        shipping_resolver=_FixedShippingResolver("me2"),  # type: ignore[arg-type]
+        config=config,
+        validation_only=True,
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+
+    result = use_case.execute([_build_product()], "MLB1234")
+
+    assert result["success"] is True
+    item_result = result["item_results"][0]
+    assert item_result["status"] == "success"
+    assert item_result["shipping_policy"]["cause_decisions"][0]["classification"] == "unknown"
 
 
 def test_validation_only_blocks_deterministic_shipping_policy_warning() -> None:
