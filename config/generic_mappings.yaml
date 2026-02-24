@@ -401,62 +401,19 @@ logging:
 # SHIPPING CONFIGURATION
 # =============================================================================
 shipping:
-  # Default shipping mode when none specified
-  default_mode: "not_specified"
-
-  # Shipping validation policy overrides.
-  # Keep free-shipping cost threshold as warning during tests.
+  # Shipping policy toggles.
+  # Mode/logistic/pickup/free_shipping payload fields are resolved at runtime from:
+  # - Spreadsheet row headers (Forma de envio, Custo de envio, Retirar pessoalmente)
+  # - Seller capabilities (/users/{id}/shipping_preferences)
   policy:
     non_blocking_codes:
       - "shipping.free_shipping.cost_exceeded"
-  
-  # Mode priority for auto-selection (higher priority first)
-  # me1 is prioritized over me2 as requested
-  mode_priority:
-    - "me1"
-    - "me2"
-  
-  # Configuration for each shipping mode
-  # Full ML API format support:
-  # {
-  #   "mode": "me2",
-  #   "methods": [],
-  #   "tags": ["mandatory_free_shipping"],
-  #   "dimensions": null,
-  #   "local_pick_up": false,
-  #   "free_shipping": true,
-  #   "logistic_type": "drop_off",
-  #   "store_pick_up": false
-  # }
-  modes:
-    not_specified:
-      local_pick_up: true
-      logistic_type: null
-      methods: []
-      tags: []
-      dimensions: null
-      free_shipping: false
-      store_pick_up: false
-    
-    me1:
-      # Mercado Envios mode 1 - Seller ships, ML handles delivery
-      local_pick_up: false
-      logistic_type: "drop_off"
-      methods: []
-      tags: []
-      dimensions: null
-      free_shipping: false
-      store_pick_up: false
-    
-    me2:
-      # Mercado Envios mode 2 - Full ML logistics
-      local_pick_up: false
-      logistic_type: "drop_off"
-      methods: []
-      tags: []
-      dimensions: null
-      free_shipping: true
-      store_pick_up: false
+      - "item.shipping.mandatory_free_shipping"
+    mandatory_free_shipping_tags:
+      - "mandatory_free_shipping"
+    enforce_mandatory_free_shipping: true
+    allow_runtime_tag_overrides: true
+    allow_runtime_free_shipping_override: true
 
 # =============================================================================
 # ATTRIBUTE CLASSIFICATION PATTERNS
