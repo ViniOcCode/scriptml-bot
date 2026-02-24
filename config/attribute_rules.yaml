@@ -69,6 +69,7 @@ na_policy:
     - "conditional_required"
     - "catalog_listing_required"
     - "allow_variations"
+    - "variation_attribute"
 
 # =============================================================================
 # SCORING WEIGHTS

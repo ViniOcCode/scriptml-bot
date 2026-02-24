@@ -96,11 +96,14 @@ class AttributeSanitizer:
         seen_values: dict[str, str] = {}  # value -> id
 
         for attr in scored_attrs:
+            can_be_redundant = self._can_be_redundant(attr)
+
             # Never drop protected attributes
             if attr.id in self.protected_attributes:
                 logger.debug(f"Keeping protected attribute {attr.id}")
                 result.append(attr)
-                seen_values[attr.value.lower()] = attr.id
+                if can_be_redundant:
+                    seen_values[attr.value.lower()] = attr.id
                 continue
 
             # Drop low-score attributes (but keep protected ones above)
@@ -109,7 +112,11 @@ class AttributeSanitizer:
                 continue
 
             # Drop only truly redundant editorial attributes
-            if attr.classification == CLASS_EDITORIAL and self._is_redundant(attr, seen_values):
+            if (
+                attr.classification == CLASS_EDITORIAL
+                and can_be_redundant
+                and self._is_redundant(attr, seen_values)
+            ):
                 logger.debug(f"Dropping redundant editorial {attr.id}")
                 continue
 
@@ -119,10 +126,19 @@ class AttributeSanitizer:
                 logger.debug(f"Keeping logistics attribute {attr.id}")
 
             result.append(attr)
-            seen_values[attr.value.lower()] = attr.id
+            if can_be_redundant:
+                seen_values[attr.value.lower()] = attr.id
 
         logger.info(f"Sanitized {len(scored_attrs)} -> {len(result)} attributes")
         return result
+
+    def _can_be_redundant(self, attr: ScoredAttribute) -> bool:
+        """Return whether attribute value should participate in redundancy detection."""
+        if attr.meta.value_type in {"boolean", "number", "number_unit"}:
+            return False
+        if attr.meta.allowed_values:
+            return False
+        return len(attr.value.strip()) > 4
 
     def _is_redundant(self, attr: ScoredAttribute, seen_values: dict[str, str]) -> bool:
         """Check for semantic similarity with already-kept attributes."""
