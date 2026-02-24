@@ -13,8 +13,11 @@ from rich.panel import Panel
 
 from mercadolivre_upload.adapters.spreadsheet.parser import SpreadsheetParser
 from mercadolivre_upload.cli.commands.upload import (
+    _ensure_observability_evidence,
     _extract_row_category,
     _extract_row_identity,
+    _top_code_entries,
+    _top_codes_by_status,
     build_publish_use_case,
     load_config,
 )
@@ -32,6 +35,45 @@ def _extract_cause_codes(error: str | None) -> list[str]:
     if not error:
         return []
     return list(dict.fromkeys(_CAUSE_CODE_PATTERN.findall(error.lower())))
+
+
+def _is_warning_classification(classification: str) -> bool:
+    return classification in {"critical_warning", "informational_warning"}
+
+
+def _is_error_classification(classification: str) -> bool:
+    return classification in {"blocking_error", "retryable_error"}
+
+
+def _increment_code_counter(counter: dict[str, int], code: str) -> None:
+    normalized = code.strip().lower()
+    if not normalized:
+        return
+    counter[normalized] = counter.get(normalized, 0) + 1
+
+
+def _merge_category_resolution_fields(
+    target: dict[str, Any], source: dict[str, Any], default_input: str | None = None
+) -> None:
+    category_input = source.get("category_input")
+    if not isinstance(category_input, str) or not category_input:
+        category_input = default_input
+    target["category_input"] = category_input
+
+    category_resolved_id = source.get("category_resolved_id")
+    if isinstance(category_resolved_id, str) and category_resolved_id:
+        target["category_resolved_id"] = category_resolved_id
+    else:
+        target["category_resolved_id"] = None
+
+    category_path = source.get("category_path")
+    target["category_path"] = list(category_path) if isinstance(category_path, list) else []
+
+    resolution_strategy = source.get("resolution_strategy")
+    if isinstance(resolution_strategy, str) and resolution_strategy:
+        target["resolution_strategy"] = resolution_strategy
+    else:
+        target["resolution_strategy"] = "unresolved"
 
 
 @app.callback(invoke_without_command=True)
@@ -84,6 +126,8 @@ def validate(
     all_item_results: list[dict[str, Any]] = []
     all_errors: list[str] = []
     cause_code_counts: dict[str, int] = {}
+    warning_code_counts: dict[str, dict[str, int]] = {"valid": {}, "failed": {}}
+    error_code_counts: dict[str, dict[str, int]] = {"valid": {}, "failed": {}}
     total_validated = 0
     total_failed = 0
 
@@ -96,18 +140,17 @@ def validate(
         for index, row in enumerate(batch_products):
             sku, title = _extract_row_identity(row)
             input_category = _extract_row_category(row) or category
-            item_results.append(
-                {
-                    "index": index,
-                    "sku": sku,
-                    "title": title,
-                    "category_input": input_category,
-                    "category_used": input_category,
-                    "status": "failed",
-                    "error": "Missing item result from validation use case",
-                    "cause_codes": [],
-                }
-            )
+            base_item: dict[str, Any] = {
+                "index": index,
+                "sku": sku,
+                "title": title,
+                "category_used": input_category,
+                "status": "failed",
+                "error": "Missing item result from validation use case",
+                "cause_codes": [],
+            }
+            _merge_category_resolution_fields(base_item, {}, input_category)
+            item_results.append(base_item)
 
         grouped_products: dict[str, list[tuple[int, dict[str, Any]]]] = {}
         for index, row in enumerate(batch_products):
@@ -121,6 +164,10 @@ def validate(
         for group_category, indexed_rows in grouped_products.items():
             rows_for_category = [row for _, row in indexed_rows]
             results = use_case.execute(rows_for_category, group_category)  # type: ignore[arg-type]
+            raw_group_flow_routing = results.get("flow_routing")
+            group_flow_routing = (
+                dict(raw_group_flow_routing) if isinstance(raw_group_flow_routing, dict) else None
+            )
 
             batch_validated += int(results.get("validated", results.get("published", 0)))
             batch_failed += int(results.get("failed", 0))
@@ -129,18 +176,18 @@ def validate(
             grouped_results: list[dict[str, Any]] = []
             for group_index, (_, row) in enumerate(indexed_rows):
                 sku, title = _extract_row_identity(row)
-                grouped_results.append(
-                    {
-                        "index": group_index,
-                        "sku": sku,
-                        "title": title,
-                        "category_input": _extract_row_category(row) or category,
-                        "category_used": group_category,
-                        "status": "failed",
-                        "error": "Missing item result from validation use case",
-                        "cause_codes": [],
-                    }
-                )
+                row_input_category = _extract_row_category(row) or category
+                base_item = {
+                    "index": group_index,
+                    "sku": sku,
+                    "title": title,
+                    "category_used": group_category,
+                    "status": "failed",
+                    "error": "Missing item result from validation use case",
+                    "cause_codes": [],
+                }
+                _merge_category_resolution_fields(base_item, {}, row_input_category)
+                grouped_results.append(base_item)
 
             raw_item_results = results.get("item_results", [])
             if isinstance(raw_item_results, list):
@@ -167,15 +214,71 @@ def validate(
                         "index": target_index,
                         "sku": item.get("sku") or grouped_results[target_index]["sku"],
                         "title": item.get("title") or grouped_results[target_index]["title"],
-                        "category_input": grouped_results[target_index]["category_input"],
                         "category_used": group_category,
                         "status": "valid" if row_status == "success" else "failed",
                         "error": error_text,
                         "cause_codes": cause_codes,
                     }
+                    cause_taxonomy = item.get("cause_taxonomy")
+                    if isinstance(cause_taxonomy, list):
+                        normalized_taxonomy = [
+                            dict(cause) for cause in cause_taxonomy if isinstance(cause, dict)
+                        ]
+                        if normalized_taxonomy:
+                            grouped_results[target_index]["cause_taxonomy"] = normalized_taxonomy
+                    validation_decision = item.get("validation_decision")
+                    if isinstance(validation_decision, dict):
+                        grouped_results[target_index]["validation_decision"] = dict(
+                            validation_decision
+                        )
+                    _merge_category_resolution_fields(
+                        grouped_results[target_index],
+                        item,
+                        grouped_results[target_index].get("category_input"),
+                    )
+                    policy_hash = item.get("policy_hash")
+                    if isinstance(policy_hash, str) and policy_hash:
+                        grouped_results[target_index]["policy_hash"] = policy_hash
+                    policy_summary = item.get("policy_summary")
+                    if isinstance(policy_summary, dict):
+                        grouped_results[target_index]["policy_summary"] = policy_summary
+                    schema_contract_hash = item.get("schema_contract_hash")
+                    if isinstance(schema_contract_hash, str) and schema_contract_hash:
+                        grouped_results[target_index]["schema_contract_hash"] = schema_contract_hash
+                    schema_contract_summary = item.get("schema_contract_summary")
+                    if isinstance(schema_contract_summary, dict):
+                        grouped_results[target_index][
+                            "schema_contract_summary"
+                        ] = schema_contract_summary
+                    identifier_gate = item.get("identifier_gate")
+                    if isinstance(identifier_gate, dict):
+                        grouped_results[target_index]["identifier_gate"] = identifier_gate
+                    flow_routing = item.get("flow_routing")
+                    if isinstance(flow_routing, dict):
+                        grouped_results[target_index]["flow_routing"] = flow_routing
+                    elif group_flow_routing is not None:
+                        grouped_results[target_index]["flow_routing"] = dict(group_flow_routing)
+                    image_diagnostics = item.get("image_diagnostics")
+                    if isinstance(image_diagnostics, dict):
+                        grouped_results[target_index]["image_diagnostics"] = image_diagnostics
+                    shipping_policy = item.get("shipping_policy")
+                    if isinstance(shipping_policy, dict):
+                        grouped_results[target_index]["shipping_policy"] = shipping_policy
+                    rollout_flags = item.get("rollout_flags")
+                    if isinstance(rollout_flags, dict):
+                        grouped_results[target_index]["rollout_flags"] = rollout_flags
+                    grouped_results[target_index] = _ensure_observability_evidence(
+                        grouped_results[target_index],
+                        row_status=grouped_results[target_index]["status"],
+                        default_flow_routing=group_flow_routing,
+                    )
 
             for group_index, (batch_index_pos, _) in enumerate(indexed_rows):
-                mapped = dict(grouped_results[group_index])
+                mapped = _ensure_observability_evidence(
+                    dict(grouped_results[group_index]),
+                    row_status=str(grouped_results[group_index].get("status", "failed")),
+                    default_flow_routing=group_flow_routing,
+                )
                 mapped["index"] = batch_index_pos
                 item_results[batch_index_pos] = mapped
 
@@ -184,11 +287,55 @@ def validate(
         all_errors.extend(batch_errors)
 
         for index, item_result in enumerate(item_results):
-            item_result["batch"] = batch_number
-            item_result["index"] = start + index
-            all_item_results.append(item_result)
-            for code in item_result.get("cause_codes", []):
-                cause_code_counts[code] = cause_code_counts.get(code, 0) + 1
+            row_status = str(item_result.get("status", "failed")).lower()
+            normalized_item = _ensure_observability_evidence(item_result, row_status=row_status)
+            normalized_item["batch"] = batch_number
+            normalized_item["index"] = start + index
+            all_item_results.append(normalized_item)
+            status_bucket = "valid" if row_status == "valid" else "failed"
+            raw_codes = normalized_item.get("cause_codes", [])
+            cause_codes = (
+                [str(code).strip().lower() for code in raw_codes if str(code).strip()]
+                if isinstance(raw_codes, list)
+                else []
+            )
+
+            warning_codes_for_row: set[str] = set()
+            error_codes_for_row: set[str] = set()
+            all_codes_for_row: set[str] = set(cause_codes)
+            taxonomy = normalized_item.get("cause_taxonomy")
+            if isinstance(taxonomy, list):
+                for cause in taxonomy:
+                    if not isinstance(cause, dict):
+                        continue
+                    code = str(cause.get("code", "")).strip().lower()
+                    if not code:
+                        continue
+                    all_codes_for_row.add(code)
+                    classification = str(cause.get("classification", "")).strip().lower()
+                    if _is_warning_classification(classification):
+                        warning_codes_for_row.add(code)
+                    elif _is_error_classification(classification):
+                        error_codes_for_row.add(code)
+                    else:
+                        cause_type = str(cause.get("type", "")).strip().lower()
+                        if cause_type == "warning":
+                            warning_codes_for_row.add(code)
+                        elif cause_type == "error":
+                            error_codes_for_row.add(code)
+
+            if not warning_codes_for_row and not error_codes_for_row:
+                if status_bucket == "valid":
+                    warning_codes_for_row.update(cause_codes)
+                else:
+                    error_codes_for_row.update(cause_codes)
+
+            for code in all_codes_for_row:
+                _increment_code_counter(cause_code_counts, code)
+            for code in warning_codes_for_row:
+                _increment_code_counter(warning_code_counts[status_bucket], code)
+            for code in error_codes_for_row:
+                _increment_code_counter(error_code_counts[status_bucket], code)
 
         console.print(
             f"[green]Batch {batch_number}: {batch_validated} valid[/green], "
@@ -198,6 +345,12 @@ def validate(
     report_dir.mkdir(parents=True, exist_ok=True)
     run_id = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     summary_path = report_dir / f"validation-summary-{run_id}.json"
+    rollout_flags_snapshot: dict[str, Any] = {}
+    for item in all_item_results:
+        raw_rollout_flags = item.get("rollout_flags")
+        if isinstance(raw_rollout_flags, dict) and raw_rollout_flags:
+            rollout_flags_snapshot = dict(raw_rollout_flags)
+            break
     summary_report = {
         "run_id": run_id,
         "source_file": str(excel),
@@ -208,6 +361,12 @@ def validate(
         "validated": total_validated,
         "failed": total_failed,
         "cause_code_counts": cause_code_counts,
+        "warning_code_counts": warning_code_counts,
+        "error_code_counts": error_code_counts,
+        "top_cause_codes": _top_code_entries(cause_code_counts),
+        "top_warning_codes_by_status": _top_codes_by_status(warning_code_counts),
+        "top_error_codes_by_status": _top_codes_by_status(error_code_counts),
+        "rollout_flags": rollout_flags_snapshot,
         "items": all_item_results,
     }
     summary_path.write_text(

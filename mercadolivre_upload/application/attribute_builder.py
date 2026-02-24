@@ -200,6 +200,11 @@ class AttributeBuilderService:
             if not value:
                 continue
 
+            variation_hint: str | None = None
+            extract_variation_hint = getattr(self._cache_mapper, "extract_variation_hint", None)
+            if callable(extract_variation_hint):
+                variation_hint = extract_variation_hint(header)
+
             attr = self._cache_mapper.find_attribute_by_name(header)
             if attr and attr.get("id"):
                 attr_id = str(attr["id"])
@@ -215,14 +220,51 @@ class AttributeBuilderService:
                     continue
                 mapped.append(payload)
                 tags = attr.get("tags", {})
+                should_extract_variations = bool(variation_hint)
                 if isinstance(tags, dict) and tags.get("allow_variations"):
-                    variation_values = self._cache_mapper.map_all_values(attr_id, str(value))
+                    should_extract_variations = True
+
+                if should_extract_variations:
+                    variation_values: list[dict[str, Any]] = []
+                    map_all_values = getattr(self._cache_mapper, "map_all_values", None)
+                    if callable(map_all_values):
+                        variation_values = map_all_values(attr_id, str(value))
+                    if variation_hint and len(variation_values) <= 1:
+                        variation_values = self._expand_variation_candidates_from_hint(
+                            str(value),
+                            variation_values,
+                        )
                     if len(variation_values) > 1:
                         mapped.append({"_variation_candidates": {attr_id: variation_values}})
                 mapped_headers.add(header)
                 logger.debug(f"Cache mapped: {header} -> {attr['id']}")
 
         return mapped, mapped_headers
+
+    @staticmethod
+    def _expand_variation_candidates_from_hint(
+        excel_value: str,
+        base_values: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Expand variation candidates from raw hint value tokens."""
+        candidates = [
+            value
+            for value in base_values
+            if isinstance(value, dict) and isinstance(value.get("name"), str) and value.get("name")
+        ]
+        seen = {
+            PortugueseTextNormalizer.normalize(str(value["name"]))
+            for value in candidates
+            if isinstance(value.get("name"), str)
+        }
+        for token in re.split(r"[,;/|]", excel_value):
+            candidate = token.strip()
+            normalized_candidate = PortugueseTextNormalizer.normalize(candidate)
+            if not normalized_candidate or normalized_candidate in seen:
+                continue
+            seen.add(normalized_candidate)
+            candidates.append({"id": None, "name": candidate})
+        return candidates
 
     def _deduplicate_attributes(
         self, attributes: list[dict[str, Any]], attr_metadata: list[Any]

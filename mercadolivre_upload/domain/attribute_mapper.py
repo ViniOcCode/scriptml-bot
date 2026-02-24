@@ -5,19 +5,20 @@ to Mercado Livre API attribute definitions.
 """
 
 import logging
+import re
 from typing import Any
 
 from mercadolivre_upload.shared.utils.text_utils import PortugueseTextNormalizer, TextNormalizer
 
 logger = logging.getLogger(__name__)
 
+_VARIATION_HINT_PREFIX = "varia por"
 _OPERATIONAL_HEADER_PATTERNS = (
     "forma de envio",
     "custo de envio",
     "tarifa de venda",
     "retirar pessoalmente",
     "quantidade de caracteres",
-    "varia por",
     "unidade de altura",
     "unidade de largura",
     "unidade de comprimento",
@@ -90,14 +91,39 @@ def _resolve_auto_explicit_mappings(
 def _is_operational_header(column_name: str) -> bool:
     """Return whether header is operational metadata and should not be fuzzy-mapped."""
     normalized = _normalize_column_name(column_name)
-    for pattern in _OPERATIONAL_HEADER_PATTERNS:
-        if pattern == "varia por":
-            if normalized.startswith(pattern):
-                return True
+    return normalized in _OPERATIONAL_HEADER_PATTERNS
+
+
+def _extract_variation_hint(column_name: str) -> str | None:
+    """Extract normalized variation attribute hint from a column name."""
+    normalized = _normalize_column_name(column_name)
+    if not normalized.startswith(_VARIATION_HINT_PREFIX):
+        return None
+    hint = normalized[len(_VARIATION_HINT_PREFIX) :].strip()
+    return hint or None
+
+
+def _extract_variation_candidates(value: Any) -> list[dict[str, Any]]:
+    """Extract raw variation candidates from a multi-value spreadsheet cell."""
+    if value is None:
+        return []
+
+    tokens = [part.strip() for part in re.split(r"[,;/|]", str(value)) if part.strip()]
+    if len(tokens) <= 1:
+        return []
+
+    unique_tokens: list[str] = []
+    seen: set[str] = set()
+    for token in tokens:
+        normalized = PortugueseTextNormalizer.normalize(token)
+        if not normalized or normalized in seen:
             continue
-        if normalized == pattern:
-            return True
-    return False
+        seen.add(normalized)
+        unique_tokens.append(token)
+
+    if len(unique_tokens) <= 1:
+        return []
+    return [{"id": None, "name": token} for token in unique_tokens]
 
 
 class AttributeMapper:
@@ -125,7 +151,8 @@ class AttributeMapper:
         Returns:
             Tuple of (best_attribute_definition, similarity_score) or (None, 0.0)
         """
-        excel_normalized = TextNormalizer.normalize(excel_column)
+        hint = _extract_variation_hint(excel_column)
+        excel_normalized = TextNormalizer.normalize(hint or excel_column)
         best_match = None
         best_score = 0.0
 
@@ -200,8 +227,8 @@ class AttributeMapper:
             Tuple of (ml_attributes_list, sale_terms_list)
         """
         excel_columns = list(product_attributes.keys())
-        ml_attributes_list = []
-        sale_terms_list = []
+        ml_attributes_list: list[dict[str, Any]] = []
+        sale_terms_list: list[dict[str, Any]] = []
         available_attribute_ids = {
             attr_id
             for attr in ml_attributes
@@ -359,13 +386,22 @@ class AttributeMapper:
         for col, attr_def in column_to_attr.items():
             value = product_attributes.get(col)  # type: ignore[assignment]
             if value:
+                attr_id = attr_def["id"]
                 ml_attributes_list.append(
                     {
-                        "id": attr_def["id"],
+                        "id": attr_id,
                         "name": attr_def["name"],
                         "value_name": value,
                     }
                 )
+                if isinstance(attr_id, str):
+                    variation_hint = _extract_variation_hint(col)
+                    if variation_hint:
+                        variation_candidates = _extract_variation_candidates(value)
+                        if variation_candidates:
+                            ml_attributes_list.append(
+                                {"_variation_candidates": {attr_id: variation_candidates}}
+                            )
 
         return ml_attributes_list, sale_terms_list
 

@@ -163,3 +163,33 @@ def test_upload_image_normalizes_url_from_variations(tmp_path):
 
     assert result["secure_url"] == "https://img.example/test.jpg"
     assert result["url"] == "https://img.example/test.jpg"
+
+
+def test_diagnose_picture_posts_picture_url_payload():
+    http_client = MagicMock()
+    client = MLApiClient(http_client=http_client)
+    client.post = MagicMock(return_value={"id": "diag-1"})
+
+    result = client.diagnose_picture(
+        picture_url="https://example.com/image.jpg",
+        context={"category_id": "MLB1", "picture_type": "thumbnail"},
+    )
+
+    assert result == {"id": "diag-1"}
+    client.post.assert_called_once_with(
+        "/moderations/pictures/diagnostic",
+        json={
+            "picture_url": "https://example.com/image.jpg",
+            "context": {"category_id": "MLB1", "picture_type": "thumbnail"},
+        },
+    )
+
+
+def test_diagnose_picture_requires_single_identifier():
+    client = MLApiClient(http_client=MagicMock())
+
+    with pytest.raises(ValueError):
+        client.diagnose_picture()
+
+    with pytest.raises(ValueError):
+        client.diagnose_picture(picture_url="https://example.com/image.jpg", picture_id="PIC-1")

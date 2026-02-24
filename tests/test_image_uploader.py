@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
+import requests
 
 from mercadolivre_upload.adapters.image_uploader import ImageUploader
 
@@ -232,6 +233,51 @@ class TestImageUploader:
 
         results = uploader.upload_batch([str(img)], product_id="PROD123")
         assert results[0]["success"] is True
+
+    def test_diagnose_images_reports_detected_issues(self, uploader_with_api):
+        """Test diagnostics returns blocking issues when detections exist."""
+        uploader_with_api.api_client.diagnose_picture.return_value = {
+            "diagnostics": [
+                {
+                    "picture_type": "thumbnail",
+                    "action": "diagnostic",
+                    "detections": [{"name": "text_logo"}],
+                }
+            ]
+        }
+
+        result = uploader_with_api.diagnose_images(
+            sku="SKU-1",
+            category_id="MLB1",
+            title="Produto",
+            picture_urls=["https://example.com/image.jpg"],
+            picture_ids=["PIC-1"],
+        )
+
+        assert result["status"] == "failed"
+        assert result["available"] is True
+        assert result["issues"] == ["Picture 1 diagnostic issues: text_logo"]
+        uploader_with_api.api_client.diagnose_picture.assert_called_once()
+
+    def test_diagnose_images_marks_unavailable_on_404(self, uploader_with_api, caplog):
+        """Test diagnostics fallback when endpoint is unavailable."""
+        caplog.set_level(logging.WARNING)
+        error = requests.HTTPError("not found")
+        error.response = Mock(status_code=404)
+        uploader_with_api.api_client.diagnose_picture.side_effect = error
+
+        result = uploader_with_api.diagnose_images(
+            sku="SKU-1",
+            category_id="MLB1",
+            title="Produto",
+            picture_urls=["https://example.com/image.jpg"],
+            picture_ids=["PIC-1"],
+        )
+
+        assert result["status"] == "unavailable"
+        assert result["available"] is False
+        assert "endpoint unavailable" in result["message"].lower()
+        assert "endpoint unavailable" in caplog.text.lower()
 
     # ==================== get_uploaded_images ====================
 
