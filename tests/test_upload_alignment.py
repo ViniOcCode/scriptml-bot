@@ -230,6 +230,30 @@ def test_explicit_mapping_is_not_bypassed_by_cache_mapper() -> None:
     assert cache_mapper.map_calls == 0
 
 
+def test_explicit_mapping_accepts_dynamic_conditional_metadata() -> None:
+    resolver = _FakeCategoryResolver(
+        [AttributeMeta(id="BRAND", name="Marca", value_type="string", required=False)],
+        conditional_attrs=[{"id": "SIZE", "name": "Tamanho", "value_type": "string"}],
+    )
+    service = AttributeBuilderService(
+        category_resolver=resolver,
+        config={"explicit_mappings": {"Tamanho": {"target": "attribute", "id": "SIZE"}}},
+        min_attribute_score=0,
+    )
+
+    attrs, sale_terms, warnings, errors = service.build_attributes(
+        _build_product({"Tamanho": "M"}),
+        "MLB123",
+    )
+
+    assert not sale_terms
+    assert not warnings
+    assert not errors
+    assert {a["id"]: a["value_name"] for a in attrs}["SIZE"] == "M"
+    assert resolver.last_conditional_payload is not None
+    assert resolver.last_conditional_payload["description"] == {"plain_text": "Desc"}
+
+
 def test_peso_fisico_variants_are_mapped_without_explicit_config() -> None:
     resolver = _FakeCategoryResolver(
         [
@@ -623,6 +647,36 @@ def test_shipping_resolver_selection_uses_first_logistic_type_when_no_default() 
 
     assert selection["mode"] == "me1"
     assert selection["logistic_type"] == "xd_drop_off"
+
+
+def test_shipping_resolver_selection_exposes_runtime_policy_hints() -> None:
+    provider = _FakeShippingProvider(
+        user_info={"id": 789},
+        shipping_preferences={
+            "modes": [],
+            "logistics": [
+                {
+                    "mode": "me2",
+                    "types": [{"type": "drop_off", "default": True}],
+                    "tags": ["mandatory_free_shipping", "cross_border"],
+                    "free_shipping": {"required": True},
+                    "constraints": {"carrier": "me2", "dimensions": "required"},
+                }
+            ],
+        },
+    )
+    resolver = ShippingResolver(
+        provider,
+        config={"mode_priority": ["me2", "me1"], "default_mode": "not_specified"},
+    )
+
+    selection = resolver.get_best_shipping_selection()
+
+    assert selection["mode"] == "me2"
+    assert selection["logistic_type"] == "drop_off"
+    assert selection["tags"] == ["mandatory_free_shipping", "cross_border"]
+    assert selection["free_shipping"] is True
+    assert selection["constraints"] == {"carrier": "me2", "dimensions": "required"}
 
 
 def test_publish_attribute_normalization_uses_attribute_id_for_weights() -> None:
@@ -1341,6 +1395,104 @@ def test_auto_na_policy_fills_optional_and_skips_non_eligible(caplog) -> None:  
     assert resolver.last_conditional_payload is not None
     assert resolver.last_conditional_payload["description"] == {"plain_text": "Desc"}
     assert any("Skipped N/A auto-fill" in message for message in caplog.messages)
+
+
+def test_auto_na_policy_skips_non_fillable_tags() -> None:
+    resolver = _FakeCategoryResolver(
+        metadata=[
+            AttributeMeta(id="VISIBLE", name="Visível", value_type="string", required=False),
+            AttributeMeta(
+                id="HIDDEN_ATTR",
+                name="Oculto",
+                value_type="string",
+                required=False,
+                tags={"hidden"},
+            ),
+            AttributeMeta(
+                id="READ_ONLY_ATTR",
+                name="Somente leitura",
+                value_type="string",
+                required=False,
+                tags={"read-only"},
+            ),
+            AttributeMeta(
+                id="LOCKED_ATTR",
+                name="Bloqueado",
+                value_type="string",
+                required=False,
+                tags={"non-modifiable"},
+            ),
+            AttributeMeta(
+                id="COND_VISIBLE",
+                name="Condicional",
+                value_type="string",
+                required=False,
+            ),
+            AttributeMeta(
+                id="COND_HIDDEN",
+                name="Condicional oculto",
+                value_type="string",
+                required=False,
+                tags={"hidden"},
+            ),
+        ],
+        conditional_attrs=[{"id": "COND_VISIBLE"}, {"id": "COND_HIDDEN"}],
+    )
+
+    use_case = object.__new__(PublishProductUseCase)
+    use_case.config = {"na_policy": {"enabled": True, "value_id": "-1", "value_name": None}}
+    use_case.category_resolver = resolver
+
+    item = {"attributes": []}
+    conditional_required_ids = PublishProductUseCase._inject_optional_na_attributes(
+        use_case,
+        category_id="MLB123",
+        item=item,
+        sku="SKU-1",
+        description="Desc",
+    )
+
+    attrs_by_id = {attr["id"]: attr for attr in item["attributes"]}
+    assert attrs_by_id["VISIBLE"] == {"id": "VISIBLE", "value_id": "-1", "value_name": None}
+    assert "HIDDEN_ATTR" not in attrs_by_id
+    assert "READ_ONLY_ATTR" not in attrs_by_id
+    assert "LOCKED_ATTR" not in attrs_by_id
+    assert "COND_VISIBLE" not in attrs_by_id
+    assert "COND_HIDDEN" not in attrs_by_id
+    assert conditional_required_ids == {"COND_VISIBLE"}
+
+
+def test_missing_conditional_attributes_ignores_non_fillable_ids() -> None:
+    resolver = _FakeCategoryResolver(
+        metadata=[
+            AttributeMeta(
+                id="COND_HIDDEN",
+                name="Condicional oculto",
+                value_type="string",
+                required=False,
+                tags={"read_only"},
+            ),
+            AttributeMeta(
+                id="COND_VISIBLE",
+                name="Condicional visível",
+                value_type="string",
+                required=False,
+            ),
+        ],
+        conditional_attrs=[{"id": "COND_HIDDEN"}, {"id": "COND_VISIBLE"}],
+    )
+
+    use_case = object.__new__(PublishProductUseCase)
+    use_case.category_resolver = resolver
+
+    missing = PublishProductUseCase._get_missing_conditional_attributes(
+        use_case,
+        category_id="MLB123",
+        item={"attributes": []},
+        description="Desc",
+    )
+
+    assert missing == ["COND_VISIBLE"]
 
 
 def test_build_product_reads_descricao_header() -> None:

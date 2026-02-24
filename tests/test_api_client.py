@@ -40,6 +40,79 @@ def test_validate_item_raises_for_non_json_400_response():
     response.raise_for_status.assert_called_once()
 
 
+def test_validate_user_product_item_sanitizes_payload_before_validation():
+    client = MLApiClient(http_client=MagicMock())
+    payload = {
+        "title": "Linha Alpha Model X",
+        "family_name": "Linha Alpha",
+        "variations": [{"id": 1}],
+        "user_product": {"selected_model": "Model X", "variations": []},
+    }
+    client.validate_item = MagicMock(return_value={"cause": []})
+
+    result = client.validate_user_product_item(payload)
+
+    assert result == {"cause": []}
+    client.validate_item.assert_called_once_with({"family_name": "Linha Alpha"})
+
+
+def test_validate_user_product_item_uses_title_as_family_name_when_missing():
+    client = MLApiClient(http_client=MagicMock())
+    client.validate_item = MagicMock(return_value={"cause": []})
+
+    result = client.validate_user_product_item({"title": "Linha Alpha Model X"})
+
+    assert result == {"cause": []}
+    client.validate_item.assert_called_once_with({"family_name": "Linha Alpha Model X"})
+
+
+def test_create_user_product_item_sanitizes_payload_before_create():
+    client = MLApiClient(http_client=MagicMock())
+    payload = {
+        "title": "Linha Alpha Model X",
+        "family_name": "Linha Alpha",
+        "variations": [{"id": 1}],
+        "user_product": {"selected_model": "Model X", "variations": []},
+    }
+    client.create_item = MagicMock(return_value={"id": "MLB1234567890"})
+
+    result = client.create_user_product_item(payload)
+
+    assert result == {"id": "MLB1234567890"}
+    client.create_item.assert_called_once_with({"family_name": "Linha Alpha"})
+
+
+def test_create_user_product_item_routes_sales_condition_when_user_product_id_present():
+    client = MLApiClient(http_client=MagicMock())
+    client.post = MagicMock(return_value={"id": "MLB1234567890"})
+
+    payload = {
+        "title": "Linha Alpha Model X",
+        "user_product_id": "MLBU123",
+        "price": 100.0,
+        "category_id": "MLB1055",
+        "currency_id": "BRL",
+        "buying_mode": "buy_it_now",
+        "listing_type_id": "gold_special",
+        "available_quantity": 1,
+        "condition": "new",
+    }
+
+    result = client.create_user_product_item(payload)
+
+    assert result == {"id": "MLB1234567890"}
+    client.post.assert_called_once_with(
+        "/user-products/MLBU123/items",
+        json={
+            "price": 100.0,
+            "category_id": "MLB1055",
+            "currency_id": "BRL",
+            "buying_mode": "buy_it_now",
+            "listing_type_id": "gold_special",
+        },
+    )
+
+
 def test_get_category_conditional_attributes_from_required_attributes():
     http_client = MagicMock()
     client = MLApiClient(http_client=http_client)

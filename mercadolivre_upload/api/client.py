@@ -250,9 +250,46 @@ class MLApiClient:
         """
         return self.post("/items/validate", json=item)
 
+    @staticmethod
+    def _sanitize_user_product_item_payload(item: dict[str, Any]) -> dict[str, Any]:
+        """Strip legacy fields not supported by MLB user-products create contract."""
+        payload = dict(item)
+        family_name = payload.get("family_name")
+        if not isinstance(family_name, str) or not family_name.strip():
+            title = payload.get("title")
+            if isinstance(title, str) and title.strip():
+                payload["family_name"] = title.strip()
+        payload.pop("title", None)
+        payload.pop("variations", None)
+        payload.pop("user_product", None)
+        return payload
+
+    @staticmethod
+    def _build_user_product_sales_condition_payload(
+        item: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Keep only fields accepted by /user-products/{id}/items."""
+        allowed_fields = {
+            "price",
+            "category_id",
+            "currency_id",
+            "buying_mode",
+            "listing_type_id",
+            "shipping",
+            "channels",
+            "tags",
+            "sale_terms",
+            "catalog_listing",
+            "catalog_product_id",
+            "official_store_id",
+        }
+        return {field: value for field, value in item.items() if field in allowed_fields}
+
     def validate_user_product_item(self, item: dict[str, Any]) -> dict[str, Any]:
         """Validate user-products payload using current MVP endpoint routing."""
-        return self.validate_item(item)
+        payload = self._sanitize_user_product_item_payload(item)
+        payload.pop("user_product_id", None)
+        return self.validate_item(payload)
 
     def diagnose_picture(
         self,
@@ -288,8 +325,16 @@ class MLApiClient:
         return self.post("/items", json=item)
 
     def create_user_product_item(self, item: dict[str, Any]) -> dict[str, Any]:
-        """Create user-products payload using current MVP endpoint routing."""
-        return self.create_item(item)
+        """Create user-products payload with MLB-safe endpoint routing."""
+        payload = self._sanitize_user_product_item_payload(item)
+        user_product_id = payload.pop("user_product_id", None)
+        if isinstance(user_product_id, str) and user_product_id.strip():
+            sales_condition_payload = self._build_user_product_sales_condition_payload(payload)
+            return self.post(
+                f"/user-products/{user_product_id.strip()}/items",
+                json=sales_condition_payload,
+            )
+        return self.create_item(payload)
 
     def create_item_description(self, item_id: str, plain_text: str) -> dict[str, Any]:
         """Create or update item description."""
