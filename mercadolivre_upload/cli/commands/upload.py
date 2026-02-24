@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,11 @@ from mercadolivre_upload.api.category_adapter import CategoryAdapter
 from mercadolivre_upload.api.client import MLApiClient
 from mercadolivre_upload.application.publish_product import PublishProductUseCase
 from mercadolivre_upload.auth import AuthManager
+from mercadolivre_upload.cli.commands.common import (
+    coerce_path_option,
+    merge_category_resolution_fields,
+    parse_products_or_exit,
+)
 from mercadolivre_upload.domain.category.resolver import CategoryResolver
 from mercadolivre_upload.domain.fiscal.service import FiscalService
 from mercadolivre_upload.domain.shipping.resolver import ShippingResolver
@@ -24,6 +30,8 @@ from mercadolivre_upload.infrastructure.cache.attribute_cache import AttributeCa
 from mercadolivre_upload.shared.utils.config_loader import load_merged_yaml_config
 
 logger = logging.getLogger(__name__)
+
+_CAUSE_CODE_PATTERN = re.compile(r"\b[a-z]+(?:[._-][a-z0-9]+)+\b")
 
 
 def _normalize_cause_codes(raw_codes: Any) -> list[str]:
@@ -41,6 +49,32 @@ def _normalize_cause_taxonomy(raw_taxonomy: Any) -> list[dict[str, Any]]:
     if not isinstance(raw_taxonomy, list):
         return []
     return [dict(cause) for cause in raw_taxonomy if isinstance(cause, dict)]
+
+
+def _extract_cause_codes(error: str | None) -> list[str]:
+    if not error:
+        return []
+    return list(dict.fromkeys(_CAUSE_CODE_PATTERN.findall(error.lower())))
+
+
+def _extract_decision_classified_codes(validation_decision: Any) -> tuple[set[str], set[str]]:
+    warning_codes: set[str] = set()
+    error_codes: set[str] = set()
+    if not isinstance(validation_decision, dict):
+        return warning_codes, error_codes
+
+    classification_codes = validation_decision.get("classification_codes")
+    if not isinstance(classification_codes, dict):
+        return warning_codes, error_codes
+
+    for classification, raw_codes in classification_codes.items():
+        normalized_codes = _normalize_cause_codes(raw_codes)
+        normalized_classification = str(classification).strip().lower()
+        if _is_warning_classification(normalized_classification):
+            warning_codes.update(normalized_codes)
+        elif _is_error_classification(normalized_classification):
+            error_codes.update(normalized_codes)
+    return warning_codes, error_codes
 
 
 def _default_validation_decision(status: str) -> dict[str, Any]:
@@ -259,30 +293,6 @@ def _extract_row_category(row: dict[str, Any]) -> str | None:
     return None
 
 
-def _merge_category_resolution_fields(
-    target: dict[str, Any], source: dict[str, Any], default_input: str | None = None
-) -> None:
-    category_input = source.get("category_input")
-    if not isinstance(category_input, str) or not category_input:
-        category_input = default_input
-    target["category_input"] = category_input
-
-    category_resolved_id = source.get("category_resolved_id")
-    if isinstance(category_resolved_id, str) and category_resolved_id:
-        target["category_resolved_id"] = category_resolved_id
-    else:
-        target["category_resolved_id"] = None
-
-    category_path = source.get("category_path")
-    target["category_path"] = list(category_path) if isinstance(category_path, list) else []
-
-    resolution_strategy = source.get("resolution_strategy")
-    if isinstance(resolution_strategy, str) and resolution_strategy:
-        target["resolution_strategy"] = resolution_strategy
-    else:
-        target["resolution_strategy"] = "unresolved"
-
-
 @app.callback(invoke_without_command=True)
 def upload(
     excel: Path = typer.Option(..., "--excel", "-e", help="Excel file path"),  # noqa: B008
@@ -300,17 +310,8 @@ def upload(
     # Load configuration
     config = load_config()
 
-    # Defensive: if cache_dir is OptionInfo, use default
-    if isinstance(cache_dir, typer.models.OptionInfo):
-        cache_dir = Path("cache/categories")
-    elif not isinstance(cache_dir, Path):
-        cache_dir = Path(cache_dir)
-
-    # Defensive: if report_dir is OptionInfo, use default
-    if isinstance(report_dir, typer.models.OptionInfo):
-        report_dir = Path("cache/reports")
-    elif not isinstance(report_dir, Path):
-        report_dir = Path(report_dir)
+    cache_dir = coerce_path_option(cache_dir, default=Path("cache/categories"))
+    report_dir = coerce_path_option(report_dir, default=Path("cache/reports"))
 
     if batch_size < 1:
         err_console.print("[red]batch-size must be greater than zero[/red]")
@@ -325,12 +326,8 @@ def upload(
 
     # Parse products
     parser = SpreadsheetParser()
-    try:
-        products = parser.parse(excel)
-        console.print(f"Found {len(products)} products")
-    except (FileNotFoundError, ValueError) as e:
-        err_console.print(f"[red]Error parsing Excel: {e}[/red]")
-        raise typer.Exit(1) from e
+    products = parse_products_or_exit(parser=parser, excel=excel, err_console=err_console)
+    console.print(f"Found {len(products)} products")
 
     if dry_run:
         console.print("[yellow]Dry run mode - validating only[/yellow]")
@@ -368,7 +365,7 @@ def upload(
                 "status": "failed",
                 "error": "Missing item result from use case",
             }
-            _merge_category_resolution_fields(base_item, {}, input_category)
+            merge_category_resolution_fields(base_item, {}, input_category)
             item_results.append(base_item)
         grouped_products: dict[str, list[tuple[int, dict[str, Any]]]] = {}
         for index, row in enumerate(batch_products):
@@ -405,7 +402,7 @@ def upload(
                     "status": "failed",
                     "error": "Missing item result from use case",
                 }
-                _merge_category_resolution_fields(base_item, {}, group_category)
+                merge_category_resolution_fields(base_item, {}, group_category)
                 grouped_results.append(base_item)
 
             raw_item_results = results.get("item_results", [])
@@ -421,18 +418,24 @@ def upload(
                         continue
 
                     row_status = str(item.get("status", "failed")).lower()
+                    error_text = item.get("error")
                     mapped_item = {
                         "index": target_index,
                         "sku": item.get("sku") or grouped_results[target_index]["sku"],
                         "title": item.get("title") or grouped_results[target_index]["title"],
                         "status": "success" if row_status == "success" else "failed",
-                        "error": item.get("error"),
+                        "error": error_text,
                     }
                     cause_codes = item.get("cause_codes")
+                    normalized_codes: list[str] = []
                     if isinstance(cause_codes, list):
                         normalized_codes = [str(code) for code in cause_codes if str(code).strip()]
-                        if normalized_codes:
-                            mapped_item["cause_codes"] = normalized_codes
+                    if not normalized_codes:
+                        normalized_codes = _extract_cause_codes(
+                            str(error_text) if error_text is not None else None
+                        )
+                    if normalized_codes:
+                        mapped_item["cause_codes"] = normalized_codes
                     cause_taxonomy = item.get("cause_taxonomy")
                     if isinstance(cause_taxonomy, list):
                         normalized_taxonomy = [
@@ -443,7 +446,7 @@ def upload(
                     validation_decision = item.get("validation_decision")
                     if isinstance(validation_decision, dict):
                         mapped_item["validation_decision"] = dict(validation_decision)
-                    _merge_category_resolution_fields(
+                    merge_category_resolution_fields(
                         mapped_item,
                         item,
                         grouped_results[target_index].get("category_input"),
@@ -510,10 +513,15 @@ def upload(
                 "error": item_result.get("error"),
             }
             cause_codes = item_result.get("cause_codes")
+            normalized_codes = []
             if isinstance(cause_codes, list):
                 normalized_codes = [str(code) for code in cause_codes if str(code).strip()]
-                if normalized_codes:
-                    normalized["cause_codes"] = normalized_codes
+            if not normalized_codes:
+                normalized_codes = _extract_cause_codes(
+                    str(item_result.get("error")) if item_result.get("error") is not None else None
+                )
+            if normalized_codes:
+                normalized["cause_codes"] = normalized_codes
             cause_taxonomy = item_result.get("cause_taxonomy")
             if isinstance(cause_taxonomy, list):
                 normalized_taxonomy = [
@@ -524,7 +532,7 @@ def upload(
             validation_decision = item_result.get("validation_decision")
             if isinstance(validation_decision, dict):
                 normalized["validation_decision"] = dict(validation_decision)
-            _merge_category_resolution_fields(
+            merge_category_resolution_fields(
                 normalized,
                 item_result,
                 item_result.get("category_input"),
@@ -589,6 +597,15 @@ def upload(
                             warning_codes_for_row.add(code)
                         elif cause_type == "error":
                             error_codes_for_row.add(code)
+
+            if not warning_codes_for_row and not error_codes_for_row:
+                decision_warning_codes, decision_error_codes = _extract_decision_classified_codes(
+                    normalized.get("validation_decision")
+                )
+                warning_codes_for_row.update(decision_warning_codes)
+                error_codes_for_row.update(decision_error_codes)
+                all_codes_for_row.update(decision_warning_codes)
+                all_codes_for_row.update(decision_error_codes)
 
             if not warning_codes_for_row and not error_codes_for_row:
                 if status_bucket == "success":

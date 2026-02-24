@@ -3,12 +3,13 @@
 ## Build, test, and lint commands
 
 - Install dependencies (dev): `uv pip install -e ".[dev]"`
-- Run full tests: `uv run pytest`
+- Run full tests: `uv run pytest -q`
 - Run a single test file: `uv run pytest tests/test_cli.py -q`
 - Run a single test node: `uv run pytest tests/test_cli.py::TestUploadCommand::test_upload_success -q`
 - Lint: `uv run ruff check .`
 - Format check: `uv run black --check --diff .`
 - Type check: `uv run mypy mercadolivre_upload/`
+- Security check: `uv run bandit -q -c pyproject.toml -r mercadolivre_upload`
 - Run hooks: `uv run pre-commit run --all-files`
 - Build package (CI path): `python -m build` (CI installs `build` first)
 

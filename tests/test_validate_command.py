@@ -327,3 +327,74 @@ def test_validate_exits_with_failure_and_reports_cause_codes(tmp_path, monkeypat
     assert summary["items"][0]["policy_summary"] == {}
     assert summary["items"][0]["schema_contract_hash"] is None
     assert summary["items"][0]["schema_contract_summary"] == {}
+
+
+def test_validate_uses_validation_decision_codes_when_taxonomy_is_missing(
+    tmp_path, monkeypatch
+) -> None:
+    rows = _build_rows(1)
+
+    parser_instance = MagicMock()
+    parser_instance.parse.return_value = rows
+    monkeypatch.setattr(validate_cmd, "SpreadsheetParser", MagicMock(return_value=parser_instance))
+    monkeypatch.setattr(validate_cmd, "load_config", lambda: {})
+
+    use_case_instance = MagicMock()
+    use_case_instance.execute.return_value = {
+        "validated": 0,
+        "published": 0,
+        "failed": 1,
+        "errors": ["SKU001: publish failed"],
+        "item_results": [
+            _make_item_result(
+                0,
+                "SKU001",
+                status="failed",
+                error="SKU001: publish failed",
+                cause_codes=["item.pictures.without_main"],
+                validation_decision={
+                    "mode": "strict",
+                    "action": "allow",
+                    "classification_codes": {
+                        "blocking_error": [],
+                        "retryable_error": [],
+                        "critical_warning": [],
+                        "informational_warning": ["item.pictures.without_main"],
+                    },
+                },
+            )
+        ],
+    }
+    monkeypatch.setattr(
+        validate_cmd,
+        "build_publish_use_case",
+        MagicMock(return_value=use_case_instance),
+    )
+
+    excel = tmp_path / "products.xlsx"
+    excel.write_text("dummy", encoding="utf-8")
+    images = tmp_path / "images"
+    images.mkdir()
+    report_dir = tmp_path / "reports"
+
+    with pytest.raises(typer.Exit) as exc_info:
+        validate_cmd.validate(
+            excel=excel,
+            images=images,
+            category="MLB1000",
+            cache_dir=tmp_path / "cache",
+            detailed=False,
+            batch_size=5,
+            report_dir=report_dir,
+        )
+
+    assert exc_info.value.exit_code == 1
+    summary_files = list(report_dir.glob("validation-summary-*.json"))
+    assert len(summary_files) == 1
+    summary = json.loads(summary_files[0].read_text(encoding="utf-8"))
+    assert summary["cause_code_counts"] == {"item.pictures.without_main": 1}
+    assert summary["warning_code_counts"] == {
+        "valid": {},
+        "failed": {"item.pictures.without_main": 1},
+    }
+    assert summary["error_code_counts"] == {"valid": {}, "failed": {}}

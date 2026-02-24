@@ -3,7 +3,6 @@
 Apenas inicialização e configuração. Comandos estão em cli/commands/.
 """
 
-import json
 from importlib import import_module
 from pathlib import Path
 from typing import Any
@@ -47,29 +46,6 @@ def _get_auth_manager_cls() -> Any:
 def setup_logging(verbose: bool = False) -> None:
     """Configure logging based on verbosity."""
     setup_app_logging(level="DEBUG" if verbose else "INFO")
-
-
-def print_json(data: dict[str, Any]) -> None:
-    """Print data as JSON."""
-    console.print(json.dumps(data, indent=2, default=str))
-
-
-def print_result(
-    result: dict[str, Any], success_message: str = "", error_message: str = ""
-) -> None:
-    """Print result based on output format."""
-    if state["output_format"] == "json":
-        print_json(result)
-    else:
-        if result.get("success"):
-            if success_message:
-                console.print(f"✓ {success_message}", style="success")
-        else:
-            if error_message:
-                err_console.print(f"✗ {error_message}", style="error")
-            if result.get("errors"):
-                for error in result["errors"]:
-                    err_console.print(f"  • {error}", style="error")
 
 
 # Importar comandos
@@ -161,12 +137,8 @@ def auth(
             raise typer.Exit(1) from err
         return
     status = manager.get_auth_status()
-    if isinstance(status, dict):
-        authenticated = bool(status.get("authenticated"))
-        user_id = status.get("user_id")
-    else:
-        authenticated = bool(getattr(status, "authenticated", False))
-        user_id = getattr(status, "user_id", None)
+    authenticated = bool(status.get("authenticated"))
+    user_id = status.get("user_id")
     if authenticated:
         console.print(f"Autenticado: {user_id}")
     else:
