@@ -469,6 +469,10 @@ class CategoryResolver:
 
         return {}
 
+    def get_category_data(self, category_id: str) -> dict[str, Any]:
+        """Get category details for policy and validation workflows."""
+        return self._get_category_cached(category_id)
+
     def is_listing_allowed(self, category_id: str) -> bool:
         """Check whether category is enabled for listing.
 

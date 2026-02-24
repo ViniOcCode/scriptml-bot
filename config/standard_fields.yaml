@@ -11,6 +11,19 @@ min_confidence_threshold: 0.85
 # - fail: Stop processing with error
 on_unmatched: flag
 
+# Rollout safety controls for publish/validate hardening gates.
+# strict_warning_gate_mode: enforce | report_only
+strict_warning_gate_mode: "enforce"
+
+# Publish flow routing controls.
+flow_routing:
+  user_products_enabled: true
+  blocked_behavior: "fail" # fail | fallback_legacy
+
+# Image diagnostics gate controls.
+image_diagnostics:
+  gate_mode: "enforce" # enforce | report_only | disabled
+
 # Core item fields that are ALWAYS required for every publication
 # These are set automatically if not found in Excel
 core_item_fields:

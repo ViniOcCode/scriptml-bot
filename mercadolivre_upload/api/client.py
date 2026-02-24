@@ -250,6 +250,32 @@ class MLApiClient:
         """
         return self.post("/items/validate", json=item)
 
+    def validate_user_product_item(self, item: dict[str, Any]) -> dict[str, Any]:
+        """Validate user-products payload using current MVP endpoint routing."""
+        return self.validate_item(item)
+
+    def diagnose_picture(
+        self,
+        *,
+        picture_url: str | None = None,
+        picture_id: str | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Run image diagnostics preflight for a picture."""
+        if bool(picture_url) == bool(picture_id):
+            raise ValueError("Provide exactly one of picture_url or picture_id")
+
+        payload: dict[str, Any] = {}
+        if picture_id:
+            payload["picture_id"] = picture_id
+        elif picture_url:
+            payload["picture_url"] = picture_url
+
+        if isinstance(context, dict) and context:
+            payload["context"] = context
+
+        return self.post("/moderations/pictures/diagnostic", json=payload)
+
     def create_item(self, item: dict[str, Any]) -> dict[str, Any]:
         """Create/publish an item.
 
@@ -260,6 +286,10 @@ class MLApiClient:
             Created item data
         """
         return self.post("/items", json=item)
+
+    def create_user_product_item(self, item: dict[str, Any]) -> dict[str, Any]:
+        """Create user-products payload using current MVP endpoint routing."""
+        return self.create_item(item)
 
     def create_item_description(self, item_id: str, plain_text: str) -> dict[str, Any]:
         """Create or update item description."""
