@@ -70,6 +70,9 @@ na_policy:
     - "catalog_listing_required"
     - "allow_variations"
     - "variation_attribute"
+    - "hidden"
+    - "read_only"
+    - "non_modifiable"
 
 # =============================================================================
 # SCORING WEIGHTS
