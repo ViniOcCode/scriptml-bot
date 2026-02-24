@@ -299,7 +299,7 @@ class ImageValidator(ExtendedValidator):
 class CategoryValidator(ExtendedValidator):
     """Category validator."""
 
-    CATEGORY_ID_PATTERN = re.compile(r"^ML[BCDU]\d+$")
+    CATEGORY_ID_PATTERN = re.compile(r"^[A-Z]{3}\d+$")
 
     def validate(self, data: dict[str, Any]) -> list[ValidationResult]:
         """Validate product category."""
@@ -332,7 +332,7 @@ class CategoryValidator(ExtendedValidator):
             results.append(
                 ValidationResult(
                     field="category_id",
-                    message=f"Formato inválido: '{category_id}' (esperado: MLB12345)",
+                    message=f"Formato inválido: '{category_id}' (esperado: AAA12345)",
                     severity=ValidationSeverity.ERROR,
                 )
             )

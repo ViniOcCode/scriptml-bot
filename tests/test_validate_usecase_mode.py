@@ -136,6 +136,15 @@ class _FixedShippingResolver:
         return self.mode
 
 
+class _SelectionShippingResolver:
+    def __init__(self, mode: str, logistic_type: str | None = None):
+        self.mode = mode
+        self.logistic_type = logistic_type
+
+    def get_best_shipping_selection(self) -> dict[str, str | None]:
+        return {"mode": self.mode, "logistic_type": self.logistic_type}
+
+
 class _SchemaContractResolver(_ValidationResolver):
     def __init__(
         self,
@@ -358,6 +367,32 @@ def test_validation_only_mode_exposes_shipping_policy_metadata() -> None:
     assert item_result["shipping_policy"]["decision"]["source"] == "shipping_resolver"
     assert item_result["shipping_policy"]["decision"]["selected_mode"] == "me2"
     assert item_result["shipping_policy"]["payload"]["mode"] == "me2"
+
+
+def test_validation_only_mode_exposes_selection_logistic_type_metadata() -> None:
+    publisher = _ValidationPublisher()
+    config = _base_config()
+    config["shipping"] = _shipping_config()
+    use_case = PublishProductUseCase(
+        category_resolver=_ValidationResolver(),  # type: ignore[arg-type]
+        publisher=publisher,  # type: ignore[arg-type]
+        image_uploader=_ImageUploader(),  # type: ignore[arg-type]
+        shipping_resolver=_SelectionShippingResolver("me2", logistic_type="fulfillment"),  # type: ignore[arg-type]
+        config=config,
+        validation_only=True,
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+
+    result = use_case.execute([_build_product()], "MLB1234")
+
+    item_result = result["item_results"][0]
+    decision = item_result["shipping_policy"]["decision"]
+    assert decision["source"] == "shipping_resolver.selection"
+    assert decision["selected_mode"] == "me2"
+    assert decision["selected_logistic_type"] == "fulfillment"
+    assert decision["logistic_type_source"] == "shipping_resolver.selection"
+    assert item_result["shipping_policy"]["payload"]["logistic_type"] == "fulfillment"
 
 
 def test_validation_only_blocks_deterministic_shipping_policy_warning() -> None:
