@@ -923,9 +923,7 @@ def test_publish_sale_terms_complete_required_ids_with_default_fallback() -> Non
                     "currency_id": "BRL",
                     "buying_mode": "buy_it_now",
                     "listing_type_id": "gold_special",
-                    "sale_terms": [
-                        {"id": "WARRANTY_TYPE", "value_name": "Garantia do vendedor"}
-                    ],
+                    "sale_terms": [{"id": "WARRANTY_TYPE", "value_name": "Garantia do vendedor"}],
                 }
             },
         },
