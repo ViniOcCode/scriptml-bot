@@ -235,6 +235,13 @@ class MLApiClient:
             return cast(list[dict[str, Any]], result)
         return []
 
+    def get_site_listing_types(self, site_id: str = "MLB") -> list[dict[str, Any]]:
+        """Get listing types available for a site."""
+        result = self.get(f"/sites/{site_id}/listing_types")
+        if isinstance(result, list):
+            return cast(list[dict[str, Any]], result)
+        return []
+
     def get_category_technical_specs(self, category_id: str) -> dict[str, Any]:
         """Get category technical specs (input structure)."""
         return self.get(f"/categories/{category_id}/technical_specs/input")

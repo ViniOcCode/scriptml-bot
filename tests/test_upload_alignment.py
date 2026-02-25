@@ -134,15 +134,20 @@ class _FakePublisher:
         self,
         listing_types: list[dict[str, str]] | None = None,
         sale_terms: list[dict[str, Any]] | None = None,
+        site_listing_types: list[dict[str, str]] | None = None,
     ):
         self.listing_types = listing_types or []
         self.sale_terms = sale_terms or []
+        self.site_listing_types = site_listing_types or []
         self.validated_items: list[dict[str, Any]] = []
         self.created_items: list[dict[str, Any]] = []
         self.description_calls: list[tuple[str, str]] = []
 
     def get_available_listing_types(self, category_id: str) -> list[dict[str, str]]:
         return self.listing_types
+
+    def get_site_listing_types(self, site_id: str) -> list[dict[str, str]]:
+        return self.site_listing_types
 
     def get_category_sale_terms(self, category_id: str) -> list[dict[str, Any]]:
         return self.sale_terms
@@ -795,6 +800,59 @@ def test_publish_flow_uses_available_listing_type_and_description_endpoint() -> 
 
     assert resolver.last_conditional_payload is not None
     assert resolver.last_conditional_payload["description"] == {"plain_text": "Desc"}
+
+
+def test_publish_listing_type_fallback_uses_site_listing_types() -> None:
+    resolver = _FakeCategoryResolver(
+        [
+            AttributeMeta(id="BRAND", name="Marca", value_type="string", required=False),
+        ]
+    )
+    publisher = _FakePublisher(
+        listing_types=[],
+        sale_terms=[],
+        site_listing_types=[{"id": "free"}],
+    )
+    use_case = PublishProductUseCase(
+        category_resolver=resolver,  # type: ignore[arg-type]
+        publisher=publisher,  # type: ignore[arg-type]
+        image_uploader=_FakeImageUploader(),  # type: ignore[arg-type]
+        shipping_resolver=_FixedShippingResolver("me2"),  # type: ignore[arg-type]
+        fiscal_service=None,
+        clip_uploader=None,
+        config={
+            "core_item_fields": {
+                "defaults": {
+                    "currency_id": "BRL",
+                    "buying_mode": "buy_it_now",
+                    "listing_type_id": "gold_special",
+                    "sale_terms": [],
+                }
+            },
+            "shipping": {
+                "default_mode": "me2",
+                "modes": {
+                    "me2": {
+                        "local_pick_up": False,
+                        "logistic_type": "drop_off",
+                        "methods": [],
+                        "tags": [],
+                        "dimensions": None,
+                        "free_shipping": False,
+                        "store_pick_up": False,
+                    }
+                },
+            },
+        },
+        dry_run=False,
+        min_attribute_score=0,
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+
+    assert use_case._publish_one(_build_product({}), "MLB123") is True
+    created_item = publisher.created_items[0]
+    assert created_item["listing_type_id"] == "free"
 
 
 def test_publish_builds_variations_from_marked_candidates() -> None:
