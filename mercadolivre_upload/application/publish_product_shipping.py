@@ -334,7 +334,7 @@ def build_shipping_config(
         runtime_free_shipping_for_mode = resolved_runtime_free_shipping
 
     configured_tags: list[str] = []
-    selected_tags = []
+    selected_tags: list[str] = []
     tags_source = "runtime.default.empty"
     policy_overrides: list[str] = []
 
