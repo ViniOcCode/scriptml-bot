@@ -20,7 +20,7 @@ from mercadolivre_upload.domain.validation import ValidationFeedback
 from mercadolivre_upload.shared.utils.text_utils import PortugueseTextNormalizer
 
 from .attribute_builder import AttributeBuilderService
-from .policy_snapshot import compile_policy_snapshot, compile_schema_contract
+from .policy_snapshot import compile_policy_snapshot
 from .ports import ClipUploaderPort, ImageUploaderPort, ItemPublisherPort, ShippingResolverPort
 from .publish_product_category import (
     build_category_resolution_observability,
@@ -62,6 +62,15 @@ from .publish_product_identifier import (
     normalize_gtin_value,
     normalize_identifier_text,
     validate_identifier_state,
+)
+from .publish_product_preflight import (
+    get_schema_contract_artifact as _get_schema_contract_artifact_helper,
+)
+from .publish_product_preflight import (
+    get_schema_contract_compiled as _get_schema_contract_compiled_helper,
+)
+from .publish_product_preflight import (
+    run_image_diagnostic_preflight as _run_image_diagnostic_preflight_helper,
 )
 from .publish_product_shipping import (
     build_shipping_config as _build_shipping_config_helper,
@@ -2541,61 +2550,10 @@ class PublishProductUseCase:
         return artifact
 
     def _get_schema_contract_compiled(self, category_id: str) -> dict[str, Any]:
-        """Compile and cache schema contract for a category."""
-        cached = self._category_schema_contract_cache.get(category_id)
-        if cached is not None:
-            return cached
-
-        category_data = self._get_policy_category_data(category_id)
-        attributes = self._get_policy_attributes(category_id)
-        sale_terms = list(self._get_category_sale_terms_map(category_id).values())
-
-        try:
-            compiled = compile_schema_contract(
-                category_id=category_id,
-                category_data=category_data,
-                attributes=attributes,
-                sale_terms=sale_terms,
-            )
-        except Exception as error:
-            logger.error("Failed to compile schema contract for %s: %s", category_id, error)
-            compiled = compile_schema_contract(
-                category_id=category_id,
-                category_data={},
-                attributes=[],
-                sale_terms=[],
-            )
-
-        summary = compiled.get("schema_contract_summary", {})
-        if isinstance(summary, dict):
-            if summary.get("required_attribute_count", 0) == 0:
-                logger.info(
-                    "Schema contract %s has no deterministic required attributes metadata.",
-                    category_id,
-                )
-            if (
-                summary.get("max_pictures") is None
-                and summary.get("max_variations_allowed") is None
-            ):
-                logger.info(
-                    "Schema contract %s has no category limits metadata for pictures/variations.",
-                    category_id,
-                )
-
-        self._category_schema_contract_cache[category_id] = compiled
-        return compiled
+        return _get_schema_contract_compiled_helper(self, category_id)
 
     def _get_schema_contract_artifact(self, category_id: str) -> dict[str, Any]:
-        """Return compact schema contract metadata for reports."""
-        compiled = self._get_schema_contract_compiled(category_id)
-        artifact: dict[str, Any] = {}
-        schema_contract_hash = compiled.get("schema_contract_hash")
-        if isinstance(schema_contract_hash, str) and schema_contract_hash:
-            artifact["schema_contract_hash"] = schema_contract_hash
-        summary = compiled.get("schema_contract_summary")
-        if isinstance(summary, dict):
-            artifact["schema_contract_summary"] = summary
-        return artifact
+        return _get_schema_contract_artifact_helper(self, category_id)
 
     def _run_image_diagnostic_preflight(
         self,
@@ -2606,55 +2564,14 @@ class PublishProductUseCase:
         picture_urls: list[str],
         picture_ids: list[str],
     ) -> dict[str, Any]:
-        """Run optional image diagnostics before validate/publish gates."""
-        artifact: dict[str, Any] = {
-            "status": "unavailable",
-            "available": False,
-            "checked": 0,
-            "issues": [],
-            "results": [],
-        }
-
-        if self.image_diagnostics_gate_mode == "disabled":
-            artifact["status"] = "skipped"
-            artifact["message"] = (
-                "Image diagnostics gate disabled by rollout flag " "'image_diagnostics.gate_mode'."
-            )
-            return self._annotate_image_diagnostics_artifact(artifact)
-
-        diagnose_images = getattr(self.image_uploader, "diagnose_images", None)
-        if not callable(diagnose_images):
-            message = (
-                "Image diagnostics unavailable: image uploader does not expose diagnose_images."
-            )
-            logger.warning(message)
-            artifact["message"] = message
-            return self._annotate_image_diagnostics_artifact(artifact)
-
-        try:
-            diagnostic_result = diagnose_images(
-                sku=sku,
-                category_id=category_id,
-                title=title,
-                picture_urls=picture_urls,
-                picture_ids=picture_ids,
-            )
-        except Exception as error:
-            message = f"Image diagnostics preflight failed for {sku}: {error}"
-            logger.warning(message)
-            artifact["message"] = message
-            return self._annotate_image_diagnostics_artifact(artifact)
-
-        if isinstance(diagnostic_result, dict):
-            return self._annotate_image_diagnostics_artifact(diagnostic_result)
-
-        message = (
-            "Image diagnostics preflight returned unexpected payload type: "
-            f"{type(diagnostic_result).__name__}"
+        return _run_image_diagnostic_preflight_helper(
+            self,
+            sku=sku,
+            title=title,
+            category_id=category_id,
+            picture_urls=picture_urls,
+            picture_ids=picture_ids,
         )
-        logger.warning(message)
-        artifact["message"] = message
-        return self._annotate_image_diagnostics_artifact(artifact)
 
     @staticmethod
     def _normalize_identifier_text(value: Any) -> str | None:
