@@ -385,7 +385,7 @@ def test_validation_only_mode_exposes_shipping_policy_metadata() -> None:
     assert decision["source"] == "shipping_resolver"
     assert decision["selected_mode"] == "me2"
     assert decision["mode_configured"] is True
-    assert decision["available_modes"] == ["me2", "not_specified"]
+    assert decision["available_modes"] == ["me2"]
     assert decision["constraints"]["category_id"] == "MLB1234"
     assert decision["constraints"]["listing_allowed"] is True
     assert decision["constraints"]["category_status"] == "enabled"
@@ -477,7 +477,7 @@ def test_validation_only_mode_enforces_mandatory_free_shipping_tag_from_selectio
 
     item_result = result["item_results"][0]
     decision = item_result["shipping_policy"]["decision"]
-    assert decision["tags_source"] == "config.mode+shipping_resolver.selection"
+    assert decision["tags_source"] == "shipping_resolver.selection"
     assert decision["selected_tags"] == ["mandatory_free_shipping"]
     assert decision["selected_free_shipping"] is True
     assert decision["free_shipping_source"] == "policy.mandatory_free_shipping_tag"
@@ -645,7 +645,7 @@ def test_validation_only_keeps_retryable_shipping_warning_non_blocking() -> None
     assert item_result["shipping_policy"]["cause_decisions"][0]["classification"] == "retryable"
 
 
-def test_shipping_policy_falls_back_when_resolved_mode_is_not_configured() -> None:
+def test_shipping_policy_keeps_resolved_mode_without_legacy_config_fallback() -> None:
     publisher = _ValidationPublisher()
     config = _base_config()
     config["shipping"] = _shipping_config()
@@ -664,9 +664,9 @@ def test_shipping_policy_falls_back_when_resolved_mode_is_not_configured() -> No
 
     item_result = result["item_results"][0]
     decision = item_result["shipping_policy"]["decision"]
-    assert decision["source"] == "config.modes_fallback"
-    assert decision["fallback_applied"] is True
-    assert item_result["shipping_policy"]["payload"]["mode"] == "not_specified"
+    assert decision["source"] == "shipping_resolver"
+    assert decision["fallback_applied"] is False
+    assert item_result["shipping_policy"]["payload"]["mode"] == "custom_mode"
 
 
 def test_validation_only_mode_reuses_policy_snapshot_for_same_category() -> None:

@@ -133,17 +133,11 @@ def build_shipping_config(
     category_id: str | None = None,
     row_attributes: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Build shipping configuration from config and runtime seller capabilities."""
-    raw_shipping_config = use_case.config.get("shipping", {})
-    shipping_config = raw_shipping_config if isinstance(raw_shipping_config, dict) else {}
-    default_mode_raw = shipping_config.get("default_mode", "not_specified")
-    default_mode = str(default_mode_raw).strip() or "not_specified"
-    raw_modes = shipping_config.get("modes", {})
-    modes_config = raw_modes if isinstance(raw_modes, dict) else {}
-
+    """Build shipping configuration from runtime seller capabilities and row headers."""
+    default_mode = "not_specified"
     requested_mode = default_mode
-    decision_source = "config.default_mode"
-    decision_reason = "Using configured default mode."
+    decision_source = "runtime.default_mode"
+    decision_reason = "Using runtime default mode."
     resolved_mode: str | None = None
     resolved_logistic_type: str | None = None
     resolved_logistic_type_source: str | None = None
@@ -296,20 +290,11 @@ def build_shipping_config(
                     "Resolved Mercado Envios from spreadsheet headers using available seller modes."
                 )
             else:
-                fallback_marketplace_mode: str | None = None
-                if default_mode in marketplace_priority:
-                    fallback_marketplace_mode = default_mode
-                else:
-                    for mode in marketplace_priority:
-                        if mode in modes_config:
-                            fallback_marketplace_mode = mode
-                            break
-                if not fallback_marketplace_mode:
-                    fallback_marketplace_mode = marketplace_priority[0]
+                fallback_marketplace_mode = marketplace_priority[0]
                 requested_mode = fallback_marketplace_mode
                 decision_reason = (
                     "Resolved Mercado Envios from spreadsheet headers with "
-                    f"{requested_mode.upper()} fallback."
+                    f"{requested_mode.upper()} runtime fallback."
                 )
         else:
             requested_mode = row_mode_intent
@@ -330,20 +315,7 @@ def build_shipping_config(
             decision_source = "shipping_resolver.available_modes_fallback"
             decision_reason = f"Mode '{shipping_mode}' not configured; using '{fallback_mode}'."
             shipping_mode = str(fallback_mode)
-    elif modes_config and shipping_mode not in modes_config:
-        fallback_mode = (
-            default_mode
-            if default_mode in modes_config
-            else str(next(iter(modes_config), shipping_mode))
-        )
-        if fallback_mode != shipping_mode:
-            fallback_applied = True
-            decision_source = "config.modes_fallback"
-            decision_reason = f"Mode '{shipping_mode}' not configured; using '{fallback_mode}'."
-            shipping_mode = fallback_mode
 
-    raw_mode_config = modes_config.get(shipping_mode, {})
-    mode_config = raw_mode_config if isinstance(raw_mode_config, dict) else {}
     runtime_policy_for_mode = resolved_runtime_policy_by_mode.get(shipping_mode, {})
     if not runtime_policy_for_mode and shipping_mode == resolved_mode:
         runtime_policy_for_mode = {
@@ -361,9 +333,9 @@ def build_shipping_config(
     if runtime_free_shipping_for_mode is None and shipping_mode == resolved_mode:
         runtime_free_shipping_for_mode = resolved_runtime_free_shipping
 
-    configured_tags = use_case._normalize_seller_tags(mode_config.get("tags", []))
-    selected_tags = list(configured_tags)
-    tags_source = "config.mode"
+    configured_tags: list[str] = []
+    selected_tags = []
+    tags_source = "runtime.default.empty"
     policy_overrides: list[str] = []
 
     if use_case.shipping_allow_runtime_tag_overrides and runtime_tags_for_mode:
@@ -371,15 +343,10 @@ def build_shipping_config(
         if merged_tags != selected_tags:
             policy_overrides.append("runtime_tags_merged")
         selected_tags = merged_tags
-        tags_source = "config.mode+shipping_resolver.selection"
+        tags_source = "shipping_resolver.selection"
 
-    configured_free_shipping = use_case._coerce_shipping_bool(
-        mode_config.get("free_shipping", False)
-    )
-    selected_free_shipping = (
-        configured_free_shipping if configured_free_shipping is not None else False
-    )
-    free_shipping_source = "config.mode" if mode_config else "default.false"
+    selected_free_shipping = False
+    free_shipping_source = "default.false"
     if (
         use_case.shipping_allow_runtime_free_shipping_override
         and runtime_free_shipping_for_mode is not None
@@ -412,15 +379,12 @@ def build_shipping_config(
 
     config_shipping: dict[str, Any] = {
         "mode": shipping_mode,
-        "methods": mode_config.get("methods", []),
         "tags": selected_tags,
-        "dimensions": mode_config.get("dimensions"),
-        "local_pick_up": mode_config.get("local_pick_up", False),
+        "local_pick_up": False,
         "free_shipping": selected_free_shipping,
-        "logistic_type": mode_config.get("logistic_type"),
-        "store_pick_up": mode_config.get("store_pick_up", False),
+        "logistic_type": None,
     }
-    logistic_type_source = "config.mode" if mode_config.get("logistic_type") else "default.none"
+    logistic_type_source = "runtime.none"
     logistic_type_for_mode = resolved_logistic_type_by_mode.get(shipping_mode)
     if logistic_type_for_mode:
         config_shipping["logistic_type"] = logistic_type_for_mode
@@ -429,19 +393,13 @@ def build_shipping_config(
         config_shipping["logistic_type"] = resolved_logistic_type
         if resolved_logistic_type_source:
             logistic_type_source = resolved_logistic_type_source
-    elif shipping_mode == "me1":
-        config_shipping["logistic_type"] = "default"
-        logistic_type_source = "docs.me1_default"
-    elif shipping_mode == "me2":
-        config_shipping["logistic_type"] = "drop_off"
-        logistic_type_source = "docs.me2_default"
 
     selected_local_pick_up = use_case._coerce_shipping_bool(
         config_shipping.get("local_pick_up", False)
     )
     if selected_local_pick_up is None:
         selected_local_pick_up = False
-    local_pick_up_source = "config.mode" if "local_pick_up" in mode_config else "default.false"
+    local_pick_up_source = "default.false"
     row_local_pick_up = row_shipping_input.get("local_pick_up")
     if isinstance(row_local_pick_up, bool):
         if selected_local_pick_up != row_local_pick_up:
@@ -479,12 +437,11 @@ def build_shipping_config(
             "selected_mode": shipping_mode,
             "default_mode": default_mode,
             "fallback_applied": fallback_applied,
-            "mode_configured": shipping_mode in modes_config if modes_config else False,
+            "mode_configured": (
+                shipping_mode in resolved_available_modes if resolved_available_modes else False
+            ),
             "available_modes": sorted(
-                {
-                    *[str(mode) for mode in resolved_available_modes if str(mode).strip()],
-                    *[str(mode) for mode in modes_config],
-                }
+                {str(mode) for mode in resolved_available_modes if str(mode).strip()}
             ),
             "selected_logistic_type": selected_logistic_type,
             "logistic_type_source": logistic_type_source,
