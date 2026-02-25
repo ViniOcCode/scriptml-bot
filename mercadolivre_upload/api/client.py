@@ -263,9 +263,8 @@ class MLApiClient:
         payload = dict(item)
         family_name = payload.get("family_name")
         if not isinstance(family_name, str) or not family_name.strip():
-            title = payload.get("title")
-            if isinstance(title, str) and title.strip():
-                payload["family_name"] = title.strip()
+            raise ValueError("user-products payload requires non-empty 'family_name'.")
+        payload["family_name"] = family_name.strip()
         payload.pop("title", None)
         payload.pop("variations", None)
         payload.pop("user_product", None)
