@@ -179,6 +179,26 @@ def test_get_available_listing_types_reads_list_response():
     assert result == [{"id": "gold_pro"}]
 
 
+def test_get_site_listing_types_reads_list_response():
+    http_client = MagicMock()
+    client = MLApiClient(http_client=http_client)
+    client.get = MagicMock(return_value=[{"id": "gold_special"}, {"id": "free"}])
+
+    result = client.get_site_listing_types("MLB")
+
+    assert result == [{"id": "gold_special"}, {"id": "free"}]
+
+
+def test_get_site_listing_types_returns_empty_for_invalid_shape():
+    http_client = MagicMock()
+    client = MLApiClient(http_client=http_client)
+    client.get = MagicMock(return_value={"unexpected": "shape"})
+
+    result = client.get_site_listing_types("MLB")
+
+    assert result == []
+
+
 def test_check_fiscal_data_exists_returns_false_for_404():
     http_client = MagicMock()
     client = MLApiClient(http_client=http_client)

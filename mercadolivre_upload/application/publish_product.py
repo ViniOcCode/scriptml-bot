@@ -72,9 +72,7 @@ from .publish_product_preflight import (
 from .publish_product_preflight import (
     run_image_diagnostic_preflight as _run_image_diagnostic_preflight_helper,
 )
-from .publish_product_shipping import (
-    build_shipping_config as _build_shipping_config_helper,
-)
+from .publish_product_shipping import build_shipping_config as _build_shipping_config_helper
 from .publish_product_validation import (
     build_validation_cause_taxonomy,
     classify_validation_cause,
@@ -2843,32 +2841,54 @@ class PublishProductUseCase:
         if cached is not None:
             return cached
 
+        def _extract_listing_type_ids(payload: Any) -> list[str]:
+            listing_type_ids: list[str] = []
+            if isinstance(payload, list):
+                for listing_type in payload:
+                    if not isinstance(listing_type, dict):
+                        continue
+                    listing_type_id = listing_type.get("id")
+                    if isinstance(listing_type_id, str) and listing_type_id:
+                        listing_type_ids.append(listing_type_id)
+            return list(dict.fromkeys(listing_type_ids))
+
+        listing_types: Any = []
         getter = getattr(self.publisher, "get_available_listing_types", None)
-        if not callable(getter):
+        if callable(getter):
+            try:
+                listing_types = getter(category_id)
+            except Exception as e:
+                logger.warning(f"Could not fetch available listing types for {category_id}: {e}")
+        else:
             logger.warning(
                 "Publisher does not expose available listing types for category %s",
                 category_id,
             )
-            self._available_listing_types_cache[category_id] = []
-            return []
 
-        try:
-            listing_types = getter(category_id)
-        except Exception as e:
-            logger.warning(f"Could not fetch available listing types for {category_id}: {e}")
-            self._available_listing_types_cache[category_id] = []
-            return []
+        deduped_listing_type_ids = _extract_listing_type_ids(listing_types)
 
-        listing_type_ids: list[str] = []
-        if isinstance(listing_types, list):
-            for listing_type in listing_types:
-                if not isinstance(listing_type, dict):
-                    continue
-                listing_type_id = listing_type.get("id")
-                if isinstance(listing_type_id, str) and listing_type_id:
-                    listing_type_ids.append(listing_type_id)
+        if not deduped_listing_type_ids:
+            site_getter = getattr(self.publisher, "get_site_listing_types", None)
+            site_id = category_id[:3].upper() if isinstance(category_id, str) else ""
+            if callable(site_getter) and site_id:
+                try:
+                    site_listing_types = site_getter(site_id)
+                except Exception as e:
+                    logger.warning(
+                        "Could not fetch site listing types for %s (%s): %s",
+                        category_id,
+                        site_id,
+                        e,
+                    )
+                else:
+                    deduped_listing_type_ids = _extract_listing_type_ids(site_listing_types)
+                    if deduped_listing_type_ids:
+                        logger.info(
+                            "Using site-level listing types as fallback for %s "
+                            "due empty seller availability.",
+                            category_id,
+                        )
 
-        deduped_listing_type_ids = list(dict.fromkeys(listing_type_ids))
         self._available_listing_types_cache[category_id] = deduped_listing_type_ids
         return deduped_listing_type_ids
 
