@@ -18,6 +18,12 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, TypeVar
 
+from mercadolivre_upload.infrastructure.metrics_helpers import (
+    cap_metric_values,
+    format_metric_labels,
+    get_timer_statistics,
+)
+
 # Tentativa de importar prometheus_client (opcional)
 try:
     from prometheus_client import (  # noqa: F401
@@ -174,8 +180,7 @@ class MetricsCollector:
         self._timers[name].append(duration)
 
         # Mantém apenas últimos 1000 valores para economizar memória
-        if len(self._timers[name]) > 1000:
-            self._timers[name] = self._timers[name][-1000:]
+        self._timers[name] = cap_metric_values(self._timers[name])
 
         # Prometheus
         if self._prometheus_enabled:
@@ -201,26 +206,7 @@ class MetricsCollector:
             Dicionário com count, sum, mean, min, max, p50, p95, p99.
         """
         values = self._timers.get(name, [])
-        if not values:
-            return {"count": 0, "sum": 0.0, "mean": 0.0, "min": 0.0, "max": 0.0}
-
-        sorted_values = sorted(values)
-        n = len(sorted_values)
-
-        def percentile(p: float) -> float:
-            idx = int(n * p / 100)
-            return sorted_values[min(idx, n - 1)]
-
-        return {
-            "count": float(n),
-            "sum": sum(values),
-            "mean": sum(values) / n,
-            "min": sorted_values[0],
-            "max": sorted_values[-1],
-            "p50": percentile(50),
-            "p95": percentile(95),
-            "p99": percentile(99),
-        }
+        return get_timer_statistics(values)
 
     # =====================================================================
     # Histograms
@@ -246,8 +232,7 @@ class MetricsCollector:
         self._histograms[name].append(value)
 
         # Mantém apenas últimos 1000 valores
-        if len(self._histograms[name]) > 1000:
-            self._histograms[name] = self._histograms[name][-1000:]
+        self._histograms[name] = cap_metric_values(self._histograms[name])
 
         # Prometheus
         if self._prometheus_enabled:
@@ -305,9 +290,7 @@ class MetricsCollector:
 
     def _format_labels(self, labels: dict[str, str]) -> str:
         """Formata labels para chave."""
-        if not labels:
-            return ""
-        return "_" + "_".join(f"{k}={v}" for k, v in sorted(labels.items()))
+        return format_metric_labels(labels)
 
     def get_all_metrics(self) -> dict[str, Any]:
         """Obtém todas as métricas em formato serializável.
