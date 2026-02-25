@@ -2,18 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
 from mercadolivre_upload.shared.utils.text_utils import PortugueseTextNormalizer
-
-
-@dataclass
-class MappingResult:
-    """Result of a field mapping operation."""
-
-    mapped: dict[str, Any]
-    errors: list[str]
 
 
 class SmartMapper:
