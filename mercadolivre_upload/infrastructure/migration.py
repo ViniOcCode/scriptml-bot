@@ -281,13 +281,13 @@ class SchemaVersion:
 
     def has_field(self, name: str) -> bool:
         """Verifica se o schema tem um campo (considera aliases)."""
-        return any(field.normalize_name(name) for fld in self.fields.values())  # type: ignore[attr-defined]
+        return any(fld.normalize_name(name) for fld in self.fields.values())
 
     def get_field_by_name(self, name: str) -> Field | None:
         """Retorna campo pelo nome ou alias."""
-        for _fld in self.fields.values():
-            if field.normalize_name(name):  # type: ignore[attr-defined]
-                return field  # type: ignore[return-value]
+        for fld in self.fields.values():
+            if fld.normalize_name(name):
+                return fld
         return None
 
     def validate_data(self, data: dict[str, Any]) -> list[str]:
@@ -299,19 +299,19 @@ class SchemaVersion:
         errors = []
 
         # Verifica campos obrigatórios
-        for name, _fld in self.fields.items():
-            if field.required:  # type: ignore[attr-defined]
+        for name, required_field in self.fields.items():
+            if required_field.required:
                 value = data.get(name)
                 if value is None or value == "":
                     errors.append(f"Campo obrigatório ausente: {name}")
 
         # Valida tipos
         for name, value in data.items():
-            fld = self.get_field_by_name(name)
-            if fld and value is not None and not fld.field_type.validate(value):
+            field_match = self.get_field_by_name(name)
+            if field_match and value is not None and not field_match.field_type.validate(value):
                 errors.append(
                     f"Tipo inválido para '{name}': "
-                    f"esperado {field.field_type.name}, "  # type: ignore[attr-defined]
+                    f"esperado {field_match.field_type.name}, "
                     f"recebido {type(value).__name__}"
                 )
 
