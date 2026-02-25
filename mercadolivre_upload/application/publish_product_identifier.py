@@ -85,6 +85,48 @@ def collect_identifier_state(attributes: Any) -> dict[str, Any]:
     return state
 
 
+def select_empty_gtin_reason(
+    *,
+    default_value_name: str,
+    allowed_reason_ids: set[str],
+    allowed_reason_names: list[str],
+) -> tuple[str | None, str | None, str | None]:
+    """Select EMPTY_GTIN_REASON default with deterministic schema-aware fallback."""
+    normalized_reason_name_map: dict[str, str] = {}
+    for reason_name in sorted(set(allowed_reason_names)):
+        normalized_reason_name = PortugueseTextNormalizer.normalize(reason_name)
+        if normalized_reason_name:
+            normalized_reason_name_map.setdefault(normalized_reason_name, reason_name)
+
+    selected_reason_id: str | None = None
+    if len(allowed_reason_ids) == 1:
+        selected_reason_id = next(iter(allowed_reason_ids))
+    elif allowed_reason_ids and not normalized_reason_name_map:
+        selected_reason_id = sorted(allowed_reason_ids)[0]
+
+    selected_reason_name: str | None = default_value_name
+    warning_message: str | None = None
+    has_allowed_reasons = bool(allowed_reason_ids or normalized_reason_name_map)
+    if has_allowed_reasons:
+        normalized_default_name = PortugueseTextNormalizer.normalize(default_value_name)
+        if normalized_default_name in normalized_reason_name_map:
+            selected_reason_name = normalized_reason_name_map[normalized_default_name]
+        elif normalized_reason_name_map:
+            selected_reason_name = normalized_reason_name_map[sorted(normalized_reason_name_map)[0]]
+            warning_message = (
+                "Configured EMPTY_GTIN_REASON default is not allowed by schema metadata; "
+                "using deterministic allowed fallback."
+            )
+        else:
+            selected_reason_name = None
+            warning_message = (
+                "Configured EMPTY_GTIN_REASON default cannot be validated against schema "
+                "names; using deterministic allowed value_id fallback."
+            )
+
+    return selected_reason_id, selected_reason_name, warning_message
+
+
 def is_valid_empty_gtin_reason(
     *,
     state: dict[str, Any],
