@@ -106,6 +106,7 @@ explicit_mappings:
     name: "Tempo de garantia"
     value_name: "30 dias"
     value_type: "number_unit"
+    unit_from_column: "Unidade de tempo de garantia"
     value_struct:
       number: 30
       unit: "dias"

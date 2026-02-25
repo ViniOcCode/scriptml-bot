@@ -126,6 +126,51 @@ def _extract_variation_candidates(value: Any) -> list[dict[str, Any]]:
     return [{"id": None, "name": token} for token in unique_tokens]
 
 
+def _clean_cell_text(value: Any) -> str:
+    """Normalize raw cell values into plain stripped text."""
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _parse_number_unit_sale_term(
+    raw_value: Any,
+    *,
+    unit_hint: Any = None,
+) -> tuple[str, dict[str, Any] | None]:
+    """Parse number_unit sale-term values from cell value + optional unit hint."""
+    value_text = _clean_cell_text(raw_value)
+    unit_text = _clean_cell_text(unit_hint)
+
+    number_value: int | float | None = None
+    parsed_unit = ""
+    if value_text:
+        match = re.match(r"^\s*(\d+(?:[.,]\d+)?)\s*([^\d].*)?$", value_text)
+        if match:
+            number_text = match.group(1).replace(",", ".")
+            try:
+                numeric_value = float(number_text)
+            except ValueError:
+                numeric_value = None
+            if numeric_value is not None:
+                number_value = int(numeric_value) if numeric_value.is_integer() else numeric_value
+            inline_unit = _clean_cell_text(match.group(2))
+            if inline_unit:
+                parsed_unit = inline_unit
+
+    if unit_text:
+        parsed_unit = unit_text
+
+    if number_value is None:
+        return value_text or unit_text, None
+
+    value_name = f"{number_value} {parsed_unit}".strip()
+    value_struct: dict[str, Any] = {"number": number_value}
+    if parsed_unit:
+        value_struct["unit"] = parsed_unit
+    return value_name, value_struct
+
+
 class AttributeMapper:
     """Maps Excel column names to ML API attribute definitions using fuzzy matching."""
 
@@ -239,6 +284,9 @@ class AttributeMapper:
 
         # Track which columns have been explicitly mapped
         explicitly_mapped = set()
+        normalized_product_values = {
+            _normalize_column_name(column): value for column, value in product_attributes.items()
+        }
 
         # 1. First, apply explicit mappings (bypass fuzzy matching)
         # Normalize explicit mapping keys to match parser's column cleaning
@@ -267,46 +315,58 @@ class AttributeMapper:
                     target = mapping_config.get("target", "attribute")
 
                     if target == "sale_terms":
-                        # Build sale term from config with full ML API format
+                        sale_term_id = str(mapping_config["id"])
                         sale_term = {
-                            "id": mapping_config["id"],
-                            "name": mapping_config.get("name", mapping_config["id"]),
+                            "id": sale_term_id,
+                            "name": mapping_config.get("name", sale_term_id),
                         }
+                        value_id = mapping_config.get("value_id")
+                        sale_term["value_id"] = value_id
 
-                        # Determine value_name
-                        if "value_name" in mapping_config:
-                            sale_term["value_name"] = mapping_config["value_name"]
-                        elif value:
-                            sale_term["value_name"] = value
-                        else:
-                            sale_term["value_name"] = ""
+                        configured_value_type = str(
+                            mapping_config.get("value_type", "list")
+                        ).strip()
+                        sale_term_value_type = configured_value_type.lower() or "list"
 
-                        # Build values array
-                        if "value_struct" in mapping_config:
-                            sale_term["value_struct"] = mapping_config["value_struct"]
-                            sale_term["values"] = [
-                                {
-                                    "id": mapping_config.get("value_id"),
-                                    "name": sale_term["value_name"],
-                                    "struct": mapping_config["value_struct"],
-                                }
-                            ]
-                            sale_term["value_type"] = "number_unit"
-                        else:
-                            sale_term["value_id"] = mapping_config.get("value_id")
-                            sale_term["values"] = [
-                                {
-                                    "id": mapping_config.get("value_id"),
-                                    "name": sale_term["value_name"],
-                                    "struct": None,
-                                }
-                            ]
-                            sale_term["value_type"] = mapping_config.get("value_type", "list")
+                        excel_value_name = _clean_cell_text(value)
+                        fallback_value_name = _clean_cell_text(mapping_config.get("value_name"))
+                        sale_term_value_name = excel_value_name or fallback_value_name
+
+                        sale_term_value_struct: dict[str, Any] | None = None
+                        if sale_term_value_type == "number_unit":
+                            unit_hint = None
+                            raw_unit_column = mapping_config.get("unit_from_column")
+                            if isinstance(raw_unit_column, str) and raw_unit_column.strip():
+                                unit_hint = normalized_product_values.get(
+                                    _normalize_column_name(raw_unit_column)
+                                )
+                            parsed_value_name, parsed_value_struct = _parse_number_unit_sale_term(
+                                value,
+                                unit_hint=unit_hint,
+                            )
+                            if parsed_value_name:
+                                sale_term_value_name = parsed_value_name
+                            if parsed_value_struct is not None:
+                                sale_term_value_struct = parsed_value_struct
+                            else:
+                                configured_struct = mapping_config.get("value_struct")
+                                if isinstance(configured_struct, dict):
+                                    sale_term_value_struct = dict(configured_struct)
+
+                        sale_term["value_name"] = sale_term_value_name
+                        if sale_term_value_struct is not None:
+                            sale_term["value_struct"] = sale_term_value_struct
+                        sale_term["values"] = [
+                            {
+                                "id": value_id,
+                                "name": sale_term_value_name,
+                                "struct": sale_term_value_struct,
+                            }
+                        ]
+                        sale_term["value_type"] = sale_term_value_type
 
                         sale_terms_list.append(sale_term)
-                        logger.info(
-                            f"Explicitly mapped '{col}' -> sale_terms[{mapping_config['id']}]"
-                        )
+                        logger.info(f"Explicitly mapped '{col}' -> sale_terms[{sale_term_id}]")
                     elif target == "listing_type_id":
                         # Map listing type (Tipo de anúncio) - use cell value, not hardcoded ID
                         # Map common Portuguese values to ML API values

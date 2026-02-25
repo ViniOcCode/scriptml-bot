@@ -496,6 +496,47 @@ def test_listing_type_explicit_mapping_uses_gold_pro_for_premium() -> None:
     assert mapped_attrs == [{"_listing_type_id": "gold_pro"}]
 
 
+def test_attribute_mapper_maps_sale_terms_from_excel_values() -> None:
+    mapper = AttributeMapper(similarity_threshold=0.7)
+
+    mapped_attrs, sale_terms = mapper.map_product_attributes(
+        {
+            "Tipo de garantia": "Garantia do fabricante",
+            "Tempo de garantia": "90",
+            "Unidade de tempo de garantia": "dias",
+        },
+        [],
+        explicit_mappings={
+            "Tipo de garantia": {
+                "target": "sale_terms",
+                "id": "WARRANTY_TYPE",
+                "name": "Tipo de garantia",
+                "value_type": "list",
+                "value_name": "Garantia do vendedor",
+            },
+            "Tempo de garantia": {
+                "target": "sale_terms",
+                "id": "WARRANTY_TIME",
+                "name": "Tempo de garantia",
+                "value_type": "number_unit",
+                "unit_from_column": "Unidade de tempo de garantia",
+                "value_name": "30 dias",
+                "value_struct": {"number": 30, "unit": "dias"},
+            },
+        },
+        auto_explicit_mappings=[],
+    )
+
+    assert mapped_attrs == []
+    mapped_sale_terms = {sale_term["id"]: sale_term for sale_term in sale_terms}
+    assert mapped_sale_terms["WARRANTY_TYPE"]["value_name"] == "Garantia do fabricante"
+    assert mapped_sale_terms["WARRANTY_TIME"]["value_name"] == "90 dias"
+    assert mapped_sale_terms["WARRANTY_TIME"]["value_struct"] == {
+        "number": 90,
+        "unit": "dias",
+    }
+
+
 def test_attribute_mapper_skips_unsupported_explicit_attribute() -> None:
     mapper = AttributeMapper(similarity_threshold=0.7)
 
@@ -853,6 +894,71 @@ def test_publish_listing_type_fallback_uses_site_listing_types() -> None:
     assert use_case._publish_one(_build_product({}), "MLB123") is True
     created_item = publisher.created_items[0]
     assert created_item["listing_type_id"] == "free"
+
+
+def test_publish_sale_terms_complete_required_ids_with_default_fallback() -> None:
+    resolver = _FakeCategoryResolver(
+        [
+            AttributeMeta(id="BRAND", name="Marca", value_type="string", required=False),
+        ]
+    )
+    publisher = _FakePublisher(
+        listing_types=[{"id": "gold_special"}],
+        sale_terms=[
+            {"id": "WARRANTY_TYPE", "tags": {"required": True}},
+            {"id": "WARRANTY_TIME", "tags": {}},
+        ],
+    )
+
+    use_case = PublishProductUseCase(
+        category_resolver=resolver,  # type: ignore[arg-type]
+        publisher=publisher,  # type: ignore[arg-type]
+        image_uploader=_FakeImageUploader(),  # type: ignore[arg-type]
+        shipping_resolver=_FixedShippingResolver("me2"),  # type: ignore[arg-type]
+        fiscal_service=None,
+        clip_uploader=None,
+        config={
+            "core_item_fields": {
+                "defaults": {
+                    "currency_id": "BRL",
+                    "buying_mode": "buy_it_now",
+                    "listing_type_id": "gold_special",
+                    "sale_terms": [
+                        {"id": "WARRANTY_TYPE", "value_name": "Garantia do vendedor"}
+                    ],
+                }
+            },
+        },
+        dry_run=False,
+        min_attribute_score=0,
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+
+    class _DynamicSaleTermsBuilder:
+        def build_attributes(
+            self,
+            product: Product,
+            category_id: str,
+        ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], list[str]]:
+            del product, category_id
+            return (
+                [{"id": "BRAND", "value_name": "Marca X"}],
+                [{"id": "WARRANTY_TIME", "value_name": "90 dias"}],
+                [],
+                [],
+            )
+
+        def set_cache_mapper(self, cache_mapper: Any) -> None:  # pragma: no cover - compat hook
+            del cache_mapper
+
+    use_case._attribute_builder = _DynamicSaleTermsBuilder()  # type: ignore[assignment]
+
+    assert use_case._publish_one(_build_product({}), "MLB123") is True
+    created_item = publisher.created_items[0]
+    sale_terms_by_id = {sale_term["id"]: sale_term for sale_term in created_item["sale_terms"]}
+    assert sale_terms_by_id["WARRANTY_TIME"]["value_name"] == "90 dias"
+    assert sale_terms_by_id["WARRANTY_TYPE"]["value_name"] == "Garantia do vendedor"
 
 
 def test_publish_builds_variations_from_marked_candidates() -> None:
