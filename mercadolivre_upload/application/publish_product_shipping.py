@@ -128,200 +128,225 @@ def extract_row_shipping_input(
     }
 
 
-def build_shipping_config(
-    use_case: Any,
-    category_id: str | None = None,
-    row_attributes: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Build shipping configuration from runtime seller capabilities and row headers."""
-    default_mode = "not_specified"
-    requested_mode = default_mode
-    decision_source = "runtime.default_mode"
-    decision_reason = "Using runtime default mode."
-    resolved_mode: str | None = None
-    resolved_logistic_type: str | None = None
-    resolved_logistic_type_source: str | None = None
-    resolved_runtime_tags: list[str] = []
-    resolved_runtime_constraints: dict[str, Any] = {}
-    resolved_runtime_free_shipping: bool | None = None
-    resolved_available_modes: list[str] = []
-    resolved_logistic_type_by_mode: dict[str, str] = {}
-    resolved_runtime_policy_by_mode: dict[str, dict[str, Any]] = {}
+def _initialize_shipping_resolution_state(default_mode: str) -> dict[str, Any]:
+    return {
+        "requested_mode": default_mode,
+        "decision_source": "runtime.default_mode",
+        "decision_reason": "Using runtime default mode.",
+        "resolved_mode": None,
+        "resolved_logistic_type": None,
+        "resolved_logistic_type_source": None,
+        "resolved_runtime_tags": [],
+        "resolved_runtime_constraints": {},
+        "resolved_runtime_free_shipping": None,
+        "resolved_available_modes": [],
+        "resolved_logistic_type_by_mode": {},
+        "resolved_runtime_policy_by_mode": {},
+        "fallback_applied": False,
+    }
 
-    if use_case.shipping_resolver:
-        resolved_from_selection = False
-        selection_getter = getattr(use_case.shipping_resolver, "get_best_shipping_selection", None)
-        if callable(selection_getter):
-            try:
-                selection_payload = selection_getter()
-            except Exception as error:
-                logger.warning(
-                    "Shipping resolver selection failed; fallback to mode-only resolver: %s",
-                    error,
-                )
-            else:
-                if isinstance(selection_payload, dict):
-                    resolved_mode_raw = selection_payload.get("mode")
-                    resolved_mode = (
-                        str(resolved_mode_raw).strip() if resolved_mode_raw is not None else ""
-                    )
-                    if resolved_mode:
-                        requested_mode = resolved_mode
-                        decision_source = "shipping_resolver.selection"
-                        decision_reason = "Resolved mode from seller shipping selection metadata."
-                        resolved_from_selection = True
 
-                    available_modes_raw = selection_payload.get("available_modes")
-                    if isinstance(available_modes_raw, list):
-                        resolved_available_modes = [
-                            str(mode).strip() for mode in available_modes_raw if str(mode).strip()
-                        ]
+def _merge_resolver_selection(use_case: Any, state: dict[str, Any], default_mode: str) -> None:
+    if not use_case.shipping_resolver:
+        return
 
-                    logistic_type_by_mode_raw = selection_payload.get("logistic_type_by_mode")
-                    if isinstance(logistic_type_by_mode_raw, dict):
-                        for mode, logistic_type in logistic_type_by_mode_raw.items():
-                            normalized_mode = str(mode).strip()
-                            normalized_logistic = str(logistic_type).strip()
-                            if normalized_mode and normalized_logistic:
-                                resolved_logistic_type_by_mode[normalized_mode] = (
-                                    normalized_logistic
-                                )
-
-                    runtime_policy_by_mode_raw = selection_payload.get("runtime_policy_by_mode")
-                    if isinstance(runtime_policy_by_mode_raw, dict):
-                        for mode, raw_policy in runtime_policy_by_mode_raw.items():
-                            if not isinstance(raw_policy, dict):
-                                continue
-                            normalized_mode = str(mode).strip()
-                            if not normalized_mode:
-                                continue
-                            resolved_runtime_policy_by_mode[normalized_mode] = dict(raw_policy)
-
-                    resolved_logistic_type_raw = selection_payload.get("logistic_type")
-                    resolved_logistic_type = (
-                        str(resolved_logistic_type_raw).strip()
-                        if resolved_logistic_type_raw is not None
-                        else ""
-                    )
-                    if resolved_logistic_type:
-                        resolved_logistic_type_source = "shipping_resolver.selection"
-                        logger.info(
-                            "Using shipping logistic_type from resolver selection: %s",
-                            resolved_logistic_type,
-                        )
-                    else:
-                        resolved_logistic_type = None
-
-                    resolved_runtime_tags = use_case._normalize_seller_tags(
-                        selection_payload.get("tags")
-                    )
-                    if resolved_runtime_tags:
-                        logger.info(
-                            "Using shipping tags from resolver selection metadata: %s",
-                            resolved_runtime_tags,
-                        )
-
-                    resolved_runtime_constraints = use_case._normalize_shipping_constraints(
-                        selection_payload.get("constraints")
-                    )
-                    if resolved_runtime_constraints:
-                        logger.info(
-                            "Using shipping constraints from resolver selection metadata: %s",
-                            resolved_runtime_constraints,
-                        )
-
-                    resolved_runtime_free_shipping = use_case._coerce_shipping_bool(
-                        selection_payload.get("free_shipping")
-                    )
-                    if resolved_runtime_free_shipping is not None:
-                        logger.info(
-                            "Using shipping free_shipping from resolver selection metadata: %s",
-                            resolved_runtime_free_shipping,
-                        )
-
-        if not resolved_from_selection:
-            try:
-                resolved_mode_raw = use_case.shipping_resolver.get_best_shipping_mode()
-            except Exception as error:
-                logger.warning(
-                    "Shipping resolver failed; using default mode %s: %s",
-                    default_mode,
-                    error,
-                )
-                decision_reason = "Shipping resolver failed; using default mode."
-            else:
-                resolved_mode = (
+    resolved_from_selection = False
+    selection_getter = getattr(use_case.shipping_resolver, "get_best_shipping_selection", None)
+    if callable(selection_getter):
+        try:
+            selection_payload = selection_getter()
+        except Exception as error:
+            logger.warning(
+                "Shipping resolver selection failed; fallback to mode-only resolver: %s",
+                error,
+            )
+        else:
+            if isinstance(selection_payload, dict):
+                resolved_mode_raw = selection_payload.get("mode")
+                state["resolved_mode"] = (
                     str(resolved_mode_raw).strip() if resolved_mode_raw is not None else ""
                 )
-                if resolved_mode:
-                    requested_mode = resolved_mode
-                    decision_source = "shipping_resolver"
-                    decision_reason = "Resolved mode from seller shipping preferences."
-                    logger.info("Using shipping mode from resolver: %s", requested_mode)
-                    if resolved_mode not in resolved_available_modes:
-                        resolved_available_modes.append(resolved_mode)
+                if state["resolved_mode"]:
+                    state["requested_mode"] = state["resolved_mode"]
+                    state["decision_source"] = "shipping_resolver.selection"
+                    state["decision_reason"] = (
+                        "Resolved mode from seller shipping selection metadata."
+                    )
+                    resolved_from_selection = True
 
-    row_shipping_input = extract_row_shipping_input(use_case, row_attributes)
+                available_modes_raw = selection_payload.get("available_modes")
+                if isinstance(available_modes_raw, list):
+                    state["resolved_available_modes"] = [
+                        str(mode).strip() for mode in available_modes_raw if str(mode).strip()
+                    ]
+
+                logistic_type_by_mode_raw = selection_payload.get("logistic_type_by_mode")
+                if isinstance(logistic_type_by_mode_raw, dict):
+                    for mode, logistic_type in logistic_type_by_mode_raw.items():
+                        normalized_mode = str(mode).strip()
+                        normalized_logistic = str(logistic_type).strip()
+                        if normalized_mode and normalized_logistic:
+                            state["resolved_logistic_type_by_mode"][
+                                normalized_mode
+                            ] = normalized_logistic
+
+                runtime_policy_by_mode_raw = selection_payload.get("runtime_policy_by_mode")
+                if isinstance(runtime_policy_by_mode_raw, dict):
+                    for mode, raw_policy in runtime_policy_by_mode_raw.items():
+                        if not isinstance(raw_policy, dict):
+                            continue
+                        normalized_mode = str(mode).strip()
+                        if not normalized_mode:
+                            continue
+                        state["resolved_runtime_policy_by_mode"][normalized_mode] = dict(raw_policy)
+
+                resolved_logistic_type_raw = selection_payload.get("logistic_type")
+                state["resolved_logistic_type"] = (
+                    str(resolved_logistic_type_raw).strip()
+                    if resolved_logistic_type_raw is not None
+                    else ""
+                )
+                if state["resolved_logistic_type"]:
+                    state["resolved_logistic_type_source"] = "shipping_resolver.selection"
+                    logger.info(
+                        "Using shipping logistic_type from resolver selection: %s",
+                        state["resolved_logistic_type"],
+                    )
+                else:
+                    state["resolved_logistic_type"] = None
+
+                state["resolved_runtime_tags"] = use_case._normalize_seller_tags(
+                    selection_payload.get("tags")
+                )
+                if state["resolved_runtime_tags"]:
+                    logger.info(
+                        "Using shipping tags from resolver selection metadata: %s",
+                        state["resolved_runtime_tags"],
+                    )
+
+                state["resolved_runtime_constraints"] = use_case._normalize_shipping_constraints(
+                    selection_payload.get("constraints")
+                )
+                if state["resolved_runtime_constraints"]:
+                    logger.info(
+                        "Using shipping constraints from resolver selection metadata: %s",
+                        state["resolved_runtime_constraints"],
+                    )
+
+                state["resolved_runtime_free_shipping"] = use_case._coerce_shipping_bool(
+                    selection_payload.get("free_shipping")
+                )
+                if state["resolved_runtime_free_shipping"] is not None:
+                    logger.info(
+                        "Using shipping free_shipping from resolver selection metadata: %s",
+                        state["resolved_runtime_free_shipping"],
+                    )
+
+    if resolved_from_selection:
+        return
+
+    try:
+        resolved_mode_raw = use_case.shipping_resolver.get_best_shipping_mode()
+    except Exception as error:
+        logger.warning(
+            "Shipping resolver failed; using default mode %s: %s",
+            default_mode,
+            error,
+        )
+        state["decision_reason"] = "Shipping resolver failed; using default mode."
+    else:
+        state["resolved_mode"] = (
+            str(resolved_mode_raw).strip() if resolved_mode_raw is not None else ""
+        )
+        if state["resolved_mode"]:
+            state["requested_mode"] = state["resolved_mode"]
+            state["decision_source"] = "shipping_resolver"
+            state["decision_reason"] = "Resolved mode from seller shipping preferences."
+            logger.info("Using shipping mode from resolver: %s", state["requested_mode"])
+            if state["resolved_mode"] not in state["resolved_available_modes"]:
+                state["resolved_available_modes"].append(state["resolved_mode"])
+
+
+def _apply_mode_intent_overrides(
+    use_case: Any,
+    state: dict[str, Any],
+    row_shipping_input: dict[str, Any],
+) -> None:
     row_mode_intent = row_shipping_input.get("mode_intent")
-    if isinstance(row_mode_intent, str) and row_mode_intent:
-        decision_source = "spreadsheet.headers"
-        if row_mode_intent == "marketplace":
-            configured_mode_priority = getattr(use_case.shipping_resolver, "mode_priority", [])
-            marketplace_priority: list[str] = []
-            if isinstance(configured_mode_priority, list):
-                for raw_mode in configured_mode_priority:
-                    mode_name = str(raw_mode).strip().lower()
-                    if mode_name in {"me1", "me2"} and mode_name not in marketplace_priority:
-                        marketplace_priority.append(mode_name)
-            if not marketplace_priority:
-                marketplace_priority = ["me2", "me1"]
+    if not isinstance(row_mode_intent, str) or not row_mode_intent:
+        return
 
-            marketplace_modes = [
-                mode for mode in marketplace_priority if mode in resolved_available_modes
-            ]
-            if isinstance(resolved_mode, str) and resolved_mode in {"me1", "me2"}:
-                requested_mode = resolved_mode
-                decision_reason = (
-                    "Resolved Mercado Envios from spreadsheet headers using seller mode selection."
-                )
-            elif marketplace_modes:
-                requested_mode = marketplace_modes[0]
-                decision_reason = (
-                    "Resolved Mercado Envios from spreadsheet headers using available seller modes."
-                )
-            else:
-                fallback_marketplace_mode = marketplace_priority[0]
-                requested_mode = fallback_marketplace_mode
-                decision_reason = (
-                    "Resolved Mercado Envios from spreadsheet headers with "
-                    f"{requested_mode.upper()} runtime fallback."
-                )
+    state["decision_source"] = "spreadsheet.headers"
+    if row_mode_intent == "marketplace":
+        configured_mode_priority = getattr(use_case.shipping_resolver, "mode_priority", [])
+        marketplace_priority: list[str] = []
+        if isinstance(configured_mode_priority, list):
+            for raw_mode in configured_mode_priority:
+                mode_name = str(raw_mode).strip().lower()
+                if mode_name in {"me1", "me2"} and mode_name not in marketplace_priority:
+                    marketplace_priority.append(mode_name)
+        if not marketplace_priority:
+            marketplace_priority = ["me2", "me1"]
+
+        marketplace_modes = [
+            mode for mode in marketplace_priority if mode in state["resolved_available_modes"]
+        ]
+        if isinstance(state["resolved_mode"], str) and state["resolved_mode"] in {"me1", "me2"}:
+            state["requested_mode"] = state["resolved_mode"]
+            state["decision_reason"] = (
+                "Resolved Mercado Envios from spreadsheet headers using seller mode selection."
+            )
+        elif marketplace_modes:
+            state["requested_mode"] = marketplace_modes[0]
+            state["decision_reason"] = (
+                "Resolved Mercado Envios from spreadsheet headers using available seller modes."
+            )
         else:
-            requested_mode = row_mode_intent
-            decision_reason = "Resolved shipping mode from spreadsheet headers."
+            fallback_marketplace_mode = marketplace_priority[0]
+            state["requested_mode"] = fallback_marketplace_mode
+            state["decision_reason"] = (
+                "Resolved Mercado Envios from spreadsheet headers with "
+                f"{state['requested_mode'].upper()} runtime fallback."
+            )
+    else:
+        state["requested_mode"] = row_mode_intent
+        state["decision_reason"] = "Resolved shipping mode from spreadsheet headers."
 
-    shipping_mode = requested_mode or default_mode
-    fallback_applied = False
-    if resolved_available_modes and shipping_mode not in resolved_available_modes:
+
+def _normalize_shipping_mode(state: dict[str, Any], default_mode: str) -> str:
+    shipping_mode = state["requested_mode"] or default_mode
+    if state["resolved_available_modes"] and shipping_mode not in state["resolved_available_modes"]:
         fallback_mode = None
-        if isinstance(resolved_mode, str) and resolved_mode in resolved_available_modes:
-            fallback_mode = resolved_mode
-        elif default_mode in resolved_available_modes:
+        if (
+            isinstance(state["resolved_mode"], str)
+            and state["resolved_mode"] in state["resolved_available_modes"]
+        ):
+            fallback_mode = state["resolved_mode"]
+        elif default_mode in state["resolved_available_modes"]:
             fallback_mode = default_mode
-        elif resolved_available_modes:
-            fallback_mode = resolved_available_modes[0]
+        elif state["resolved_available_modes"]:
+            fallback_mode = state["resolved_available_modes"][0]
         if fallback_mode != shipping_mode:
-            fallback_applied = True
-            decision_source = "shipping_resolver.available_modes_fallback"
-            decision_reason = f"Mode '{shipping_mode}' not configured; using '{fallback_mode}'."
+            state["fallback_applied"] = True
+            state["decision_source"] = "shipping_resolver.available_modes_fallback"
+            state["decision_reason"] = (
+                f"Mode '{shipping_mode}' not configured; using '{fallback_mode}'."
+            )
             shipping_mode = str(fallback_mode)
+    return shipping_mode
 
-    runtime_policy_for_mode = resolved_runtime_policy_by_mode.get(shipping_mode, {})
-    if not runtime_policy_for_mode and shipping_mode == resolved_mode:
+
+def _resolve_runtime_policy_for_mode(
+    use_case: Any,
+    state: dict[str, Any],
+    shipping_mode: str,
+) -> tuple[list[str], dict[str, Any], bool | None]:
+    runtime_policy_for_mode = state["resolved_runtime_policy_by_mode"].get(shipping_mode, {})
+    if not runtime_policy_for_mode and shipping_mode == state["resolved_mode"]:
         runtime_policy_for_mode = {
-            "tags": list(resolved_runtime_tags),
-            "constraints": dict(resolved_runtime_constraints),
-            "free_shipping": resolved_runtime_free_shipping,
+            "tags": list(state["resolved_runtime_tags"]),
+            "constraints": dict(state["resolved_runtime_constraints"]),
+            "free_shipping": state["resolved_runtime_free_shipping"],
         }
     runtime_tags_for_mode = use_case._normalize_seller_tags(runtime_policy_for_mode.get("tags"))
     runtime_constraints_for_mode = use_case._normalize_shipping_constraints(
@@ -330,9 +355,22 @@ def build_shipping_config(
     runtime_free_shipping_for_mode = use_case._coerce_shipping_bool(
         runtime_policy_for_mode.get("free_shipping")
     )
-    if runtime_free_shipping_for_mode is None and shipping_mode == resolved_mode:
-        runtime_free_shipping_for_mode = resolved_runtime_free_shipping
+    if runtime_free_shipping_for_mode is None and shipping_mode == state["resolved_mode"]:
+        runtime_free_shipping_for_mode = state["resolved_runtime_free_shipping"]
+    return runtime_tags_for_mode, runtime_constraints_for_mode, runtime_free_shipping_for_mode
 
+
+def _assemble_shipping_payload(
+    use_case: Any,
+    state: dict[str, Any],
+    *,
+    category_id: str | None,
+    row_shipping_input: dict[str, Any],
+    shipping_mode: str,
+    runtime_tags_for_mode: list[str],
+    runtime_constraints_for_mode: dict[str, Any],
+    runtime_free_shipping_for_mode: bool | None,
+) -> dict[str, Any]:
     configured_tags: list[str] = []
     selected_tags: list[str] = []
     tags_source = "runtime.default.empty"
@@ -385,14 +423,14 @@ def build_shipping_config(
         "logistic_type": None,
     }
     logistic_type_source = "runtime.none"
-    logistic_type_for_mode = resolved_logistic_type_by_mode.get(shipping_mode)
+    logistic_type_for_mode = state["resolved_logistic_type_by_mode"].get(shipping_mode)
     if logistic_type_for_mode:
         config_shipping["logistic_type"] = logistic_type_for_mode
         logistic_type_source = "shipping_resolver.selection"
-    elif resolved_logistic_type and shipping_mode == requested_mode:
-        config_shipping["logistic_type"] = resolved_logistic_type
-        if resolved_logistic_type_source:
-            logistic_type_source = resolved_logistic_type_source
+    elif state["resolved_logistic_type"] and shipping_mode == state["requested_mode"]:
+        config_shipping["logistic_type"] = state["resolved_logistic_type"]
+        if state["resolved_logistic_type_source"]:
+            logistic_type_source = state["resolved_logistic_type_source"]
 
     selected_local_pick_up = use_case._coerce_shipping_bool(
         config_shipping.get("local_pick_up", False)
@@ -431,17 +469,19 @@ def build_shipping_config(
 
     use_case._current_shipping_policy = {
         "decision": {
-            "source": decision_source,
-            "reason": decision_reason,
-            "requested_mode": requested_mode,
+            "source": state["decision_source"],
+            "reason": state["decision_reason"],
+            "requested_mode": state["requested_mode"],
             "selected_mode": shipping_mode,
-            "default_mode": default_mode,
-            "fallback_applied": fallback_applied,
+            "default_mode": "not_specified",
+            "fallback_applied": state["fallback_applied"],
             "mode_configured": (
-                shipping_mode in resolved_available_modes if resolved_available_modes else False
+                shipping_mode in state["resolved_available_modes"]
+                if state["resolved_available_modes"]
+                else False
             ),
             "available_modes": sorted(
-                {str(mode) for mode in resolved_available_modes if str(mode).strip()}
+                {str(mode) for mode in state["resolved_available_modes"] if str(mode).strip()}
             ),
             "selected_logistic_type": selected_logistic_type,
             "logistic_type_source": logistic_type_source,
@@ -461,3 +501,30 @@ def build_shipping_config(
 
     logger.info(f"Shipping config for {shipping_mode} mode: {config_shipping}")
     return config_shipping
+
+
+def build_shipping_config(
+    use_case: Any,
+    category_id: str | None = None,
+    row_attributes: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build shipping configuration from runtime seller capabilities and row headers."""
+    default_mode = "not_specified"
+    state = _initialize_shipping_resolution_state(default_mode)
+    _merge_resolver_selection(use_case, state, default_mode)
+    row_shipping_input = extract_row_shipping_input(use_case, row_attributes)
+    _apply_mode_intent_overrides(use_case, state, row_shipping_input)
+    shipping_mode = _normalize_shipping_mode(state, default_mode)
+    runtime_tags_for_mode, runtime_constraints_for_mode, runtime_free_shipping_for_mode = (
+        _resolve_runtime_policy_for_mode(use_case, state, shipping_mode)
+    )
+    return _assemble_shipping_payload(
+        use_case,
+        state,
+        category_id=category_id,
+        row_shipping_input=row_shipping_input,
+        shipping_mode=shipping_mode,
+        runtime_tags_for_mode=runtime_tags_for_mode,
+        runtime_constraints_for_mode=runtime_constraints_for_mode,
+        runtime_free_shipping_for_mode=runtime_free_shipping_for_mode,
+    )
