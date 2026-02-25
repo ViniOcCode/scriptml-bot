@@ -51,8 +51,8 @@ dev = [
 ml-upload = "mercadolivre_upload.main:main"
 
 [tool.setuptools]
-# Use a minimal explicit package list to avoid referencing missing subpackages during build.
-packages = ["mercadolivre_upload"]
+# Discover all runtime packages under mercadolivre_upload.
+packages = { find = { include = ["mercadolivre_upload*"] } }
 
 [project.urls]
 Homepage = "https://github.com/vinicius/scriptml"
