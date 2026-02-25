@@ -56,14 +56,13 @@ def test_validate_user_product_item_sanitizes_payload_before_validation():
     client.validate_item.assert_called_once_with({"family_name": "Linha Alpha"})
 
 
-def test_validate_user_product_item_uses_title_as_family_name_when_missing():
+def test_validate_user_product_item_raises_when_family_name_is_missing():
     client = MLApiClient(http_client=MagicMock())
     client.validate_item = MagicMock(return_value={"cause": []})
 
-    result = client.validate_user_product_item({"title": "Linha Alpha Model X"})
-
-    assert result == {"cause": []}
-    client.validate_item.assert_called_once_with({"family_name": "Linha Alpha Model X"})
+    with pytest.raises(ValueError, match="requires non-empty 'family_name'"):
+        client.validate_user_product_item({"title": "Linha Alpha Model X"})
+    client.validate_item.assert_not_called()
 
 
 def test_create_user_product_item_sanitizes_payload_before_create():
@@ -82,12 +81,22 @@ def test_create_user_product_item_sanitizes_payload_before_create():
     client.create_item.assert_called_once_with({"family_name": "Linha Alpha"})
 
 
+def test_create_user_product_item_raises_when_family_name_is_missing():
+    client = MLApiClient(http_client=MagicMock())
+    client.create_item = MagicMock(return_value={"id": "MLB1234567890"})
+
+    with pytest.raises(ValueError, match="requires non-empty 'family_name'"):
+        client.create_user_product_item({"title": "Linha Alpha Model X"})
+    client.create_item.assert_not_called()
+
+
 def test_create_user_product_item_routes_sales_condition_when_user_product_id_present():
     client = MLApiClient(http_client=MagicMock())
     client.post = MagicMock(return_value={"id": "MLB1234567890"})
 
     payload = {
         "title": "Linha Alpha Model X",
+        "family_name": "Linha Alpha",
         "user_product_id": "MLBU123",
         "price": 100.0,
         "category_id": "MLB1055",
