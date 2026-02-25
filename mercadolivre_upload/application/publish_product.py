@@ -58,8 +58,6 @@ from .publish_product_constants import (
 )
 from .publish_product_identifier import (
     collect_identifier_state,
-    is_valid_empty_gtin_reason,
-    normalize_gtin_value,
     normalize_identifier_text,
     validate_identifier_state,
 )
@@ -75,9 +73,7 @@ from .publish_product_preflight import (
 from .publish_product_shipping import build_shipping_config as _build_shipping_config_helper
 from .publish_product_validation import (
     build_validation_cause_taxonomy,
-    classify_validation_cause,
     get_critical_attribute_warnings,
-    get_critical_validation_warnings,
 )
 from .shipping_policy import (
     coerce_shipping_bool,
@@ -486,16 +482,6 @@ class PublishProductUseCase:
     def _get_critical_attribute_warnings(warnings: list[str]) -> list[str]:
         """Return attribute-processing warnings that should block publication."""
         return get_critical_attribute_warnings(warnings)
-
-    @staticmethod
-    def _get_critical_validation_warnings(warnings: list[str]) -> list[str]:
-        """Return API validation warnings that indicate payload/data loss."""
-        return get_critical_validation_warnings(warnings)
-
-    @staticmethod
-    def _classify_validation_cause(cause: dict[str, Any]) -> str:
-        """Classify validation causes for deterministic decisioning."""
-        return classify_validation_cause(cause)
 
     @classmethod
     def _build_validation_cause_taxonomy(cls, causes: list[dict[str, Any]]) -> list[dict[str, str]]:
@@ -2292,13 +2278,6 @@ class PublishProductUseCase:
 
         return variations
 
-    @staticmethod
-    def _split_multi_value(raw_value: str | None) -> list[str]:
-        """Split a multi-value cell string into normalized tokens."""
-        if not isinstance(raw_value, str):
-            return []
-        return [part.strip() for part in re.split(r"[,;/|]", raw_value) if part.strip()]
-
     def _resolve_picture_ids(self, picture_urls: list[str]) -> list[str]:
         """Resolve ML picture IDs for current picture URLs from uploader history."""
         getter = getattr(self.image_uploader, "get_uploaded_images", None)
@@ -2554,24 +2533,8 @@ class PublishProductUseCase:
     def _normalize_identifier_text(value: Any) -> str | None:
         return normalize_identifier_text(value)
 
-    def _normalize_gtin_value(self, value: Any) -> str | None:
-        return normalize_gtin_value(value)
-
     def _collect_identifier_state(self, attributes: Any) -> dict[str, Any]:
         return collect_identifier_state(attributes)
-
-    def _is_valid_empty_gtin_reason(
-        self,
-        *,
-        state: dict[str, Any],
-        allowed_reason_ids: set[str],
-        allowed_reason_names: set[str],
-    ) -> bool:
-        return is_valid_empty_gtin_reason(
-            state=state,
-            allowed_reason_ids=allowed_reason_ids,
-            allowed_reason_names=allowed_reason_names,
-        )
 
     def _validate_identifier_state(
         self,
