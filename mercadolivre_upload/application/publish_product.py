@@ -59,6 +59,7 @@ from .publish_product_constants import (
 from .publish_product_identifier import (
     collect_identifier_state,
     normalize_identifier_text,
+    select_empty_gtin_reason,
     validate_identifier_state,
 )
 from .publish_product_preflight import (
@@ -2578,10 +2579,15 @@ class PublishProductUseCase:
             for value in identifier_contract.get("empty_gtin_reason_allowed_value_ids", [])
             if str(value).strip()
         }
+        allowed_reason_value_names = sorted(
+            {
+                str(value).strip()
+                for value in identifier_contract.get("empty_gtin_reason_allowed_value_names", [])
+                if str(value).strip()
+            }
+        )
         allowed_reason_names = {
-            PortugueseTextNormalizer.normalize(str(value))
-            for value in identifier_contract.get("empty_gtin_reason_allowed_value_names", [])
-            if str(value).strip()
+            PortugueseTextNormalizer.normalize(value) for value in allowed_reason_value_names
         }
 
         default_reason_artifact = self._inject_default_empty_gtin_reason(
@@ -2593,6 +2599,7 @@ class PublishProductUseCase:
                 else None
             ),
             allowed_reason_ids=allowed_reason_ids,
+            allowed_reason_names=allowed_reason_value_names,
         )
 
         item_state = self._collect_identifier_state(item.get("attributes"))
@@ -2657,12 +2664,14 @@ class PublishProductUseCase:
         gtin_required: bool,
         empty_gtin_reason_attribute_id: str | None,
         allowed_reason_ids: set[str],
+        allowed_reason_names: list[str],
     ) -> dict[str, Any]:
         """Inject configured EMPTY_GTIN_REASON when GTIN is missing."""
         artifact: dict[str, Any] = {
             "applied": False,
             "value_id": None,
             "value_name": None,
+            "warning": None,
         }
         if not gtin_required:
             return artifact
@@ -2709,19 +2718,31 @@ class PublishProductUseCase:
             reason_attribute = {"id": target_id}
             attributes.append(reason_attribute)
 
-        selected_reason_id: str | None = None
-        if allowed_reason_ids:
-            selected_reason_id = sorted(allowed_reason_ids)[0]
+        selected_reason_id, selected_reason_name, warning_message = select_empty_gtin_reason(
+            default_value_name=default_value_name,
+            allowed_reason_ids=allowed_reason_ids,
+            allowed_reason_names=allowed_reason_names,
+        )
+
+        if selected_reason_id is not None:
             reason_attribute["value_id"] = selected_reason_id
-        reason_attribute["value_name"] = default_value_name
+        else:
+            reason_attribute.pop("value_id", None)
+        if selected_reason_name is not None:
+            reason_attribute["value_name"] = selected_reason_name
+        else:
+            reason_attribute.pop("value_name", None)
 
         artifact.update(
             {
                 "applied": True,
                 "value_id": selected_reason_id,
-                "value_name": default_value_name,
+                "value_name": selected_reason_name,
+                "warning": warning_message,
             }
         )
+        if warning_message:
+            logger.warning(warning_message)
         logger.warning(
             "Auto-filled EMPTY_GTIN_REASON with configured default value for missing GTIN."
         )
