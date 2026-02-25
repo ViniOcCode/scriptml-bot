@@ -181,7 +181,7 @@ def test_resolve_to_leaf_returns_original_for_non_dict_category() -> None:
     assert resolver.resolve_to_leaf("MLB1") == "MLB1"
 
 
-def test_resolve_to_leaf_selects_deterministic_child_path() -> None:
+def test_resolve_to_leaf_keeps_parent_when_children_are_ambiguous() -> None:
     api = _FakeApi()
     api.categories["MLB1"] = {
         "children_categories": [
@@ -193,7 +193,21 @@ def test_resolve_to_leaf_selects_deterministic_child_path() -> None:
     api.categories["MLB12"] = {"children_categories": []}
     resolver = CategoryResolver(api)
 
-    assert resolver.resolve_to_leaf("MLB1") == "MLB11"
+    assert resolver.resolve_to_leaf("MLB1") == "MLB1"
+
+
+def test_resolve_to_leaf_descends_when_single_child_path_exists() -> None:
+    api = _FakeApi()
+    api.categories["MLB1"] = {
+        "children_categories": [
+            {"id": "MLB11", "name": "Child A", "total_items_in_this_category": 2},
+        ]
+    }
+    api.categories["MLB11"] = {"children_categories": [{"id": "MLB111", "name": "Grandchild"}]}
+    api.categories["MLB111"] = {"children_categories": []}
+    resolver = CategoryResolver(api)
+
+    assert resolver.resolve_to_leaf("MLB1") == "MLB111"
 
 
 def test_find_category_uses_hierarchy_context_deterministically() -> None:

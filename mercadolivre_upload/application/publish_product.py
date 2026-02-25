@@ -436,11 +436,44 @@ class PublishProductUseCase:
                 strategy = "predictor_path_match"
                 predictor_matched = True
             else:
+                fallback_attempted = True
                 fallback_reason = "predictor_no_match"
-                logger.info(
-                    "Predictor path matching did not resolve '%s'; returning unresolved context.",
-                    category_input,
+                title_predictor = getattr(
+                    self.category_resolver, "predict_category_from_title", None
                 )
+                if callable(title_predictor):
+                    deduped_titles: list[str] = []
+                    seen_titles: set[str] = set()
+                    for title in titles:
+                        normalized_title = PortugueseTextNormalizer.normalize(title)
+                        if not normalized_title or normalized_title in seen_titles:
+                            continue
+                        seen_titles.add(normalized_title)
+                        deduped_titles.append(title)
+                        if len(deduped_titles) >= 3:
+                            break
+
+                    for title in deduped_titles:
+                        fallback_prediction = title_predictor(title, "MLB")
+                        if isinstance(fallback_prediction, str) and fallback_prediction.strip():
+                            resolved_id = fallback_prediction.strip()
+                            strategy = "predictor_title_fallback"
+                            fallback_reason = "predictor_title_fallback"
+                            logger.info(
+                                "Predictor path miss for '%s'; using bounded title fallback '%s' "
+                                "resolved to %s.",
+                                category_input,
+                                title,
+                                resolved_id,
+                            )
+                            break
+
+                if not resolved_id:
+                    logger.info(
+                        "Predictor path matching did not resolve '%s'; "
+                        "returning unresolved context.",
+                        category_input,
+                    )
         else:
             # Fallback for non-title flows: resolve by category name.
             fallback_attempted = True
@@ -456,13 +489,41 @@ class PublishProductUseCase:
 
         category_path: list[Any] = []
         if resolved_id:
+            resolved_before_leaf = resolved_id
             leaf_category_id = self.category_resolver.resolve_to_leaf(resolved_id)
-            if leaf_category_id != resolved_id:
+            if leaf_category_id != resolved_before_leaf:
                 logger.info(f"Resolved to leaf category: {leaf_category_id}")
             resolved_id = leaf_category_id
 
             category_data = self._get_policy_category_data(resolved_id)
             if isinstance(category_data, dict):
+                raw_children = category_data.get("children_categories", [])
+                has_children = isinstance(raw_children, list) and any(
+                    isinstance(child, dict) for child in raw_children
+                )
+                if has_children:
+                    logger.warning(
+                        "Resolved category %s is still non-leaf (children=%s); "
+                        "blocking publish to avoid unsafe auto-selection.",
+                        resolved_id,
+                        len(raw_children),
+                    )
+                    fallback_attempted = True
+                    fallback_reason = "ambiguous_leaf_resolution"
+                    strategy = "unresolved"
+                    resolved_id = None
+                    category_path = []
+                    return {
+                        "category_input": category_input,
+                        "category_resolved_id": resolved_id,
+                        "category_path": category_path,
+                        "resolution_strategy": strategy,
+                        "predictor_attempted": predictor_attempted,
+                        "predictor_titles_count": len(titles),
+                        "predictor_matched": predictor_matched,
+                        "fallback_attempted": fallback_attempted,
+                        "fallback_reason": fallback_reason,
+                    }
                 raw_path = category_data.get("path_from_root")
                 if isinstance(raw_path, list):
                     category_path = list(raw_path)
@@ -743,6 +804,15 @@ class PublishProductUseCase:
         seller_capabilities = self._get_seller_capabilities_artifact()
         seller_has_tag = bool(seller_capabilities.get("has_user_product_seller_tag"))
         user_products_enabled = self.flow_user_products_enabled
+        user_products_validate_supported = callable(
+            getattr(self.publisher, "validate_user_product_item", None)
+        )
+        user_products_create_supported = callable(
+            getattr(self.publisher, "create_user_product_item", None)
+        )
+        user_products_route_supported = (
+            user_products_validate_supported and user_products_create_supported
+        )
 
         selected_flow = "legacy"
         reason = "Defaulting to legacy flow for backward compatibility."
@@ -779,6 +849,13 @@ class PublishProductUseCase:
                         f"'{USER_PRODUCTS_SELLER_TAG}'."
                     )
                     reason = "Seller is not tagged for user-products flow."
+                elif not user_products_route_supported:
+                    blocked = True
+                    error_message = (
+                        "Forced publish flow 'user_products' requires publisher support for "
+                        "'validate_user_product_item' and 'create_user_product_item'."
+                    )
+                    reason = "User-products route is not supported by publisher adapter."
                 elif forced_flow not in IMPLEMENTED_ROUTING_FLOWS:
                     blocked = True
                     error_message = (
@@ -786,9 +863,14 @@ class PublishProductUseCase:
                     )
                     reason = "User-products engine is not implemented yet."
         else:
-            if seller_has_tag and user_products_enabled:
+            if seller_has_tag and user_products_enabled and user_products_route_supported:
                 selected_flow = "user_products"
                 reason = "Seller has user_product_seller capability; using user-products flow."
+            elif seller_has_tag and user_products_enabled:
+                reason = (
+                    "Seller has user_product_seller capability, but publisher adapter does not "
+                    "support user-products endpoints; using legacy flow."
+                )
             elif seller_has_tag:
                 reason = (
                     "Seller has user_product_seller capability, but rollout disabled "
@@ -817,6 +899,9 @@ class PublishProductUseCase:
             "supported_flows": sorted(IMPLEMENTED_ROUTING_FLOWS),
             "blocked": blocked,
             "user_products_enabled": user_products_enabled,
+            "user_products_route_supported": user_products_route_supported,
+            "user_products_validate_supported": user_products_validate_supported,
+            "user_products_create_supported": user_products_create_supported,
             "blocked_behavior": self.flow_blocked_behavior,
             "fallback_applied": fallback_applied,
         }
@@ -1477,11 +1562,6 @@ class PublishProductUseCase:
             f"local_pick_up={shipping_config.get('local_pick_up')}"
         )
 
-        if self.dry_run and not self.validation_only:
-            logger.info(f"DRY RUN: Would publish {product.sku}")
-            self.published += 1
-            return True
-
         # Normalize attributes before validation/publish (ensure units)
         self._normalize_item_attributes(item)
 
@@ -1743,6 +1823,15 @@ class PublishProductUseCase:
             self.failed += 1
             return False
 
+        if self.dry_run and not self.validation_only:
+            logger.info("DRY RUN: Payload valid for %s, skipping create step.", product.sku)
+            self.published += 1
+            if self.feedback and validation_result:
+                self.feedback.record_validation_result(
+                    product.sku, ml_attributes, validation_result
+                )
+            return True
+
         if self.validation_only:
             logger.info(f"VALIDATION ONLY: Payload valid for {product.sku}")
             self.published += 1
@@ -1902,6 +1991,10 @@ class PublishProductUseCase:
             validator = getattr(self.publisher, "validate_user_product_item", None)
             if callable(validator):
                 return cast(dict[str, Any], validator(item))
+            raise RuntimeError(
+                "User-products flow selected but publisher does not implement "
+                "'validate_user_product_item'."
+            )
         return self.publisher.validate_item(item)
 
     def _create_item_for_flow(self, *, item: dict[str, Any], selected_flow: str) -> dict[str, Any]:
@@ -1910,6 +2003,10 @@ class PublishProductUseCase:
             creator = getattr(self.publisher, "create_user_product_item", None)
             if callable(creator):
                 return cast(dict[str, Any], creator(item))
+            raise RuntimeError(
+                "User-products flow selected but publisher does not implement "
+                "'create_user_product_item'."
+            )
         return self.publisher.create_item(item)
 
     @staticmethod
@@ -1976,12 +2073,7 @@ class PublishProductUseCase:
         family_name = self._extract_user_products_family_name(product)
         family_name_source = "attribute"
         if not family_name:
-            title_fallback = str(product.title).strip() if product.title else ""
-            if title_fallback:
-                family_name = title_fallback
-                family_name_source = "title"
-        if not family_name:
-            raise ValueError("missing required field 'family_name' and no title fallback.")
+            raise ValueError("missing required field 'family_name'.")
 
         selected_model = self._extract_selected_model(ml_attributes, variation_candidates)
 

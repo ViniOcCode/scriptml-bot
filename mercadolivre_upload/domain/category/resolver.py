@@ -346,43 +346,23 @@ class CategoryResolver:
             return normalized_category_id
 
         visited.add(normalized_category_id)
-        site_id = normalized_category_id[:3]
-
-        data = self._api.get_category(normalized_category_id)
-
-        # CRITICAL FIX: Prevent 'str' object error
-        if not isinstance(data, dict):
-            logger.error(f"Invalid API response for {normalized_category_id}: {data}")
-            return normalized_category_id
-
-        raw_children = data.get("children_categories", [])
-        children: list[dict[str, Any]] = []
-        if isinstance(raw_children, list):
-            for child in raw_children:
-                if not isinstance(child, dict):
-                    continue
-
-                child_id = self._normalize_category_id(child.get("id"), site_id)
-                child_name = child.get("name")
-                if not child_id or not isinstance(child_name, str):
-                    continue
-
-                children.append({**child, "id": child_id, "name": child_name.strip()})
+        children = self._get_category_children(normalized_category_id)
 
         if not children:
             return normalized_category_id  # It's a leaf!
 
-        # Deterministic child selection (stable and context-safe fallback)
-        sorted_children = sorted(
-            children,
-            key=lambda child: (
-                TextNormalizer.normalize(str(child.get("name", ""))),
-                str(child.get("id", "")),
-            ),
-        )
-        best_child = sorted_children[0]
+        if len(children) > 1:
+            logger.warning(
+                "Category %s has %s children and no explicit child hint; "
+                "keeping parent category to avoid unsafe leaf auto-selection.",
+                normalized_category_id,
+                len(children),
+            )
+            return normalized_category_id
+
+        best_child = children[0]
         logger.info(
-            f"Category {category_id} has children, selecting "
+            f"Category {category_id} has a single child, selecting "
             f"'{best_child['name']}' ({best_child['id']})"
         )
 
