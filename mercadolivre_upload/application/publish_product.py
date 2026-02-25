@@ -3701,8 +3701,18 @@ class PublishProductUseCase:
         if isinstance(row_mode_intent, str) and row_mode_intent:
             decision_source = "spreadsheet.headers"
             if row_mode_intent == "marketplace":
+                configured_mode_priority = getattr(self.shipping_resolver, "mode_priority", [])
+                marketplace_priority: list[str] = []
+                if isinstance(configured_mode_priority, list):
+                    for raw_mode in configured_mode_priority:
+                        mode_name = str(raw_mode).strip().lower()
+                        if mode_name in {"me1", "me2"} and mode_name not in marketplace_priority:
+                            marketplace_priority.append(mode_name)
+                if not marketplace_priority:
+                    marketplace_priority = ["me2", "me1"]
+
                 marketplace_modes = [
-                    mode for mode in ("me2", "me1") if mode in resolved_available_modes
+                    mode for mode in marketplace_priority if mode in resolved_available_modes
                 ]
                 if isinstance(resolved_mode, str) and resolved_mode in {"me1", "me2"}:
                     requested_mode = resolved_mode
@@ -3717,9 +3727,20 @@ class PublishProductUseCase:
                         "seller modes."
                     )
                 else:
-                    requested_mode = "me2"
+                    fallback_marketplace_mode: str | None = None
+                    if default_mode in marketplace_priority:
+                        fallback_marketplace_mode = default_mode
+                    else:
+                        for mode in marketplace_priority:
+                            if mode in modes_config:
+                                fallback_marketplace_mode = mode
+                                break
+                    if not fallback_marketplace_mode:
+                        fallback_marketplace_mode = marketplace_priority[0]
+                    requested_mode = fallback_marketplace_mode
                     decision_reason = (
-                        "Resolved Mercado Envios from spreadsheet headers with ME2 fallback."
+                        "Resolved Mercado Envios from spreadsheet headers with "
+                        f"{requested_mode.upper()} fallback."
                     )
             else:
                 requested_mode = row_mode_intent
