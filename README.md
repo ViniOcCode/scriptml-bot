@@ -106,7 +106,10 @@ Excel → `SpreadsheetParser` → canonical `Product` model → `PublishProductU
 
 `PublishProductUseCase` internals are split into helper modules to keep orchestration readable:
 `publish_product_constants.py`, `publish_product_category.py`,
-`publish_product_validation.py`, and `publish_product_identifier.py`.
+`publish_product_validation.py`, `publish_product_identifier.py`,
+`publish_product_shipping.py`, and `publish_product_preflight.py`.
+
+Listing-type resolution prioritizes seller/category availability and then falls back to site-level listing types when needed.
 
 ### Ports & adapters
 
