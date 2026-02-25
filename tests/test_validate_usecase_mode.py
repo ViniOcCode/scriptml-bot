@@ -1021,11 +1021,16 @@ def test_validation_only_mode_accepts_valid_empty_gtin_reason_when_gtin_required
             },
         ]
     )
+    config = _base_config()
+    config["identifier_policy"] = {
+        "auto_fill_empty_gtin_reason": True,
+        "default_empty_gtin_reason_value_name": "teste",
+    }
     use_case = PublishProductUseCase(
         category_resolver=resolver,  # type: ignore[arg-type]
         publisher=publisher,  # type: ignore[arg-type]
         image_uploader=_ImageUploader(),  # type: ignore[arg-type]
-        config=_base_config(),
+        config=config,
         validation_only=True,
         enable_feedback=False,
         enable_fiscal_submission=False,
@@ -1036,6 +1041,13 @@ def test_validation_only_mode_accepts_valid_empty_gtin_reason_when_gtin_required
 
     assert result["success"] is True
     assert len(publisher.validated_items) == 1
+    attrs_by_id = {
+        attr["id"]: attr
+        for attr in publisher.validated_items[0]["attributes"]
+        if isinstance(attr, dict) and isinstance(attr.get("id"), str)
+    }
+    assert attrs_by_id["EMPTY_GTIN_REASON"]["value_id"] == "17055158"
+    assert attrs_by_id["EMPTY_GTIN_REASON"]["value_name"] == "Outro motivo"
     identifier_gate = result["item_results"][0]["identifier_gate"]
     assert identifier_gate["item_has_gtin"] is False
     assert identifier_gate["item_has_empty_gtin_reason"] is True
@@ -1091,13 +1103,64 @@ def test_validation_only_mode_auto_fills_default_empty_gtin_reason_when_configur
         for attr in publisher.validated_items[0]["attributes"]
         if isinstance(attr, dict) and isinstance(attr.get("id"), str)
     }
-    assert attrs_by_id["EMPTY_GTIN_REASON"]["value_name"] == "teste"
+    assert attrs_by_id["EMPTY_GTIN_REASON"]["value_name"] == "Outro motivo"
     assert attrs_by_id["EMPTY_GTIN_REASON"]["value_id"] == "17055158"
     identifier_gate = result["item_results"][0]["identifier_gate"]
     assert identifier_gate["item_has_gtin"] is False
     assert identifier_gate["item_has_empty_gtin_reason"] is True
     assert identifier_gate["default_empty_gtin_reason"]["applied"] is True
+    assert identifier_gate["default_empty_gtin_reason"]["warning"] is not None
     assert identifier_gate["violations"] == []
+
+
+def test_validation_only_mode_auto_fills_default_empty_gtin_reason_without_allowed_values() -> None:
+    class _NoIdentifierBuilder:
+        def build_attributes(
+            self,
+            _product: Product,
+            _category_id: str,
+        ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], list[str]]:
+            return ([{"id": "BRAND", "value_name": "Marca X"}], [], [], [])
+
+        def set_cache_mapper(self, cache_mapper: Any) -> None:  # pragma: no cover - compat hook
+            del cache_mapper
+
+    publisher = _ValidationPublisher()
+    resolver = _SchemaContractResolver(
+        all_attributes=[
+            {"id": "GTIN", "tags": {"required": True}},
+            {"id": "EMPTY_GTIN_REASON", "tags": {}},
+        ]
+    )
+    config = _base_config()
+    config["identifier_policy"] = {
+        "auto_fill_empty_gtin_reason": True,
+        "default_empty_gtin_reason_value_name": "teste",
+    }
+    use_case = PublishProductUseCase(
+        category_resolver=resolver,  # type: ignore[arg-type]
+        publisher=publisher,  # type: ignore[arg-type]
+        image_uploader=_ImageUploader(),  # type: ignore[arg-type]
+        config=config,
+        validation_only=True,
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+    use_case._attribute_builder = _NoIdentifierBuilder()  # type: ignore[assignment]
+
+    result = use_case.execute([_build_product()], "MLB1234")
+
+    assert result["success"] is True
+    attrs_by_id = {
+        attr["id"]: attr
+        for attr in publisher.validated_items[0]["attributes"]
+        if isinstance(attr, dict) and isinstance(attr.get("id"), str)
+    }
+    assert attrs_by_id["EMPTY_GTIN_REASON"]["value_name"] == "teste"
+    assert "value_id" not in attrs_by_id["EMPTY_GTIN_REASON"]
+    identifier_gate = result["item_results"][0]["identifier_gate"]
+    assert identifier_gate["default_empty_gtin_reason"]["applied"] is True
+    assert identifier_gate["default_empty_gtin_reason"]["warning"] is None
 
 
 def test_validation_only_mode_blocks_invalid_empty_gtin_reason_metadata() -> None:
