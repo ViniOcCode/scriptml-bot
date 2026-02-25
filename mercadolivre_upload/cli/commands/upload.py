@@ -17,6 +17,14 @@ from mercadolivre_upload.api.category_adapter import CategoryAdapter
 from mercadolivre_upload.api.client import MLApiClient
 from mercadolivre_upload.application.publish_product import PublishProductUseCase
 from mercadolivre_upload.auth import AuthManager
+from mercadolivre_upload.cli.commands.batch_reporting import (
+    _extract_group_flow_routing,
+    _extract_rollout_flags_snapshot,
+    _group_products_by_category,
+    _merge_item_observability_fields,
+    _resolve_cause_codes,
+    _update_cause_code_counters,
+)
 from mercadolivre_upload.cli.commands.common import (
     coerce_path_option,
     merge_category_resolution_fields,
@@ -25,11 +33,11 @@ from mercadolivre_upload.cli.commands.common import (
 from mercadolivre_upload.cli.commands.upload_reporting import (
     _empty_category_resolution_summary,
     _ensure_observability_evidence,
-    _extract_cause_codes,
-    _extract_decision_classified_codes,
-    _increment_code_counter,
-    _is_error_classification,
-    _is_warning_classification,
+    _extract_cause_codes,  # noqa: F401
+    _extract_decision_classified_codes,  # noqa: F401
+    _increment_code_counter,  # noqa: F401
+    _is_error_classification,  # noqa: F401
+    _is_warning_classification,  # noqa: F401
     _merge_category_resolution_summary,
     _top_code_entries,
     _top_codes_by_status,
@@ -44,12 +52,11 @@ logger = logging.getLogger(__name__)
 
 
 def load_config() -> dict[str, Any]:
-    """Load split configs with deterministic legacy fallback precedence."""
+    """Load runtime configs from split files."""
     return load_merged_yaml_config(
         Path("config/standard_fields.yaml"),
         Path("config/shipping.yaml"),
         Path("config/attribute_rules.yaml"),
-        Path("config/header_detection.yaml"),
     )
 
 
@@ -220,10 +227,11 @@ def upload(
             }
             merge_category_resolution_fields(base_item, {}, input_category)
             item_results.append(base_item)
-        grouped_products: dict[str, list[tuple[int, dict[str, Any]]]] = {}
-        for index, row in enumerate(batch_products):
-            row_category = _extract_row_category(row) or category
-            grouped_products.setdefault(row_category, []).append((index, row))
+        grouped_products = _group_products_by_category(
+            batch_products,
+            default_category=category,
+            extract_category=_extract_row_category,
+        )
 
         batch_published = 0
         batch_failed = 0
@@ -238,10 +246,7 @@ def upload(
                 category_resolution_summary,
                 results.get("category_resolution"),
             )
-            raw_group_flow_routing = results.get("flow_routing")
-            group_flow_routing = (
-                dict(raw_group_flow_routing) if isinstance(raw_group_flow_routing, dict) else None
-            )
+            group_flow_routing = _extract_group_flow_routing(results)
 
             batch_published += int(results.get("published", 0))
             batch_failed += int(results.get("failed", 0))
@@ -283,65 +288,15 @@ def upload(
                         "status": "success" if row_status == "success" else "failed",
                         "error": error_text,
                     }
-                    cause_codes = item.get("cause_codes")
-                    normalized_codes: list[str] = []
-                    if isinstance(cause_codes, list):
-                        normalized_codes = [str(code) for code in cause_codes if str(code).strip()]
-                    if not normalized_codes:
-                        normalized_codes = _extract_cause_codes(
-                            str(error_text) if error_text is not None else None
-                        )
+                    normalized_codes = _resolve_cause_codes(item.get("cause_codes"), error_text)
                     if normalized_codes:
                         mapped_item["cause_codes"] = normalized_codes
-                    cause_taxonomy = item.get("cause_taxonomy")
-                    if isinstance(cause_taxonomy, list):
-                        normalized_taxonomy = [
-                            dict(cause) for cause in cause_taxonomy if isinstance(cause, dict)
-                        ]
-                        if normalized_taxonomy:
-                            mapped_item["cause_taxonomy"] = normalized_taxonomy
-                    validation_decision = item.get("validation_decision")
-                    if isinstance(validation_decision, dict):
-                        mapped_item["validation_decision"] = dict(validation_decision)
-                    merge_category_resolution_fields(
+                    _merge_item_observability_fields(
                         mapped_item,
                         item,
-                        grouped_results[target_index].get("category_input"),
+                        category_input=grouped_results[target_index].get("category_input"),
+                        default_flow_routing=group_flow_routing,
                     )
-                    category_resolution_decision = item.get("category_resolution_decision")
-                    if isinstance(category_resolution_decision, dict):
-                        mapped_item["category_resolution_decision"] = dict(
-                            category_resolution_decision
-                        )
-                    policy_hash = item.get("policy_hash")
-                    if isinstance(policy_hash, str) and policy_hash:
-                        mapped_item["policy_hash"] = policy_hash
-                    policy_summary = item.get("policy_summary")
-                    if isinstance(policy_summary, dict):
-                        mapped_item["policy_summary"] = policy_summary
-                    schema_contract_hash = item.get("schema_contract_hash")
-                    if isinstance(schema_contract_hash, str) and schema_contract_hash:
-                        mapped_item["schema_contract_hash"] = schema_contract_hash
-                    schema_contract_summary = item.get("schema_contract_summary")
-                    if isinstance(schema_contract_summary, dict):
-                        mapped_item["schema_contract_summary"] = schema_contract_summary
-                    identifier_gate = item.get("identifier_gate")
-                    if isinstance(identifier_gate, dict):
-                        mapped_item["identifier_gate"] = identifier_gate
-                    flow_routing = item.get("flow_routing")
-                    if isinstance(flow_routing, dict):
-                        mapped_item["flow_routing"] = flow_routing
-                    elif group_flow_routing is not None:
-                        mapped_item["flow_routing"] = dict(group_flow_routing)
-                    image_diagnostics = item.get("image_diagnostics")
-                    if isinstance(image_diagnostics, dict):
-                        mapped_item["image_diagnostics"] = image_diagnostics
-                    shipping_policy = item.get("shipping_policy")
-                    if isinstance(shipping_policy, dict):
-                        mapped_item["shipping_policy"] = shipping_policy
-                    rollout_flags = item.get("rollout_flags")
-                    if isinstance(rollout_flags, dict):
-                        mapped_item["rollout_flags"] = rollout_flags
                     grouped_results[target_index] = _ensure_observability_evidence(
                         mapped_item,
                         row_status=mapped_item["status"],
@@ -374,116 +329,28 @@ def upload(
                 "status": row_status,
                 "error": item_result.get("error"),
             }
-            cause_codes = item_result.get("cause_codes")
-            normalized_codes = []
-            if isinstance(cause_codes, list):
-                normalized_codes = [str(code) for code in cause_codes if str(code).strip()]
-            if not normalized_codes:
-                normalized_codes = _extract_cause_codes(
-                    str(item_result.get("error")) if item_result.get("error") is not None else None
-                )
+            normalized_codes = _resolve_cause_codes(
+                item_result.get("cause_codes"),
+                item_result.get("error"),
+            )
             if normalized_codes:
                 normalized["cause_codes"] = normalized_codes
-            cause_taxonomy = item_result.get("cause_taxonomy")
-            if isinstance(cause_taxonomy, list):
-                normalized_taxonomy = [
-                    dict(cause) for cause in cause_taxonomy if isinstance(cause, dict)
-                ]
-                if normalized_taxonomy:
-                    normalized["cause_taxonomy"] = normalized_taxonomy
-            validation_decision = item_result.get("validation_decision")
-            if isinstance(validation_decision, dict):
-                normalized["validation_decision"] = dict(validation_decision)
-            merge_category_resolution_fields(
+            _merge_item_observability_fields(
                 normalized,
                 item_result,
-                item_result.get("category_input"),
+                category_input=item_result.get("category_input"),
             )
-            category_resolution_decision = item_result.get("category_resolution_decision")
-            if isinstance(category_resolution_decision, dict):
-                normalized["category_resolution_decision"] = dict(category_resolution_decision)
-            policy_hash = item_result.get("policy_hash")
-            if isinstance(policy_hash, str) and policy_hash:
-                normalized["policy_hash"] = policy_hash
-            policy_summary = item_result.get("policy_summary")
-            if isinstance(policy_summary, dict):
-                normalized["policy_summary"] = policy_summary
-            schema_contract_hash = item_result.get("schema_contract_hash")
-            if isinstance(schema_contract_hash, str) and schema_contract_hash:
-                normalized["schema_contract_hash"] = schema_contract_hash
-            schema_contract_summary = item_result.get("schema_contract_summary")
-            if isinstance(schema_contract_summary, dict):
-                normalized["schema_contract_summary"] = schema_contract_summary
-            identifier_gate = item_result.get("identifier_gate")
-            if isinstance(identifier_gate, dict):
-                normalized["identifier_gate"] = identifier_gate
-            flow_routing = item_result.get("flow_routing")
-            if isinstance(flow_routing, dict):
-                normalized["flow_routing"] = flow_routing
-            image_diagnostics = item_result.get("image_diagnostics")
-            if isinstance(image_diagnostics, dict):
-                normalized["image_diagnostics"] = image_diagnostics
-            shipping_policy = item_result.get("shipping_policy")
-            if isinstance(shipping_policy, dict):
-                normalized["shipping_policy"] = shipping_policy
-            rollout_flags = item_result.get("rollout_flags")
-            if isinstance(rollout_flags, dict):
-                normalized["rollout_flags"] = rollout_flags
             normalized = _ensure_observability_evidence(normalized, row_status=row_status)
             all_item_results.append(normalized)
 
             status_bucket = "success" if row_status == "success" else "failed"
-            cause_codes = normalized.get("cause_codes", [])
-            normalized_codes = (
-                [str(code).strip().lower() for code in cause_codes if str(code).strip()]
-                if isinstance(cause_codes, list)
-                else []
+            _update_cause_code_counters(
+                normalized,
+                status_bucket=status_bucket,
+                cause_code_counts=cause_code_counts,
+                warning_code_counts=warning_code_counts,
+                error_code_counts=error_code_counts,
             )
-            warning_codes_for_row: set[str] = set()
-            error_codes_for_row: set[str] = set()
-            all_codes_for_row: set[str] = set(normalized_codes)
-            taxonomy = normalized.get("cause_taxonomy")
-            if isinstance(taxonomy, list):
-                for cause in taxonomy:
-                    if not isinstance(cause, dict):
-                        continue
-                    code = str(cause.get("code", "")).strip().lower()
-                    if not code:
-                        continue
-                    all_codes_for_row.add(code)
-                    classification = str(cause.get("classification", "")).strip().lower()
-                    if _is_warning_classification(classification):
-                        warning_codes_for_row.add(code)
-                    elif _is_error_classification(classification):
-                        error_codes_for_row.add(code)
-                    else:
-                        cause_type = str(cause.get("type", "")).strip().lower()
-                        if cause_type == "warning":
-                            warning_codes_for_row.add(code)
-                        elif cause_type == "error":
-                            error_codes_for_row.add(code)
-
-            if not warning_codes_for_row and not error_codes_for_row:
-                decision_warning_codes, decision_error_codes = _extract_decision_classified_codes(
-                    normalized.get("validation_decision")
-                )
-                warning_codes_for_row.update(decision_warning_codes)
-                error_codes_for_row.update(decision_error_codes)
-                all_codes_for_row.update(decision_warning_codes)
-                all_codes_for_row.update(decision_error_codes)
-
-            if not warning_codes_for_row and not error_codes_for_row:
-                if status_bucket == "success":
-                    warning_codes_for_row.update(normalized_codes)
-                else:
-                    error_codes_for_row.update(normalized_codes)
-
-            for code in all_codes_for_row:
-                _increment_code_counter(cause_code_counts, code)
-            for code in warning_codes_for_row:
-                _increment_code_counter(warning_code_counts[status_bucket], code)
-            for code in error_codes_for_row:
-                _increment_code_counter(error_code_counts[status_bucket], code)
 
             if row_status != "success":
                 failed_row = dict(row)
@@ -520,12 +387,7 @@ def upload(
     run_id = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     summary_path = report_dir / f"upload-summary-{run_id}.json"
     failed_items_path = report_dir / f"failed-items-{run_id}.xlsx"
-    rollout_flags_snapshot: dict[str, Any] = {}
-    for item in all_item_results:
-        raw_rollout_flags = item.get("rollout_flags")
-        if isinstance(raw_rollout_flags, dict) and raw_rollout_flags:
-            rollout_flags_snapshot = dict(raw_rollout_flags)
-            break
+    rollout_flags_snapshot = _extract_rollout_flags_snapshot(all_item_results)
 
     summary_report = {
         "run_id": run_id,

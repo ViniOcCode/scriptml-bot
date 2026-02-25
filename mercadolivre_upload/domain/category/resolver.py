@@ -10,6 +10,24 @@ from typing import Any, Protocol
 from mercadolivre_upload.shared.utils.text_utils import TextNormalizer
 
 from ..attribute_metadata import AttributeMeta
+from .attribute_helpers import (
+    build_attribute_map as _build_attribute_map_helper,
+)
+from .attribute_helpers import (
+    get_all_attributes as _get_all_attributes_helper,
+)
+from .attribute_helpers import (
+    get_all_attributes_with_conditionals as _get_all_attributes_with_conditionals_helper,
+)
+from .attribute_helpers import (
+    get_conditional_attributes as _get_conditional_attributes_helper,
+)
+from .attribute_helpers import (
+    get_mandatory_attributes as _get_mandatory_attributes_helper,
+)
+from .attribute_helpers import (
+    get_required_attributes as _get_required_attributes_helper,
+)
 from .predictor import (
     call_domain_discovery as _call_domain_discovery_helper,
 )
@@ -526,40 +544,20 @@ class CategoryResolver:
 
     def get_mandatory_attributes(self, category_id: str) -> list[dict[str, Any]]:
         """Get mandatory attributes for a category."""
-        attributes = self.get_all_attributes(category_id)
-        return [attr for attr in attributes if attr.get("tags", {}).get("required")]
+        return _get_mandatory_attributes_helper(self.get_all_attributes(category_id))
 
     def get_all_attributes(self, category_id: str) -> list[dict[str, Any]]:
         """Get all attributes for a category (cached)."""
-        # Check cache first
-        if self._attribute_cache:
-            cached = self._attribute_cache.get_attributes(category_id)
-            if cached is not None:
-                logger.debug(f"Using cached attributes for {category_id}")
-                return cached
-
-        # Fetch from API
-        attributes = self._api.get_category_attributes(category_id)
-
-        # Save to cache
-        if self._attribute_cache:
-            self._attribute_cache.save_attributes(category_id, attributes)
-
-        return attributes
+        return _get_all_attributes_helper(
+            category_id,
+            self._api.get_category_attributes,
+            self._attribute_cache,
+            logger,
+        )
 
     def build_attribute_map(self, category_id: str) -> dict[str, dict[str, Any]]:
         """Build name -> attribute mapping."""
-        attributes = self.get_all_attributes(category_id)
-        mapping = {}
-
-        for attr in attributes:
-            name = attr["name"].lower()
-            mapping[name] = attr
-
-            # Also map by ID
-            mapping[attr["id"].lower()] = attr
-
-        return mapping
+        return _build_attribute_map_helper(self.get_all_attributes(category_id))
 
     def get_conditional_attributes(
         self, category_id: str, item_context: dict[str, Any]
@@ -573,19 +571,11 @@ class CategoryResolver:
         Returns:
             List of conditional attributes
         """
-        try:
-            result = self._api.get_category_conditional_attributes(category_id, item_context)
-            # Handle case where API returns error message or non-list
-            if isinstance(result, dict) and "error" in result:
-                return []
-            if isinstance(result, str):
-                return []
-            if not isinstance(result, list):
-                return []
-            return result
-        except Exception:
-            # Log error but don't fail - conditional attrs are optional
-            return []
+        return _get_conditional_attributes_helper(
+            category_id,
+            item_context,
+            self._api.get_category_conditional_attributes,
+        )
 
     def get_all_attributes_with_conditionals(
         self, category_id: str, item_context: dict[str, Any]
@@ -599,9 +589,10 @@ class CategoryResolver:
         Returns:
             Tuple of (base_attributes, conditional_attributes)
         """
-        base_attrs = self.get_all_attributes(category_id)
-        conditional = self.get_conditional_attributes(category_id, item_context)
-        return base_attrs, conditional
+        return _get_all_attributes_with_conditionals_helper(
+            self.get_all_attributes(category_id),
+            self.get_conditional_attributes(category_id, item_context),
+        )
 
     def get_required_attributes(
         self, category_id: str, item_context: dict[str, Any]
@@ -615,19 +606,10 @@ class CategoryResolver:
         Returns:
             List of required attribute definitions
         """
-        # Get base required attributes
-        all_base = self.get_all_attributes(category_id)
-        required = [attr for attr in all_base if attr.get("tags", {}).get("required")]
-
-        # Get conditional attributes
-        conditional = self.get_conditional_attributes(category_id, item_context)
-
-        # Filter conditional required attributes
-        required_conditional = [
-            attr for attr in conditional if attr.get("tags", {}).get("required")
-        ]
-
-        return required + required_conditional
+        return _get_required_attributes_helper(
+            self.get_all_attributes(category_id),
+            self.get_conditional_attributes(category_id, item_context),
+        )
 
     def _extract_technical_spec_attributes(
         self, specs: dict[str, Any]
