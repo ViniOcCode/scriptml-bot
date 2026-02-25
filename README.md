@@ -24,7 +24,8 @@ A CLI tool to prepare, validate and publish product listings to Mercado Libre fr
   ml-upload cache --help
   ```
 
-- Legacy fallback paths were removed: both `upload` and `validate` now run only through the new flow.
+- `upload` and `validate` share the same `PublishProductUseCase` pipeline; flow routing
+  (`legacy` / `user_products`) is resolved at runtime from capabilities + config.
 - Upload runs generate JSON summary reports and, when failures happen, an Excel file with failed rows
   under `cache/reports/` for easier retry.
 
@@ -102,6 +103,10 @@ mercadolivre_upload/
 ### Data flow
 
 Excel → `SpreadsheetParser` → canonical `Product` model → `PublishProductUseCase` (orchestrates `CategoryResolver`, `AttributeBuilderService`, payload `builders/`, `ImageUploaderPort`, `ItemPublisherPort`) → Mercado Libre API.
+
+`PublishProductUseCase` internals are split into helper modules to keep orchestration readable:
+`publish_product_constants.py`, `publish_product_category.py`,
+`publish_product_validation.py`, and `publish_product_identifier.py`.
 
 ### Ports & adapters
 
