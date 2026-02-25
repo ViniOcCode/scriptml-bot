@@ -75,15 +75,6 @@ from .publish_product_preflight import (
 from .publish_product_shipping import (
     build_shipping_config as _build_shipping_config_helper,
 )
-from .publish_product_shipping import (
-    extract_row_shipping_input as _extract_row_shipping_input_helper,
-)
-from .publish_product_shipping import (
-    normalize_shipping_header_name as _normalize_shipping_header_name_helper,
-)
-from .publish_product_shipping import (
-    normalize_shipping_value as _normalize_shipping_value_helper,
-)
 from .publish_product_validation import (
     build_validation_cause_taxonomy,
     classify_validation_cause,
@@ -697,18 +688,6 @@ class PublishProductUseCase:
     def _coerce_shipping_bool(value: Any) -> bool | None:
         """Coerce supported shipping booleans into strict bool values."""
         return coerce_shipping_bool(value)
-
-    @staticmethod
-    def _normalize_shipping_header_name(raw_key: Any) -> str:
-        return _normalize_shipping_header_name_helper(raw_key)
-
-    @staticmethod
-    def _normalize_shipping_value(raw_value: Any) -> str:
-        return _normalize_shipping_value_helper(raw_value)
-
-    @classmethod
-    def _extract_row_shipping_input(cls, row_attributes: dict[str, Any] | None) -> dict[str, Any]:
-        return _extract_row_shipping_input_helper(cls, row_attributes)
 
     def _get_seller_capabilities_artifact(self) -> dict[str, Any]:
         """Read seller capability tags once and reuse within the use case instance."""
