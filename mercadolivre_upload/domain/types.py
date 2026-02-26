@@ -10,13 +10,6 @@ class ClipSite(TypedDict):
     logistic_type: str  # Ex: "drop_off", "cross_docking"
 
 
-class ClipUploadResponse(TypedDict):
-    """Response from POST /marketplace/items/{item_id}/clips/upload."""
-
-    status: Literal["accepted", "rejected"]
-    clip_uuid: str
-
-
 class ClipMetadata(TypedDict):
     """Moderation metadata for a clip on a specific site."""
 
