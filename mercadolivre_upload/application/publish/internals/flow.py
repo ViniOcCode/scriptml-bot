@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from typing import Any, cast
 
+from mercadolivre_upload.application.shipping_policy import normalize_seller_tags
+
 from .constants import (
     AVAILABLE_ROUTING_FLOWS,
     IMPLEMENTED_ROUTING_FLOWS,
@@ -43,7 +45,7 @@ def get_seller_capabilities_artifact(use_case: Any) -> dict[str, Any]:
             type(payload).__name__,
         )
 
-    tags = use_case._normalize_seller_tags(seller_info.get("tags"))
+    tags = normalize_seller_tags(seller_info.get("tags"))
     has_user_products_tag = USER_PRODUCTS_SELLER_TAG in tags
     artifact = {
         "source": source,
