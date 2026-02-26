@@ -26,14 +26,6 @@ from .publish.internals.category import (
 from .publish.internals.category import (
     resolve_category_context as _resolve_category_context_helper,
 )
-from .publish.internals.decisioning import (
-    build_validation_decision,
-    classify_shipping_cause,
-    extract_exception_error_detail,
-    extract_exception_response_excerpt,
-    is_shipping_cause,
-    register_shipping_causes,
-)
 from .publish.internals.execution import (
     build_product_from_dict as _build_product_from_dict_helper,
 )
@@ -111,7 +103,6 @@ from .publish.internals.preflight_validation import (
 from .publish.internals.publish_item import publish_one as _publish_one_helper
 from .publish.internals.publisher_capabilities import build_publisher_capabilities
 from .publish.internals.runtime_settings import resolve_runtime_settings
-from .publish.internals.shipping import build_shipping_config as _build_shipping_config_helper
 from .publish.internals.state import (
     annotate_image_diagnostics_artifact as _annotate_image_diagnostics_artifact_helper,
 )
@@ -130,10 +121,6 @@ from .publish.internals.user_products import (
     normalize_variation_candidates,
     variation_value_sort_key,
 )
-from .publish.internals.validation import (
-    build_validation_cause_taxonomy,
-    get_critical_attribute_warnings,
-)
 from .publish.internals.variations import (
     build_legacy_variation_seller_sku as _build_legacy_variation_seller_sku_helper,
 )
@@ -147,11 +134,6 @@ from .publish.internals.variations import (
     get_mapped_variation_candidate as _get_mapped_variation_candidate_helper,
 )
 from .publish.internals.variations import resolve_picture_ids as _resolve_picture_ids_helper
-from .shipping_policy import (
-    coerce_shipping_bool,
-    normalize_seller_tags,
-    normalize_shipping_constraints,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -332,72 +314,6 @@ class PublishProductUseCase:
     ) -> dict[str, Any]:
         """Resolve category with deterministic strategy metadata."""
         return _resolve_category_context_helper(self, products, category_name, logger)
-
-    @staticmethod
-    def _get_critical_attribute_warnings(warnings: list[str]) -> list[str]:
-        """Return attribute-processing warnings that should block publication."""
-        return get_critical_attribute_warnings(warnings)
-
-    @classmethod
-    def _build_validation_cause_taxonomy(cls, causes: list[dict[str, Any]]) -> list[dict[str, str]]:
-        """Normalize raw validation causes into a persisted taxonomy."""
-        return build_validation_cause_taxonomy(causes)
-
-    def _build_validation_decision(self, taxonomy: list[dict[str, str]]) -> dict[str, Any]:
-        """Resolve deterministic strict/controlled decision from taxonomy."""
-        return build_validation_decision(
-            taxonomy=taxonomy,
-            validation_decision_mode=self.validation_decision_mode,
-            strict_warning_gate_mode=self.strict_warning_gate_mode,
-            strict_attribute_warnings=self.strict_attribute_warnings,
-        )
-
-    @staticmethod
-    def _is_shipping_cause(cause_code: str, cause_message: str) -> bool:
-        """Check whether a cause row is shipping-related."""
-        return is_shipping_cause(cause_code, cause_message)
-
-    def _classify_shipping_cause(self, cause_code: str, cause_message: str) -> str:
-        """Classify shipping causes into blocking/retryable/unknown buckets."""
-        return classify_shipping_cause(
-            cause_code=cause_code,
-            cause_message=cause_message,
-            shipping_non_blocking_codes=self.shipping_non_blocking_codes,
-        )
-
-    def _register_shipping_causes(self, causes: list[Any], *, stage: str) -> list[dict[str, str]]:
-        """Extract and store shipping-cause classification metadata for current item."""
-        return register_shipping_causes(
-            causes,
-            stage=stage,
-            current_shipping_policy=self._current_shipping_policy,
-            shipping_non_blocking_codes=self.shipping_non_blocking_codes,
-        )
-
-    @staticmethod
-    def _extract_exception_error_detail(error: Exception) -> dict[str, Any] | None:
-        """Return parsed API error payload when available."""
-        return extract_exception_error_detail(error)
-
-    @staticmethod
-    def _extract_exception_response_excerpt(error: Exception, *, limit: int = 200) -> str | None:
-        """Return bounded response text excerpt for non-JSON API failures."""
-        return extract_exception_response_excerpt(error, limit=limit)
-
-    @staticmethod
-    def _normalize_seller_tags(raw_tags: Any) -> list[str]:
-        """Normalize seller tag payload from users/me style responses."""
-        return normalize_seller_tags(raw_tags)
-
-    @staticmethod
-    def _normalize_shipping_constraints(raw_constraints: Any) -> dict[str, Any]:
-        """Normalize shipping constraints payload into a deterministic mapping."""
-        return normalize_shipping_constraints(raw_constraints)
-
-    @staticmethod
-    def _coerce_shipping_bool(value: Any) -> bool | None:
-        """Coerce supported shipping booleans into strict bool values."""
-        return coerce_shipping_bool(value)
 
     def _get_seller_capabilities_artifact(self) -> dict[str, Any]:
         """Read seller capability tags once and reuse within the use case instance."""
@@ -774,17 +690,6 @@ class PublishProductUseCase:
             logger.info(f"Description published for {sku} ({item_id})")
         except Exception as e:
             logger.warning(f"Could not publish description for {sku} ({item_id}): {e}")
-
-    def _build_shipping_config(
-        self,
-        category_id: str | None = None,
-        row_attributes: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        return _build_shipping_config_helper(
-            self,
-            category_id=category_id,
-            row_attributes=row_attributes,
-        )
 
     def _normalize_item_attributes(self, item: dict[str, Any]) -> None:
         _normalize_item_attributes_helper(self, item)

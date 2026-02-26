@@ -7,6 +7,15 @@ from typing import Any
 
 from mercadolivre_upload.domain.product.model import Product
 
+from .decisioning import (
+    build_validation_decision,
+    extract_exception_error_detail,
+    extract_exception_response_excerpt,
+    register_shipping_causes,
+)
+from .shipping import build_shipping_config
+from .validation import build_validation_cause_taxonomy, get_critical_attribute_warnings
+
 logger = logging.getLogger(__name__)
 
 
@@ -133,6 +142,28 @@ def _extract_decision_codes(
     return blocking_error_codes, retryable_error_codes, critical_warning_codes
 
 
+def _build_validation_decision_for_use_case(
+    use_case: Any, taxonomy: list[dict[str, str]]
+) -> dict[str, Any]:
+    return build_validation_decision(
+        taxonomy=taxonomy,
+        validation_decision_mode=use_case.validation_decision_mode,
+        strict_warning_gate_mode=use_case.strict_warning_gate_mode,
+        strict_attribute_warnings=use_case.strict_attribute_warnings,
+    )
+
+
+def _register_shipping_cause_decisions(
+    use_case: Any, causes: list[Any], *, stage: str
+) -> list[dict[str, str]]:
+    return register_shipping_causes(
+        causes,
+        stage=stage,
+        current_shipping_policy=use_case._current_shipping_policy,
+        shipping_non_blocking_codes=use_case.shipping_non_blocking_codes,
+    )
+
+
 def publish_one(use_case: Any, product: Product, category_id: str) -> bool:
     """Publish one product preserving existing behavior and artifacts."""
     logger.info("Publishing product: %s (title: %s...)", product.sku, product.title[:50])
@@ -167,7 +198,7 @@ def publish_one(use_case: Any, product: Product, category_id: str) -> bool:
 
     if attr_warnings:
         logger.warning("Attribute warnings for %s: %s", product.sku, attr_warnings)
-        critical_attr_warnings = use_case._get_critical_attribute_warnings(attr_warnings)
+        critical_attr_warnings = get_critical_attribute_warnings(attr_warnings)
         if critical_attr_warnings and use_case.strict_attribute_warnings:
             summary = critical_attr_warnings[:5]
             logger.error(
@@ -191,7 +222,8 @@ def publish_one(use_case: Any, product: Product, category_id: str) -> bool:
     if not pictures:
         logger.warning("No pictures for %s", product.sku)
 
-    shipping_config = use_case._build_shipping_config(
+    shipping_config = build_shipping_config(
+        use_case,
         category_id=category_id,
         row_attributes=product.attributes,
     )
@@ -355,8 +387,9 @@ def publish_one(use_case: Any, product: Product, category_id: str) -> bool:
             "schema_contract.preflight",
             message,
         )
-        use_case._current_validation_decision = use_case._build_validation_decision(
-            use_case._current_cause_taxonomy
+        use_case._current_validation_decision = _build_validation_decision_for_use_case(
+            use_case,
+            use_case._current_cause_taxonomy,
         )
         use_case.errors.append(f"{product.sku}: {message}")
         use_case.failed += 1
@@ -378,8 +411,9 @@ def publish_one(use_case: Any, product: Product, category_id: str) -> bool:
             "image_diagnostic.preflight",
             message,
         )
-        use_case._current_validation_decision = use_case._build_validation_decision(
-            use_case._current_cause_taxonomy
+        use_case._current_validation_decision = _build_validation_decision_for_use_case(
+            use_case,
+            use_case._current_cause_taxonomy,
         )
         use_case.errors.append(f"{product.sku}: {message}")
         use_case.failed += 1
@@ -402,8 +436,12 @@ def publish_one(use_case: Any, product: Product, category_id: str) -> bool:
         causes = [cause for cause in raw_causes if isinstance(cause, dict)]
         for cause in causes:
             logger.debug("Validation cause for %s: %s", product.sku, cause)
-        shipping_cause_decisions = use_case._register_shipping_causes(causes, stage="validate")
-        cause_taxonomy = use_case._build_validation_cause_taxonomy(causes)
+        shipping_cause_decisions = _register_shipping_cause_decisions(
+            use_case,
+            causes,
+            stage="validate",
+        )
+        cause_taxonomy = build_validation_cause_taxonomy(causes)
         use_case._current_cause_taxonomy = cause_taxonomy
         use_case._current_cause_codes = list(
             dict.fromkeys(
@@ -413,7 +451,9 @@ def publish_one(use_case: Any, product: Product, category_id: str) -> bool:
             )
         )
         use_case._current_validation_decision = (
-            use_case._build_validation_decision(cause_taxonomy) if cause_taxonomy else {}
+            _build_validation_decision_for_use_case(use_case, cause_taxonomy)
+            if cause_taxonomy
+            else {}
         )
 
         shipping_issues = [
@@ -521,19 +561,18 @@ def publish_one(use_case: Any, product: Product, category_id: str) -> bool:
         error_msg = str(error)
         cause_codes: list[str] = []
         validation_exception_taxonomy: list[dict[str, str]] = []
-        error_detail = use_case._extract_exception_error_detail(error)
+        error_detail = extract_exception_error_detail(error)
         if error_detail is not None:
             error_msg = f"{error_msg} - {error_detail}"
             causes_raw = error_detail.get("cause", [])
             causes = causes_raw if isinstance(causes_raw, list) else []
-            shipping_cause_decisions = use_case._register_shipping_causes(
+            shipping_cause_decisions = _register_shipping_cause_decisions(
+                use_case,
                 causes,
                 stage="validate_exception",
             )
             normalized_causes = [cause for cause in causes if isinstance(cause, dict)]
-            validation_exception_taxonomy = use_case._build_validation_cause_taxonomy(
-                normalized_causes
-            )
+            validation_exception_taxonomy = build_validation_cause_taxonomy(normalized_causes)
             for cause in normalized_causes:
                 cause_code = str(cause.get("code", "")).strip().lower()
                 if cause_code:
@@ -546,7 +585,7 @@ def publish_one(use_case: Any, product: Product, category_id: str) -> bool:
                     shipping_cause,
                 )
         else:
-            response_excerpt = use_case._extract_exception_response_excerpt(error)
+            response_excerpt = extract_exception_response_excerpt(error)
             if response_excerpt:
                 error_msg = f"{error_msg} - {response_excerpt}"
         use_case._current_cause_codes = list(
@@ -554,7 +593,7 @@ def publish_one(use_case: Any, product: Product, category_id: str) -> bool:
         )
         use_case._current_cause_taxonomy = validation_exception_taxonomy
         use_case._current_validation_decision = (
-            use_case._build_validation_decision(validation_exception_taxonomy)
+            _build_validation_decision_for_use_case(use_case, validation_exception_taxonomy)
             if validation_exception_taxonomy
             else {}
         )
@@ -660,15 +699,13 @@ def publish_one(use_case: Any, product: Product, category_id: str) -> bool:
         error_msg = str(error)
         publish_cause_codes: list[str] = []
         publish_exception_taxonomy: list[dict[str, str]] = []
-        error_detail = use_case._extract_exception_error_detail(error)
+        error_detail = extract_exception_error_detail(error)
         if error_detail is not None:
             error_msg = f"{error_msg} - {error_detail}"
             causes_raw = error_detail.get("cause", [])
             causes = causes_raw if isinstance(causes_raw, list) else []
             normalized_causes = [cause for cause in causes if isinstance(cause, dict)]
-            publish_exception_taxonomy = use_case._build_validation_cause_taxonomy(
-                normalized_causes
-            )
+            publish_exception_taxonomy = build_validation_cause_taxonomy(normalized_causes)
             if use_case.feedback:
                 use_case.feedback.record_validation_result(
                     product.sku,
@@ -679,7 +716,8 @@ def publish_one(use_case: Any, product: Product, category_id: str) -> bool:
                 cause_code = str(cause.get("code", "")).strip().lower()
                 if cause_code:
                     publish_cause_codes.append(cause_code)
-            shipping_cause_decisions = use_case._register_shipping_causes(
+            shipping_cause_decisions = _register_shipping_cause_decisions(
+                use_case,
                 causes,
                 stage="publish_exception",
             )
@@ -691,7 +729,7 @@ def publish_one(use_case: Any, product: Product, category_id: str) -> bool:
                     shipping_cause,
                 )
         else:
-            response_excerpt = use_case._extract_exception_response_excerpt(error)
+            response_excerpt = extract_exception_response_excerpt(error)
             if response_excerpt:
                 error_msg = f"{error_msg} - {response_excerpt}"
         use_case._current_cause_codes = list(
@@ -699,7 +737,7 @@ def publish_one(use_case: Any, product: Product, category_id: str) -> bool:
         )
         use_case._current_cause_taxonomy = publish_exception_taxonomy
         use_case._current_validation_decision = (
-            use_case._build_validation_decision(publish_exception_taxonomy)
+            _build_validation_decision_for_use_case(use_case, publish_exception_taxonomy)
             if publish_exception_taxonomy
             else {}
         )

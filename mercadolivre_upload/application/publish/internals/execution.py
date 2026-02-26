@@ -11,6 +11,8 @@ from mercadolivre_upload.domain.fiscal.data import FiscalData
 from mercadolivre_upload.domain.product.model import Product
 from mercadolivre_upload.shared.utils.text_utils import PortugueseTextNormalizer
 
+from .decisioning import build_validation_decision
+
 logger = logging.getLogger(__name__)
 
 
@@ -198,7 +200,12 @@ def _build_row_build_failed_item_result(
         "error": error_message,
         "cause_codes": [build_error_code],
         "cause_taxonomy": build_error_taxonomy,
-        "validation_decision": use_case._build_validation_decision(build_error_taxonomy),
+        "validation_decision": build_validation_decision(
+            taxonomy=build_error_taxonomy,
+            validation_decision_mode=use_case.validation_decision_mode,
+            strict_warning_gate_mode=use_case.strict_warning_gate_mode,
+            strict_attribute_warnings=use_case.strict_attribute_warnings,
+        ),
         "rollout_flags": deepcopy(use_case._rollout_flags_artifact),
     }
     item_result.update(flow_artifact)
