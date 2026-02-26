@@ -15,7 +15,6 @@ import logging
 import logging.handlers
 import os
 import sys
-import traceback
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -45,6 +44,15 @@ except ImportError:
 
 # Importa infraestrutura existente
 from mercadolivre_upload.infrastructure.logging import JSONFormatter, get_logger
+from mercadolivre_upload.infrastructure.observability_helpers import (
+    build_discord_alert_payload,
+    build_operation_extra,
+    build_slack_alert_payload,
+    build_structured_log_data,
+    format_recent_failures,
+    has_alert_capacity,
+    success_rate_color,
+)
 
 # ============================================================================
 # Constantes e Configurações
@@ -146,26 +154,16 @@ class StructuredLogger:
             extra: Campos extras personalizados.
             exception: Exceção opcional para incluir stack trace.
         """
-        log_data = {
-            **self._base_context,
-            "level": level,
-            "message": message,
-            "component": component or self.name,
-            "correlation_id": correlation_id,
-        }
-
-        if extra:
-            log_data["extra"] = extra
-
-        if exception:
-            log_data["exception"] = {
-                "type": type(exception).__name__,
-                "message": str(exception),
-                "traceback": traceback.format_exc() if exception else None,
-            }
-
-        # Remove campos None
-        log_data = {k: v for k, v in log_data.items() if v is not None}
+        log_data = build_structured_log_data(
+            base_context=self._base_context,
+            logger_name=self.name,
+            level=level,
+            message=message,
+            component=component,
+            correlation_id=correlation_id,
+            extra=extra,
+            exception=exception,
+        )
 
         # Log com extra para JSONFormatter capturar
         log_method = getattr(self._logger, level.lower())
@@ -242,12 +240,7 @@ class StructuredLogger:
             correlation_id: ID de correlação.
             extra: Campos extras.
         """
-        log_extra = {
-            "operation": operation,
-            "success": success,
-            "duration_ms": duration_ms,
-            **(extra or {}),
-        }
+        log_extra = build_operation_extra(operation, success, duration_ms, extra)
         level = "INFO" if success else "ERROR"
         self._log(level, f"Operation: {operation}", component, correlation_id, log_extra)
 
@@ -466,57 +459,25 @@ class Alert:
 
     def to_slack(self) -> dict[str, Any]:
         """Converte para formato Slack webhook."""
-        colors = {
-            "info": "#36a64f",
-            "warning": "#ff9900",
-            "error": "#ff0000",
-            "critical": "#990000",
-        }
-
-        return {
-            "attachments": [
-                {
-                    "color": colors.get(self.level, "#808080"),
-                    "title": f"[{self.level.upper()}] {self.title}",
-                    "text": self.message,
-                    "fields": [
-                        {"title": "Component", "value": self.component, "short": True},
-                        {"title": "Time", "value": self.timestamp.isoformat(), "short": True},
-                        *[
-                            {"title": k, "value": str(v), "short": True}
-                            for k, v in self.details.items()
-                        ],
-                    ],
-                    "footer": "mercadolivre-upload",
-                    "ts": int(self.timestamp.timestamp()),
-                }
-            ]
-        }
+        return build_slack_alert_payload(
+            level=self.level,
+            title=self.title,
+            message=self.message,
+            component=self.component,
+            timestamp=self.timestamp,
+            details=self.details,
+        )
 
     def to_discord(self) -> dict[str, Any]:
         """Converte para formato Discord webhook."""
-        colors = {
-            "info": 0x36A64F,
-            "warning": 0xFF9900,
-            "error": 0xFF0000,
-            "critical": 0x990000,
-        }
-
-        embed = {
-            "title": f"[{self.level.upper()}] {self.title}",
-            "description": self.message,
-            "color": colors.get(self.level, 0x808080),
-            "timestamp": self.timestamp.isoformat(),
-            "footer": {"text": "mercadolivre-upload"},
-            "fields": [
-                {"name": "Component", "value": self.component, "inline": True},
-            ],
-        }
-
-        for k, v in self.details.items():
-            embed["fields"].append({"name": k, "value": str(v)[:1024], "inline": True})  # type: ignore[attr-defined]
-
-        return {"embeds": [embed]}
+        return build_discord_alert_payload(
+            level=self.level,
+            title=self.title,
+            message=self.message,
+            component=self.component,
+            timestamp=self.timestamp,
+            details=self.details,
+        )
 
 
 class AlertManager:
@@ -555,14 +516,7 @@ class AlertManager:
 
     def _check_rate_limit(self) -> bool:
         """Verifica se pode enviar alerta respeitando rate limit."""
-        now = datetime.now()
-        one_minute_ago = now - timedelta(minutes=1)
-
-        # Remove alertas antigos
-        while self._alert_history and self._alert_history[0] < one_minute_ago:
-            self._alert_history.popleft()
-
-        return len(self._alert_history) < self.rate_limit
+        return has_alert_capacity(self._alert_history, self.rate_limit)
 
     async def send_alert(self, alert: Alert) -> bool:
         """Envia um alerta via webhooks configurados.
@@ -814,11 +768,7 @@ class Dashboard:
         table.add_column("Tempo Médio", justify="right")
 
         for stats in self.metrics.uploads_per_hour[-8:]:  # Últimas 8 horas
-            success_color = (
-                "green"
-                if stats.success_rate >= 0.9
-                else "yellow" if stats.success_rate >= 0.7 else "red"
-            )
+            success_color = success_rate_color(stats.success_rate)
             table.add_row(
                 stats.hour[-5:],  # Mostra apenas HH:00
                 str(stats.uploads),
@@ -861,18 +811,7 @@ class Dashboard:
     def _create_footer(self) -> Panel:
         """Cria o rodapé com operações recentes."""
         recent = self.metrics.recent_failures[-5:]
-
-        if not recent:
-            content = "Nenhuma falha recente"
-        else:
-            lines = []
-            for op in recent:
-                time_str = op["timestamp"][11:19]  # HH:MM:SS
-                error = op.get("error_category", "unknown")
-                lines.append(f"[{time_str}] {error}")
-            content = "\n".join(lines)
-
-        return Panel(content, title="Últimas Falhas", border_style="red")
+        return Panel(format_recent_failures(recent), title="Últimas Falhas", border_style="red")
 
     def _render(self) -> Layout:
         """Renderiza o dashboard completo."""

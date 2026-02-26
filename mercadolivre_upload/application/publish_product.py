@@ -7,7 +7,7 @@ import logging
 import re
 from copy import deepcopy
 from itertools import product as cartesian_product
-from typing import Any, cast
+from typing import Any
 
 from mercadolivre_upload.api.cbt_extractor import CbtIdExtractor
 from mercadolivre_upload.application.builders.product_builder import ProductBuilder
@@ -38,7 +38,6 @@ from .publish_product_constants import (
     DIMENSION_UNIT_MARKER_PATTERN,
     FLOW_BLOCKED_BEHAVIORS,
     IMAGE_DIAGNOSTIC_GATE_MODES,
-    IMPLEMENTED_ROUTING_FLOWS,
     NON_FILLABLE_ATTRIBUTE_TAGS,
     PACKAGE_WEIGHT_DEFAULT_UNIT,
     SHIPPING_BLOCKING_CODE_TOKENS,
@@ -55,10 +54,19 @@ from .publish_product_constants import (
     normalize_attribute_tag as _normalize_attribute_tag,
 )
 from .publish_product_flow import (
+    create_item_for_flow as _create_item_for_flow_helper,
+)
+from .publish_product_flow import (
     get_flow_routing_artifact as _get_flow_routing_artifact_helper,
 )
 from .publish_product_flow import (
     get_seller_capabilities_artifact as _get_seller_capabilities_artifact_helper,
+)
+from .publish_product_flow import (
+    resolve_selected_flow as _resolve_selected_flow_helper,
+)
+from .publish_product_flow import (
+    validate_item_for_flow as _validate_item_for_flow_helper,
 )
 from .publish_product_identifier import (
     collect_identifier_state,
@@ -76,6 +84,13 @@ from .publish_product_preflight import (
     run_image_diagnostic_preflight as _run_image_diagnostic_preflight_helper,
 )
 from .publish_product_shipping import build_shipping_config as _build_shipping_config_helper
+from .publish_product_user_products import (
+    build_user_products_payload,
+    extract_selected_model,
+    extract_user_products_family_name,
+    normalize_variation_candidates,
+    variation_value_sort_key,
+)
 from .publish_product_validation import (
     build_validation_cause_taxonomy,
     get_critical_attribute_warnings,
@@ -1806,58 +1821,22 @@ class PublishProductUseCase:
 
     def _resolve_selected_flow(self) -> str:
         """Resolve currently selected publish flow with legacy fallback."""
-        flow_artifact = self._get_flow_routing_artifact()
-        flow_routing = flow_artifact.get("flow_routing", {})
-        if isinstance(flow_routing, dict):
-            selected_flow = flow_routing.get("selected_flow")
-            if isinstance(selected_flow, str) and selected_flow in IMPLEMENTED_ROUTING_FLOWS:
-                return selected_flow
-        return "legacy"
+        return _resolve_selected_flow_helper(self)
 
     def _validate_item_for_flow(
         self, *, item: dict[str, Any], selected_flow: str
     ) -> dict[str, Any]:
         """Validate payload using the selected publish route."""
-        if selected_flow == "user_products":
-            validator = getattr(self.publisher, "validate_user_product_item", None)
-            if callable(validator):
-                return cast(dict[str, Any], validator(item))
-            raise RuntimeError(
-                "User-products flow selected but publisher does not implement "
-                "'validate_user_product_item'."
-            )
-        return self.publisher.validate_item(item)
+        return _validate_item_for_flow_helper(self, item=item, selected_flow=selected_flow)
 
     def _create_item_for_flow(self, *, item: dict[str, Any], selected_flow: str) -> dict[str, Any]:
         """Publish payload using the selected publish route."""
-        if selected_flow == "user_products":
-            creator = getattr(self.publisher, "create_user_product_item", None)
-            if callable(creator):
-                return cast(dict[str, Any], creator(item))
-            raise RuntimeError(
-                "User-products flow selected but publisher does not implement "
-                "'create_user_product_item'."
-            )
-        return self.publisher.create_item(item)
+        return _create_item_for_flow_helper(self, item=item, selected_flow=selected_flow)
 
     @staticmethod
     def _extract_user_products_family_name(product: Product) -> str | None:
         """Extract user-products family name from source row attributes."""
-        aliases = {
-            "familyname",
-            "family name",
-            "familia",
-            "nome da familia",
-            "nome familia",
-        }
-        for key, raw_value in product.attributes.items():
-            normalized_key = PortugueseTextNormalizer.normalize(str(key))
-            if normalized_key not in aliases:
-                continue
-            value = str(raw_value).strip()
-            if value:
-                return value
-        return None
+        return extract_user_products_family_name(product)
 
     @staticmethod
     def _extract_selected_model(
@@ -1865,30 +1844,7 @@ class PublishProductUseCase:
         variation_candidates: dict[str, list[dict[str, Any]]],
     ) -> str | None:
         """Extract deterministic MODEL value for UP flow artifacts."""
-        for attr in ml_attributes:
-            if not isinstance(attr, dict):
-                continue
-            attr_id = attr.get("id")
-            if not isinstance(attr_id, str) or attr_id.upper() != "MODEL":
-                continue
-            value_name = attr.get("value_name")
-            if isinstance(value_name, str) and value_name.strip():
-                return value_name.strip()
-            value_id = attr.get("value_id")
-            if value_id is not None and str(value_id).strip():
-                return str(value_id).strip()
-
-        for attr_id, values in variation_candidates.items():
-            if not isinstance(attr_id, str) or attr_id.upper() != "MODEL":
-                continue
-            for value in values:
-                if not isinstance(value, dict):
-                    continue
-                value_name = value.get("name")
-                if isinstance(value_name, str) and value_name.strip():
-                    return value_name.strip()
-
-        return None
+        return extract_selected_model(ml_attributes, variation_candidates)
 
     def _build_user_products_payload(
         self,
@@ -1901,92 +1857,26 @@ class PublishProductUseCase:
         picture_ids: list[str] | None = None,
     ) -> dict[str, Any]:
         """Build MLB-safe user-products metadata and payload fields."""
-        family_name = self._extract_user_products_family_name(product)
-        family_name_source = "attribute"
-        if not family_name:
-            raise ValueError("missing required field 'family_name'.")
-
-        selected_model = self._extract_selected_model(ml_attributes, variation_candidates)
-
-        normalized_candidates = self._normalize_variation_candidates(variation_candidates)
-        variations: list[dict[str, Any]] = []
-        if normalized_candidates:
-            combinations = list(
-                cartesian_product(*(values for _attr_id, values in normalized_candidates))
-            )
-            for combination in combinations:
-                attributes: list[dict[str, Any]] = []
-                for (attr_id, _values), value in zip(
-                    normalized_candidates, combination, strict=True
-                ):
-                    mapped = {"id": attr_id, "value_name": value["name"]}
-                    value_id = value.get("id")
-                    if value_id is not None:
-                        mapped["value_id"] = value_id
-                    attributes.append(mapped)
-
-                variation_payload: dict[str, Any] = {
-                    "attributes": attributes,
-                    "available_quantity": max(1, quantity),
-                    "price": price,
-                }
-                if picture_ids:
-                    variation_payload["picture_ids"] = picture_ids[:10]
-                variations.append(variation_payload)
-
-        return {
-            "family_name": family_name,
-            "family_name_source": family_name_source,
-            "selected_model": selected_model,
-            "variation_attribute_ids": [attr_id for attr_id, _values in normalized_candidates],
-            "variations": variations,
-        }
+        return build_user_products_payload(
+            product=product,
+            ml_attributes=ml_attributes,
+            variation_candidates=variation_candidates,
+            quantity=quantity,
+            price=price,
+            picture_ids=picture_ids,
+        )
 
     @staticmethod
     def _normalize_variation_candidates(
         variation_candidates: dict[str, list[dict[str, Any]]],
     ) -> list[tuple[str, list[dict[str, Any]]]]:
         """Normalize and deduplicate variation candidates preserving deterministic order."""
-        normalized_candidates: list[tuple[str, list[dict[str, Any]]]] = []
-        for attr_id, values in variation_candidates.items():
-            if not isinstance(attr_id, str):
-                continue
-            normalized_attr_id = attr_id.strip()
-            if not normalized_attr_id:
-                continue
-            unique_values: list[dict[str, Any]] = []
-            seen: set[tuple[Any, Any]] = set()
-            for value in values:
-                if not isinstance(value, dict):
-                    continue
-                value_name = value.get("name")
-                if not isinstance(value_name, str):
-                    continue
-                normalized_name = value_name.strip()
-                if not normalized_name:
-                    continue
-                key = (value.get("id"), normalized_name)
-                if key in seen:
-                    continue
-                seen.add(key)
-                unique_values.append({"id": value.get("id"), "name": normalized_name})
-
-            if unique_values:
-                normalized_candidates.append((normalized_attr_id, unique_values))
-        return normalized_candidates
+        return normalize_variation_candidates(variation_candidates)
 
     @staticmethod
     def _variation_value_sort_key(value: dict[str, Any]) -> tuple[str, str]:
         """Return deterministic sort key for variation candidate values."""
-        value_name = value.get("name")
-        value_id = value.get("id")
-        normalized_name = (
-            PortugueseTextNormalizer.normalize(str(value_name))
-            if isinstance(value_name, str)
-            else ""
-        )
-        normalized_id = str(value_id).strip() if value_id is not None else ""
-        return normalized_name, normalized_id
+        return variation_value_sort_key(value)
 
     def _get_legacy_variation_contract(self) -> tuple[list[str], dict[str, Any]]:
         """Return allow_variations IDs and limits for the current category."""
