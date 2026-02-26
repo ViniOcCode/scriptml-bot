@@ -5,6 +5,11 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from mercadolivre_upload.application.shipping_policy import (
+    coerce_shipping_bool,
+    normalize_seller_tags,
+    normalize_shipping_constraints,
+)
 from mercadolivre_upload.shared.utils.text_utils import PortugueseTextNormalizer
 
 from .constants import (
@@ -19,6 +24,7 @@ from .constants import (
     ROW_SHIPPING_PICKUP_HEADERS,
     ROW_SHIPPING_TRUE_TOKENS,
 )
+from .policy import get_policy_artifact
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +93,7 @@ def extract_row_shipping_input(
         elif any(token in normalized_mode for token in ROW_SHIPPING_MARKETPLACE_TOKENS):
             mode_intent = "marketplace"
 
-    free_shipping: bool | None = use_case._coerce_shipping_bool(raw_cost)
+    free_shipping: bool | None = coerce_shipping_bool(raw_cost)
     normalized_cost = normalize_shipping_value(raw_cost) if raw_cost is not None else ""
     if free_shipping is None and normalized_cost:
         if any(token in normalized_cost for token in ROW_SHIPPING_FREE_TRUE_TOKENS):
@@ -95,7 +101,7 @@ def extract_row_shipping_input(
         elif any(token in normalized_cost for token in ROW_SHIPPING_FREE_FALSE_TOKENS):
             free_shipping = False
 
-    local_pick_up: bool | None = use_case._coerce_shipping_bool(raw_pickup)
+    local_pick_up: bool | None = coerce_shipping_bool(raw_pickup)
     normalized_pickup = normalize_shipping_value(raw_pickup) if raw_pickup is not None else ""
     if local_pick_up is None and normalized_pickup:
         if any(token in normalized_pickup for token in ROW_SHIPPING_FALSE_TOKENS):
@@ -215,7 +221,7 @@ def _merge_resolver_selection(use_case: Any, state: dict[str, Any], default_mode
                 else:
                     state["resolved_logistic_type"] = None
 
-                state["resolved_runtime_tags"] = use_case._normalize_seller_tags(
+                state["resolved_runtime_tags"] = normalize_seller_tags(
                     selection_payload.get("tags")
                 )
                 if state["resolved_runtime_tags"]:
@@ -224,7 +230,7 @@ def _merge_resolver_selection(use_case: Any, state: dict[str, Any], default_mode
                         state["resolved_runtime_tags"],
                     )
 
-                state["resolved_runtime_constraints"] = use_case._normalize_shipping_constraints(
+                state["resolved_runtime_constraints"] = normalize_shipping_constraints(
                     selection_payload.get("constraints")
                 )
                 if state["resolved_runtime_constraints"]:
@@ -233,7 +239,7 @@ def _merge_resolver_selection(use_case: Any, state: dict[str, Any], default_mode
                         state["resolved_runtime_constraints"],
                     )
 
-                state["resolved_runtime_free_shipping"] = use_case._coerce_shipping_bool(
+                state["resolved_runtime_free_shipping"] = coerce_shipping_bool(
                     selection_payload.get("free_shipping")
                 )
                 if state["resolved_runtime_free_shipping"] is not None:
@@ -348,11 +354,11 @@ def _resolve_runtime_policy_for_mode(
             "constraints": dict(state["resolved_runtime_constraints"]),
             "free_shipping": state["resolved_runtime_free_shipping"],
         }
-    runtime_tags_for_mode = use_case._normalize_seller_tags(runtime_policy_for_mode.get("tags"))
-    runtime_constraints_for_mode = use_case._normalize_shipping_constraints(
+    runtime_tags_for_mode = normalize_seller_tags(runtime_policy_for_mode.get("tags"))
+    runtime_constraints_for_mode = normalize_shipping_constraints(
         runtime_policy_for_mode.get("constraints")
     )
-    runtime_free_shipping_for_mode = use_case._coerce_shipping_bool(
+    runtime_free_shipping_for_mode = coerce_shipping_bool(
         runtime_policy_for_mode.get("free_shipping")
     )
     if runtime_free_shipping_for_mode is None and shipping_mode == state["resolved_mode"]:
@@ -432,9 +438,7 @@ def _assemble_shipping_payload(
         if state["resolved_logistic_type_source"]:
             logistic_type_source = state["resolved_logistic_type_source"]
 
-    selected_local_pick_up = use_case._coerce_shipping_bool(
-        config_shipping.get("local_pick_up", False)
-    )
+    selected_local_pick_up = coerce_shipping_bool(config_shipping.get("local_pick_up", False))
     if selected_local_pick_up is None:
         selected_local_pick_up = False
     local_pick_up_source = "default.false"
@@ -451,7 +455,7 @@ def _assemble_shipping_payload(
 
     constraints: dict[str, Any] = {"category_id": category_id}
     if category_id:
-        policy_summary = use_case._get_policy_artifact(category_id).get("policy_summary")
+        policy_summary = get_policy_artifact(use_case, category_id).get("policy_summary")
         if isinstance(policy_summary, dict):
             constraints.update(
                 {
