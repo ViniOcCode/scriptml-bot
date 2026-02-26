@@ -15,6 +15,12 @@ from enum import Enum
 from typing import Any, Protocol
 
 from .data import FiscalData
+from .retry import RetryConfig, execute_with_retry, extract_response_detail, extract_status_code
+from .workflow_steps import (
+    wait_for_fiscal_data_ready,
+    wait_for_invoice_readiness,
+    wait_for_sku_link,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -88,30 +94,6 @@ class FiscalApiPort(Protocol):
         ...
 
 
-class RetryConfig:
-    """Configuration for retry logic."""
-
-    def __init__(
-        self,
-        max_retries: int = 3,
-        base_delay: float = 1.0,
-        max_delay: float = 60.0,
-        exponential_base: float = 2.0,
-        retryable_status_codes: set[int] | None = None,
-    ):
-        """Initialize retry configuration."""
-        self.max_retries = max_retries
-        self.base_delay = base_delay
-        self.max_delay = max_delay
-        self.exponential_base = exponential_base
-        self.retryable_status_codes = retryable_status_codes or {429, 500, 502, 503, 504}
-
-    def get_delay(self, attempt: int) -> float:
-        """Calculate delay for retry attempt with exponential backoff."""
-        delay = self.base_delay * (self.exponential_base**attempt)
-        return min(delay, self.max_delay)
-
-
 class FiscalService:
     """Service for managing fiscal data submission.
 
@@ -147,214 +129,78 @@ class FiscalService:
     def _execute_with_retry(
         self, operation: Callable[[], Any], operation_name: str, sku: str, item_id: str
     ) -> tuple[Any, int]:
-        """Execute an operation with retry logic.
-
-        Args:
-            operation: Callable to execute
-            operation_name: Name of operation for logging
-            sku: Product SKU for logging
-            item_id: Item ID for logging
-
-        Returns:
-            Tuple of (result, retry_count)
-        """
-        last_exception: Exception | None = None
-
-        for attempt in range(self.retry_config.max_retries + 1):
-            try:
-                result = operation()
-                if attempt > 0:
-                    logger.info(
-                        f"{operation_name} succeeded for SKU {sku} (item {item_id}) "
-                        f"after {attempt} retries"
-                    )
-                return result, attempt
-            except Exception as e:
-                last_exception = e
-                status_code = self._extract_status_code(e)
-
-                if status_code not in self.retry_config.retryable_status_codes:
-                    logger.error(
-                        f"{operation_name} failed for SKU {sku} (item {item_id}) "
-                        f"with non-retryable error: {e}"
-                    )
-                    raise
-
-                if attempt < self.retry_config.max_retries:
-                    delay = self.retry_config.get_delay(attempt)
-                    logger.warning(
-                        f"{operation_name} failed for SKU {sku} (item {item_id}) "
-                        f"with status {status_code}, retrying in {delay:.1f}s "
-                        f"(attempt {attempt + 1}/{self.retry_config.max_retries})"
-                    )
-                    time.sleep(delay)
-                else:
-                    logger.error(
-                        f"{operation_name} failed for SKU {sku} (item {item_id}) "
-                        f"after {self.retry_config.max_retries} retries: {e}"
-                    )
-
-        raise last_exception or Exception(f"{operation_name} failed")
+        """Execute an operation with retry logic."""
+        return execute_with_retry(
+            operation,
+            operation_name=operation_name,
+            sku=sku,
+            item_id=item_id,
+            retry_config=self.retry_config,
+            sleep_fn=time.sleep,
+            logger_instance=logger,
+            status_code_extractor=self._extract_status_code,
+        )
 
     def _extract_status_code(self, exception: Exception) -> int:
         """Extract HTTP status code from exception."""
-        response = getattr(exception, "response", None)
-        if response is not None:
-            return getattr(response, "status_code", 0)
-        return 0
+        return extract_status_code(exception)
 
     @staticmethod
     def _extract_response_detail(exception: Exception) -> dict[str, Any] | None:
         """Extract JSON response body from API exception when available."""
-        response = getattr(exception, "response", None)
-        if response is None:
-            return None
-        try:
-            payload = response.json()
-            return payload if isinstance(payload, dict) else None
-        except ValueError:
-            return None
+        return extract_response_detail(exception)
 
     def _wait_for_fiscal_data_ready(
         self, item_id: str, sku: str
     ) -> tuple[bool, dict[str, Any] | None, int]:
-        """Wait for item to be ready for fiscal data submission.
-
-        Polls the fiscal_information endpoint (GET /items/fiscal_information/{SKU})
-        until it returns 404 (no fiscal data yet, ready to receive) or max retries reached.
-        Waits 1 minute between retries as per ML API requirements.
-
-        Args:
-            item_id: Mercado Livre item ID (for logging)
-            sku: Product SKU to check
-
-        Returns:
-            Tuple of (is_ready, response_data, retry_count)
-        """
-        for attempt in range(self.can_invoice_max_retries + 1):
-            try:
-                exists, response = self.api_client.check_fiscal_data_exists(sku)
-
-                if not exists:
-                    # 404 returned - item has no fiscal data yet, ready to receive
-                    if attempt > 0:
-                        logger.info(
-                            f"Item {item_id} (SKU: {sku}) is ready for fiscal data submission "
-                            f"after {attempt} wait cycles (fiscal_information returned 404)"
-                        )
-                    return True, response, attempt
-
-                # 200 returned - fiscal data already exists, skip
-                logger.info(
-                    f"Fiscal data already exists for SKU {sku} (item {item_id}), "
-                    f"skipping registration"
-                )
-                return True, response, attempt
-
-            except Exception as e:
-                if attempt < self.can_invoice_max_retries:
-                    logger.warning(
-                        f"Error checking fiscal_information for {item_id} (SKU: {sku}): {e}. "
-                        f"Waiting {self.can_invoice_wait_delay}s before retry "
-                        f"{attempt + 1}/{self.can_invoice_max_retries}"
-                    )
-                    time.sleep(self.can_invoice_wait_delay)
-                else:
-                    logger.error(
-                        f"Failed to check fiscal_information for {item_id} (SKU: {sku}) "
-                        f"after {self.can_invoice_max_retries} retries: {e}"
-                    )
-                    raise
-
-        return False, None, self.can_invoice_max_retries
+        """Wait for item to be ready for fiscal data submission."""
+        return wait_for_fiscal_data_ready(
+            api_client=self.api_client,
+            item_id=item_id,
+            sku=sku,
+            max_retries=self.can_invoice_max_retries,
+            wait_delay=self.can_invoice_wait_delay,
+            sleep_fn=time.sleep,
+            logger_instance=logger,
+        )
 
     def _wait_for_sku_link(self, item_id: str, sku: str) -> tuple[dict[str, Any] | None, int]:
         """Wait until SKU can be linked to the published item."""
         retryable_statuses = self.retry_config.retryable_status_codes | {404}
-        for attempt in range(self.can_invoice_max_retries + 1):
-            try:
-                response = self.api_client.link_fiscal_sku_to_item(sku=sku, item_id=item_id)
-                if attempt > 0:
-                    logger.info(f"SKU {sku} linked to item {item_id} after {attempt} wait cycles")
-                return response, attempt
-            except Exception as e:
-                status_code = self._extract_status_code(e)
-                response_detail = self._extract_response_detail(e)
-
-                if status_code == 409:
-                    logger.info(f"SKU {sku} is already linked to item {item_id}")
-                    return response_detail, attempt
-
-                if status_code and status_code not in retryable_statuses:
-                    raise
-
-                if attempt < self.can_invoice_max_retries:
-                    logger.warning(
-                        f"Link SKU {sku} to item {item_id} failed (status={status_code}). "
-                        f"Waiting {self.can_invoice_wait_delay}s before retry "
-                        f"{attempt + 1}/{self.can_invoice_max_retries}"
-                    )
-                    time.sleep(self.can_invoice_wait_delay)
-                    continue
-
-                raise
-
-        return None, self.can_invoice_max_retries
+        return wait_for_sku_link(
+            api_client=self.api_client,
+            item_id=item_id,
+            sku=sku,
+            max_retries=self.can_invoice_max_retries,
+            wait_delay=self.can_invoice_wait_delay,
+            retryable_statuses=retryable_statuses,
+            status_code_extractor=self._extract_status_code,
+            response_detail_extractor=self._extract_response_detail,
+            sleep_fn=time.sleep,
+            logger_instance=logger,
+        )
 
     def _wait_for_invoice_readiness(
         self, item_id: str, sku: str
     ) -> tuple[bool, dict[str, Any] | None, int]:
         """Poll can_invoice endpoint until ready or timeout."""
-        total_retry_count = 0
-        last_response: dict[str, Any] | None = None
-
-        for attempt in range(self.can_invoice_max_retries + 1):
-            try:
-                (is_ready, response), retry_count = self._execute_with_retry(
-                    lambda: self.api_client.verify_invoice_readiness(item_id),
-                    "Verify invoice readiness",
-                    sku,
-                    item_id,
-                )
-                total_retry_count += retry_count
-                last_response = response
-
-                if is_ready:
-                    if attempt > 0:
-                        logger.info(
-                            f"Invoice readiness confirmed for {item_id} "
-                            f"after {attempt} wait cycles"
-                        )
-                    return True, response, total_retry_count + attempt
-
-                if attempt < self.can_invoice_max_retries:
-                    logger.info(
-                        f"Invoice readiness pending for {item_id} (SKU: {sku}). "
-                        f"Waiting {self.can_invoice_wait_delay}s before retry "
-                        f"{attempt + 1}/{self.can_invoice_max_retries}"
-                    )
-                    time.sleep(self.can_invoice_wait_delay)
-                    continue
-
-                return False, response, total_retry_count + attempt
-
-            except Exception as e:
-                status_code = self._extract_status_code(e)
-                is_retryable = (
-                    status_code in self.retry_config.retryable_status_codes
-                    or status_code == 404
-                    or status_code == 0
-                )
-                if not is_retryable or attempt >= self.can_invoice_max_retries:
-                    raise
-                logger.warning(
-                    f"Error verifying invoice readiness for {item_id} (SKU: {sku}): {e}. "
-                    f"Waiting {self.can_invoice_wait_delay}s before retry "
-                    f"{attempt + 1}/{self.can_invoice_max_retries}"
-                )
-                time.sleep(self.can_invoice_wait_delay)
-
-        return False, last_response, total_retry_count + self.can_invoice_max_retries
+        return wait_for_invoice_readiness(
+            item_id=item_id,
+            sku=sku,
+            max_retries=self.can_invoice_max_retries,
+            wait_delay=self.can_invoice_wait_delay,
+            verify_invoice_operation=lambda: self.api_client.verify_invoice_readiness(item_id),
+            execute_with_retry=lambda operation: self._execute_with_retry(
+                operation,
+                "Verify invoice readiness",
+                sku,
+                item_id,
+            ),
+            retryable_status_codes=self.retry_config.retryable_status_codes,
+            status_code_extractor=self._extract_status_code,
+            sleep_fn=time.sleep,
+            logger_instance=logger,
+        )
 
     def submit_fiscal_data_workflow(
         self, item_id: str, fiscal_data: FiscalData

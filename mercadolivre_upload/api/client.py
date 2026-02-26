@@ -4,17 +4,17 @@ Uses ResilientHTTPClient for automatic retry, backoff, jitter and rate limiting.
 All HTTP config is read from infrastructure.config.Settings or sensible defaults.
 """
 
-import contextlib
 import logging
 import re
 from typing import Any, cast
 
-import requests
-
+from mercadolivre_upload.api.domains import categories as category_endpoints
+from mercadolivre_upload.api.domains import fiscal as fiscal_endpoints
+from mercadolivre_upload.api.domains import items as item_endpoints
+from mercadolivre_upload.api.domains import media as media_endpoints
 from mercadolivre_upload.auth import AuthManager
 from mercadolivre_upload.infrastructure.http import (
     NON_IDEMPOTENT,
-    UPLOAD_RETRY,
     ResilientHTTPClient,
     RetryPolicy,
     TokenBucketLimiter,
@@ -143,7 +143,7 @@ class MLApiClient:
 
     def get_sites(self) -> list[dict[str, Any]]:
         """Get available sites."""
-        return cast(list[dict[str, Any]], self.get("/sites"))
+        return category_endpoints.get_sites(self)
 
     def get_site_categories(self, site_id: str = "MLB") -> list[dict[str, Any]]:
         """Get categories for a site.
@@ -154,7 +154,7 @@ class MLApiClient:
         Returns:
             List of category objects
         """
-        return cast(list[dict[str, Any]], self.get(f"/sites/{site_id}/categories"))
+        return category_endpoints.get_site_categories(self, site_id)
 
     def predict_category(
         self, title: str, site_id: str = "MLB", limit: int | None = None
@@ -171,19 +171,21 @@ class MLApiClient:
         Returns:
             List of predicted categories with confidence scores
         """
-        if limit is None:
-            limit = DEFAULT_PREDICTION_LIMIT
-        endpoint = f"/sites/{site_id}/domain_discovery/search"
-        params = {"q": title, "limit": limit}
-        return cast(list[dict[str, Any]], self.get(endpoint, params=params))
+        return category_endpoints.predict_category(
+            self,
+            title,
+            site_id,
+            limit,
+            default_limit=DEFAULT_PREDICTION_LIMIT,
+        )
 
     def get_category(self, category_id: str) -> dict[str, Any]:
         """Get category details."""
-        return self.get(f"/categories/{category_id}")
+        return category_endpoints.get_category(self, category_id)
 
     def get_category_attributes(self, category_id: str) -> list[dict[str, Any]]:
         """Get category attributes."""
-        return cast(list[dict[str, Any]], self.get(f"/categories/{category_id}/attributes"))
+        return category_endpoints.get_category_attributes(self, category_id)
 
     def get_category_conditional_attributes(
         self, category_id: str, item_context: dict[str, Any]
@@ -197,54 +199,27 @@ class MLApiClient:
         Returns:
             List of conditional attributes
         """
-        endpoint = f"/categories/{category_id}/attributes/conditional"
-        response = self.post(endpoint, json=item_context)
-        if isinstance(response, dict):
-            required_attributes = response.get("required_attributes", [])
-            if isinstance(required_attributes, list):
-                return cast(list[dict[str, Any]], required_attributes)
-            return []
-        if isinstance(response, list):
-            return cast(list[dict[str, Any]], response)
-        return []
+        return category_endpoints.get_category_conditional_attributes(
+            self,
+            category_id,
+            item_context,
+        )
 
     def get_category_sale_terms(self, category_id: str) -> list[dict[str, Any]]:
         """Get sale terms metadata for a category."""
-        result = self.get(f"/categories/{category_id}/sale_terms")
-        if isinstance(result, list):
-            return cast(list[dict[str, Any]], result)
-        return []
+        return category_endpoints.get_category_sale_terms(self, category_id)
 
     def get_available_listing_types(self, category_id: str) -> list[dict[str, Any]]:
         """Get listing types available for current seller in category."""
-        user_info = self.get_users_me()
-        user_id = user_info.get("id")
-        if not user_id:
-            return []
-
-        result = self.get(
-            f"/users/{user_id}/available_listing_types",
-            params={"category_id": category_id},
-        )
-        if isinstance(result, dict):
-            available = result.get("available", [])
-            if isinstance(available, list):
-                return cast(list[dict[str, Any]], available)
-            return []
-        if isinstance(result, list):
-            return cast(list[dict[str, Any]], result)
-        return []
+        return category_endpoints.get_available_listing_types(self, category_id)
 
     def get_site_listing_types(self, site_id: str = "MLB") -> list[dict[str, Any]]:
         """Get listing types available for a site."""
-        result = self.get(f"/sites/{site_id}/listing_types")
-        if isinstance(result, list):
-            return cast(list[dict[str, Any]], result)
-        return []
+        return category_endpoints.get_site_listing_types(self, site_id)
 
     def get_category_technical_specs(self, category_id: str) -> dict[str, Any]:
         """Get category technical specs (input structure)."""
-        return self.get(f"/categories/{category_id}/technical_specs/input")
+        return category_endpoints.get_category_technical_specs(self, category_id)
 
     def validate_item(self, item: dict[str, Any]) -> dict[str, Any]:
         """Validate item before publishing.
@@ -255,7 +230,7 @@ class MLApiClient:
         Returns:
             Validation result
         """
-        return self.post("/items/validate", json=item)
+        return item_endpoints.validate_item(self, item)
 
     @staticmethod
     def _sanitize_user_product_item_payload(item: dict[str, Any]) -> dict[str, Any]:
@@ -293,9 +268,7 @@ class MLApiClient:
 
     def validate_user_product_item(self, item: dict[str, Any]) -> dict[str, Any]:
         """Validate user-products payload using current MVP endpoint routing."""
-        payload = self._sanitize_user_product_item_payload(item)
-        payload.pop("user_product_id", None)
-        return self.validate_item(payload)
+        return item_endpoints.validate_user_product_item(self, item)
 
     def diagnose_picture(
         self,
@@ -305,19 +278,12 @@ class MLApiClient:
         context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Run image diagnostics preflight for a picture."""
-        if bool(picture_url) == bool(picture_id):
-            raise ValueError("Provide exactly one of picture_url or picture_id")
-
-        payload: dict[str, Any] = {}
-        if picture_id:
-            payload["picture_id"] = picture_id
-        elif picture_url:
-            payload["picture_url"] = picture_url
-
-        if isinstance(context, dict) and context:
-            payload["context"] = context
-
-        return self.post("/moderations/pictures/diagnostic", json=payload)
+        return item_endpoints.diagnose_picture(
+            self,
+            picture_url=picture_url,
+            picture_id=picture_id,
+            context=context,
+        )
 
     def create_item(self, item: dict[str, Any]) -> dict[str, Any]:
         """Create/publish an item.
@@ -328,24 +294,20 @@ class MLApiClient:
         Returns:
             Created item data
         """
-        return self.post("/items", json=item)
+        return item_endpoints.create_item(self, item)
 
     def create_user_product_item(self, item: dict[str, Any]) -> dict[str, Any]:
         """Create user-products payload with MLB-safe endpoint routing."""
-        payload = self._sanitize_user_product_item_payload(item)
-        user_product_id = payload.pop("user_product_id", None)
-        if isinstance(user_product_id, str) and user_product_id.strip():
-            sales_condition_payload = self._build_user_product_sales_condition_payload(payload)
-            return self.post(
-                f"/user-products/{user_product_id.strip()}/items",
-                json=sales_condition_payload,
-            )
-        return self.create_item(payload)
+        return item_endpoints.create_user_product_item(self, item)
 
     def create_item_description(self, item_id: str, plain_text: str) -> dict[str, Any]:
         """Create or update item description."""
-        validate_item_id(item_id)
-        return self.post(f"/items/{item_id}/description", json={"plain_text": plain_text})
+        return item_endpoints.create_item_description(
+            self,
+            item_id,
+            plain_text,
+            validate_item_id_fn=validate_item_id,
+        )
 
     def get_users_me(self) -> dict[str, Any]:
         """Get current authenticated user info.
@@ -361,38 +323,7 @@ class MLApiClient:
 
     def upload_image(self, image_path: str) -> dict[str, Any]:
         """Upload an image with retry on transient errors."""
-        from pathlib import Path
-
-        path = Path(image_path)
-        with open(path, "rb") as f:
-            files = {"file": (path.name, f, "image/jpeg")}
-            url = f"{self.base_url}/pictures/items/upload"
-            resp = self.http.post(
-                url,
-                headers=self._auth_headers_only(),
-                files=files,
-                policy=UPLOAD_RETRY,
-                timeout=60,
-            )
-            resp.raise_for_status()
-
-        data = resp.json()
-
-        # Normalize response: extract top-level url from variations if needed
-        if isinstance(data, dict):
-            top_url = data.get("secure_url") or data.get("url")
-            if not top_url:
-                variations = data.get("variations", [])
-                if isinstance(variations, list) and variations:
-                    first_var = variations[0]
-                    if isinstance(first_var, dict):
-                        top_url = first_var.get("secure_url") or first_var.get("url")
-            if top_url and "url" not in data:
-                data["url"] = top_url
-            if top_url and "secure_url" not in data:
-                data["secure_url"] = top_url
-
-        return cast(dict[str, Any], data)
+        return media_endpoints.upload_image(self, image_path)
 
     def submit_fiscal_info(self, item_id: str, fiscal_data: dict[str, Any]) -> dict[str, Any]:
         """Submit fiscal information for an item.
@@ -407,9 +338,12 @@ class MLApiClient:
         Raises:
             requests.HTTPError: On API error
         """
-        validate_item_id(item_id)
-        endpoint = f"/items/{item_id}/fiscal_info"
-        return self.post(endpoint, json=fiscal_data)
+        return fiscal_endpoints.submit_fiscal_info(
+            self,
+            item_id,
+            fiscal_data,
+            validate_item_id_fn=validate_item_id,
+        )
 
     def check_fiscal_data_exists(self, sku: str) -> tuple[bool, dict[str, Any] | None]:
         """Check if fiscal data exists for a SKU.
@@ -425,14 +359,7 @@ class MLApiClient:
         Raises:
             requests.HTTPError: For non-404 errors
         """
-        endpoint = f"/items/fiscal_information/{sku}"
-        try:
-            response = self.get(endpoint)
-            return True, response
-        except requests.HTTPError as e:
-            if e.response is not None and e.response.status_code == 404:
-                return False, None
-            raise
+        return fiscal_endpoints.check_fiscal_data_exists(self, sku)
 
     def register_fiscal_data(self, fiscal_data: dict[str, Any]) -> dict[str, Any]:
         """Register new fiscal data for a product.
@@ -447,8 +374,7 @@ class MLApiClient:
         Raises:
             requests.HTTPError: On API error
         """
-        endpoint = "/items/fiscal_information"
-        return self.post(endpoint, json=fiscal_data)
+        return fiscal_endpoints.register_fiscal_data(self, fiscal_data)
 
     def link_fiscal_sku_to_item(
         self,
@@ -466,12 +392,13 @@ class MLApiClient:
         Returns:
             API response
         """
-        validate_item_id(item_id)
-        payload: dict[str, Any] = {"sku": sku, "item_id": item_id}
-        if variation_id is not None:
-            payload["variation_id"] = variation_id
-        endpoint = "/items/fiscal_information/items"
-        return self.post(endpoint, json=payload)
+        return fiscal_endpoints.link_fiscal_sku_to_item(
+            self,
+            sku,
+            item_id,
+            variation_id,
+            validate_item_id_fn=validate_item_id,
+        )
 
     def verify_invoice_readiness(self, item_id: str) -> tuple[bool, dict[str, Any] | None]:
         """Verify if an item is ready for invoice generation.
@@ -487,11 +414,11 @@ class MLApiClient:
         Raises:
             requests.HTTPError: On API error
         """
-        validate_item_id(item_id)
-        endpoint = f"/can_invoice/items/{item_id}"
-        response = self.get(endpoint)
-        is_ready = response.get("status", False) is True
-        return is_ready, response
+        return fiscal_endpoints.verify_invoice_readiness(
+            self,
+            item_id,
+            validate_item_id_fn=validate_item_id,
+        )
 
     def upload_clip(
         self,
@@ -500,50 +427,10 @@ class MLApiClient:
         sites: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Upload a video clip for an item (CBT parent ID required)."""
-        import mimetypes
-        from pathlib import Path
-
-        path = Path(file_path)
-        validate_clip_item_id(item_id)
-
-        mime_type, _ = mimetypes.guess_type(str(path))
-        if not mime_type:
-            mime_type = "video/mp4"
-
-        with open(path, "rb") as f:
-            files = {"file": (path.name, f, mime_type)}
-            data: dict[str, Any] = {}
-            if sites is not None and sites:
-                import json as json_mod
-
-                data["sites"] = json_mod.dumps(sites)
-
-            url = f"{self.base_url}/marketplace/items/{item_id}/clips/upload"
-
-            try:
-                resp = self.http.post(
-                    url,
-                    headers=self._auth_headers_only(),
-                    files=files,
-                    data=data,
-                    policy=UPLOAD_RETRY,
-                    timeout=120,
-                )
-                resp.raise_for_status()
-            except requests.RequestException as e:
-                error_resp = getattr(e, "response", None)
-                status_code = getattr(error_resp, "status_code", "unknown")
-                error_body: dict[str, Any] = {}
-                if error_resp is not None:
-                    with contextlib.suppress(ValueError):
-                        error_body = error_resp.json()
-                logger.error(
-                    "Clip upload failed for %s: [%s] %s: %s",
-                    item_id,
-                    status_code,
-                    error_body.get("error_status", ""),
-                    error_body.get("message", ""),
-                )
-                raise
-
-        return cast(dict[str, Any], resp.json())
+        return media_endpoints.upload_clip(
+            self,
+            item_id,
+            file_path,
+            sites,
+            validate_clip_item_id_fn=validate_clip_item_id,
+        )
