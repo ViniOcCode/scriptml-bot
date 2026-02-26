@@ -116,6 +116,7 @@ from .publish.internals.preflight_validation import (
     run_schema_contract_preflight as _run_schema_contract_preflight_helper,
 )
 from .publish.internals.publish_item import publish_one as _publish_one_helper
+from .publish.internals.publisher_capabilities import build_publisher_capabilities
 from .publish.internals.shipping import build_shipping_config as _build_shipping_config_helper
 from .publish.internals.user_products import (
     build_user_products_payload,
@@ -192,6 +193,7 @@ class PublishProductUseCase:
         """
         self.category_resolver = category_resolver
         self.publisher = publisher
+        self._publisher_capabilities = build_publisher_capabilities(publisher)
         self.image_uploader = image_uploader
         self.shipping_resolver = shipping_resolver
         self.fiscal_service = fiscal_service
