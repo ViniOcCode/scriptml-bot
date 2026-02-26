@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import sys
-from importlib import import_module
+
+from mercadolivre_upload.compat.entrypoints import run_repo_main
 
 
 def main() -> int:
     """Run the package entrypoint from repository root."""
-    return int(import_module("mercadolivre_upload.main").run_as_module())
+    return run_repo_main()
 
 
 if __name__ == "__main__":
