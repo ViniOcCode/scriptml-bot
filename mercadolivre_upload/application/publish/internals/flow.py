@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any, cast
 
-from .publish_product_constants import (
+from .constants import (
     AVAILABLE_ROUTING_FLOWS,
     IMPLEMENTED_ROUTING_FLOWS,
     USER_PRODUCTS_SELLER_TAG,
