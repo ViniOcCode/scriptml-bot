@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from .publish_product_constants import (
+from .constants import (
     CRITICAL_ATTRIBUTE_WARNING_TOKENS,
     CRITICAL_VALIDATION_WARNING_TOKENS,
     RETRYABLE_VALIDATION_ERROR_TOKENS,

@@ -7,7 +7,7 @@ from typing import Any
 
 from mercadolivre_upload.shared.utils.text_utils import PortugueseTextNormalizer
 
-from .publish_product_constants import IDENTIFIER_EMPTY_TOKENS
+from .constants import IDENTIFIER_EMPTY_TOKENS
 
 
 def normalize_identifier_text(value: Any) -> str | None:

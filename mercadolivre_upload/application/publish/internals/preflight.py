@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from .policy_snapshot import compile_schema_contract
+from ...policy_snapshot import compile_schema_contract
 
 logger = logging.getLogger(__name__)
 
