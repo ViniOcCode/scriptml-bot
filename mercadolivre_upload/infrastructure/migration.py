@@ -41,7 +41,6 @@ Example:
 
 from __future__ import annotations
 
-import contextlib
 import logging
 import re
 from abc import ABC, abstractmethod
@@ -50,6 +49,14 @@ from datetime import datetime
 from enum import Enum, auto
 from pathlib import Path
 from typing import Any, TypeVar
+
+from mercadolivre_upload.infrastructure.migration_helpers import (
+    calculate_schema_match_score,
+    clean_data_fields,
+    ensure_dataframe,
+    parse_version_parts,
+    resolve_sheet_name,
+)
 
 try:
     import pandas as pd
@@ -206,17 +213,7 @@ class Version:
 
     def _parse(self, version_str: str) -> tuple[int, ...]:
         """Parseia string de versão em componentes numéricos."""
-        # Remove prefixo 'v' se existir
-        version_str = version_str.lstrip("vV")
-        # Separa por pontos
-        parts = re.split(r"[.-]", version_str)
-
-        result = []
-        for part in parts:
-            with contextlib.suppress(ValueError):
-                result.append(int(part))
-
-        return tuple(result) if result else (0,)
+        return parse_version_parts(version_str)
 
     def __str__(self) -> str:  # noqa: D105
         return self.original
@@ -467,45 +464,22 @@ class MigrationManager:
             return explicit_version  # type: ignore[no-any-return]
 
         # 2. Compara campos com schemas
-        data_fields = set(data.keys())
+        data_fields_clean = clean_data_fields(data)
         best_match: tuple[str, float] | None = None
 
         for version, schema in self.schemas.items():
             schema_fields = schema.get_field_names()
+            if not schema_fields:
+                continue
 
-            # Ignora campos de metadados
-            data_fields_clean = {f for f in data_fields if not f.startswith("_")}
+            score = calculate_schema_match_score(
+                data_fields_clean,
+                schema_fields,
+                set(schema.get_required_fields()),
+            )
 
-            # Calcula score de correspondência
-            if schema_fields:
-                # Campos em comum
-                common = data_fields_clean & schema_fields
-                # Campos extras nos dados (não conhecidos por este schema)
-                extra = data_fields_clean - schema_fields
-                # Campos faltantes (do schema que não estão nos dados)
-                missing = schema_fields - data_fields_clean
-
-                # Score: mais campos em comum é melhor
-                # Penalidade leve para campos extras
-                # Penalidade maior para campos obrigatórios faltantes
-                coverage = len(common) / len(schema_fields) if schema_fields else 0
-                required_missing = sum(
-                    1 for f in missing if schema.fields.get(f) and schema.fields[f].required
-                )
-
-                # Penalidades
-                extra_penalty = min(len(extra) * 0.05, 0.3)  # Max 0.3 de penalidade
-                missing_penalty = required_missing * 0.3
-
-                score = coverage - extra_penalty - missing_penalty
-
-                # Bônus para schemas que cobrem mais campos dos dados
-                if data_fields_clean:
-                    field_match_ratio = len(common) / len(data_fields_clean)
-                    score += field_match_ratio * 0.1
-
-                if best_match is None or score > best_match[1]:
-                    best_match = (version, score)
+            if best_match is None or score > best_match[1]:
+                best_match = (version, score)
 
         # Retorna apenas se score é razoável (> 0.2)
         if best_match and best_match[1] > 0.2:
@@ -704,16 +678,9 @@ class MigrationManager:
 
         try:
             # Lê planilha - se sheet_name for None, lê primeira aba
-            if sheet_name is None:
-                # Obtém nome da primeira aba
-                xl = pd.ExcelFile(file_path)
-                sheet_name = xl.sheet_names[0] if xl.sheet_names else "Sheet1"
-
+            sheet_name = resolve_sheet_name(file_path, pd, sheet_name)
             df = pd.read_excel(file_path, sheet_name=sheet_name)
-
-            # Garante que df é um DataFrame (não dict de múltiplas abas)
-            if isinstance(df, dict):
-                df = list(df.values())[0]
+            df = ensure_dataframe(df)
 
             # Adiciona metadado de versão se existir
 

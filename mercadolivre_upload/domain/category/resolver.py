@@ -7,8 +7,6 @@ Infrastructure layer provides the implementation (adapter).
 import logging
 from typing import Any, Protocol
 
-from mercadolivre_upload.shared.utils.text_utils import TextNormalizer
-
 from ..attribute_metadata import AttributeMeta
 from .attribute_helpers import (
     build_attribute_map as _build_attribute_map_helper,
@@ -27,6 +25,18 @@ from .attribute_helpers import (
 )
 from .attribute_helpers import (
     get_required_attributes as _get_required_attributes_helper,
+)
+from .hierarchy_helpers import (
+    get_category_children as _get_category_children_helper,
+)
+from .hierarchy_helpers import (
+    load_categories as _load_categories_helper,
+)
+from .hierarchy_helpers import (
+    search_in_hierarchy as _search_in_hierarchy_helper,
+)
+from .metadata_helpers import (
+    get_attribute_metadata as _get_attribute_metadata_helper,
 )
 from .predictor import (
     call_domain_discovery as _call_domain_discovery_helper,
@@ -193,63 +203,21 @@ class CategoryResolver:
         Stores normalized category names (lowercase, no accents) for better matching.
         """
         normalized_site = self._normalize_site_id(site_id)
-        categories = self._api.get_site_categories(normalized_site)
-
-        self._categories.clear()
-        items: list[tuple[str, str]] = []
-
-        for cat in categories:
-            if not isinstance(cat, dict):
-                continue
-
-            category_id = self._normalize_category_id(cat.get("id"), normalized_site)
-            category_name = cat.get("name")
-            if not category_id or not isinstance(category_name, str):
-                continue
-
-            name_normalized = TextNormalizer.normalize(category_name)
-            if name_normalized:
-                items.append((name_normalized, category_id))
-
-        for name_normalized, category_id in sorted(items, key=lambda item: (item[0], item[1])):
-            self._categories[name_normalized] = category_id
-
+        self._categories = _load_categories_helper(
+            self._api,
+            normalized_site,
+            self._normalize_category_id,
+        )
         self._loaded_site_id = normalized_site
 
     def _get_category_children(self, category_id: str) -> list[dict[str, Any]]:
         """Get children of a category from category data."""
-        if category_id not in self._children_cache:
-            try:
-                # Use get_category which returns children_categories in response
-                category_data = self._api.get_category(category_id)
-                raw_children = []
-                if isinstance(category_data, dict):
-                    raw_children = category_data.get("children_categories", [])
-
-                expected_site = category_id[:3] if len(category_id) >= 3 else None
-                children: list[dict[str, Any]] = []
-                if isinstance(raw_children, list):
-                    for child in raw_children:
-                        if not isinstance(child, dict):
-                            continue
-
-                        child_id = self._normalize_category_id(child.get("id"), expected_site)
-                        child_name = child.get("name")
-                        if not child_id or not isinstance(child_name, str):
-                            continue
-
-                        children.append({**child, "id": child_id, "name": child_name.strip()})
-
-                children.sort(
-                    key=lambda child: (
-                        TextNormalizer.normalize(str(child.get("name", ""))),
-                        str(child.get("id", "")),
-                    )
-                )
-                self._children_cache[category_id] = children
-            except Exception:
-                self._children_cache[category_id] = []
-        return self._children_cache[category_id]
+        return _get_category_children_helper(
+            self._api,
+            category_id,
+            self._children_cache,
+            self._normalize_category_id,
+        )
 
     def _search_in_hierarchy(
         self,
@@ -279,58 +247,21 @@ class CategoryResolver:
         Returns:
             Tuple(category_id, score) or None
         """
-        if visited is None:
-            visited = set()
-        if context_terms is None:
-            context_terms = set()
-        if path_names is None:
-            path_names = []
-
-        # Prevent infinite recursion
-        if depth > max_depth:
-            return None
-
-        if parent_id in visited:
-            return None
-
-        visited.add(parent_id)
-        children = self._get_category_children(parent_id)
-        best_match: tuple[str, tuple[Any, ...]] | None = None
-
-        for child in children:
-            child_id = self._normalize_category_id(child.get("id"), site_id)
-            child_name = child.get("name")
-            if not child_id or not isinstance(child_name, str):
-                continue
-
-            child_normalized = TextNormalizer.normalize(child_name)
-            child_path = [*path_names, child_normalized]
-
-            score = self._build_match_score(
-                target_name=target_name,
-                candidate_name=child_normalized,
-                context_terms=context_terms,
-                path_names=child_path,
-                depth=depth + 1,
-                min_similarity=min_similarity,
-            )
-            if score is not None:
-                best_match = self._pick_best_candidate(best_match, (child_id, score))
-
-            subtree_match = self._search_in_hierarchy(
-                target_name=target_name,
-                parent_id=child_id,
-                context_terms=context_terms,
-                path_names=child_path,
-                visited=visited,
-                depth=depth + 1,
-                max_depth=max_depth,
-                min_similarity=min_similarity,
-                site_id=site_id,
-            )
-            best_match = self._pick_best_candidate(best_match, subtree_match)
-
-        return best_match
+        return _search_in_hierarchy_helper(
+            target_name=target_name,
+            parent_id=parent_id,
+            get_category_children=self._get_category_children,
+            normalize_category_id=self._normalize_category_id,
+            build_match_score=self._build_match_score,
+            pick_best_candidate=self._pick_best_candidate,
+            context_terms=context_terms,
+            path_names=path_names,
+            visited=visited,
+            depth=depth,
+            max_depth=max_depth,
+            min_similarity=min_similarity,
+            site_id=site_id,
+        )
 
     def resolve_to_leaf(
         self,
@@ -628,48 +559,4 @@ class CategoryResolver:
         Returns:
             List of AttributeMeta objects
         """
-        # Try cache first if available
-        raw_attributes: list[dict[str, Any]] | None = None
-        if self._attribute_cache:
-            cached = self._attribute_cache.get_attributes(category_id)
-            if cached is not None:
-                logger.debug(f"Using cached metadata for {category_id}")
-                raw_attributes = cached
-
-        # Fetch from API when cache is not available
-        if raw_attributes is None:
-            raw_attributes = self._api.get_category_attributes(category_id)
-
-        # Enrich with technical specs input (relevance, hierarchy, tags)
-        technical_specs = {}
-        if hasattr(self._api, "get_category_technical_specs"):
-            try:
-                technical_specs = self._api.get_category_technical_specs(category_id)
-            except Exception:
-                technical_specs = {}
-
-        if technical_specs:
-            spec_map = self._extract_technical_spec_attributes(technical_specs)
-            if spec_map:
-                for attr in raw_attributes:
-                    attr_id = attr.get("id")
-                    if not isinstance(attr_id, str):
-                        continue
-                    spec = spec_map.get(attr_id)
-                    if spec:
-                        self._merge_technical_spec(attr, spec)
-
-        # Normalize to AttributeMeta
-        metadata = []
-        for attr in raw_attributes:
-            try:
-                meta = AttributeMeta.from_ml_api(attr)
-                metadata.append(meta)
-            except (KeyError, TypeError) as e:
-                logger.warning(f"Failed to parse attribute: {attr.get('id', 'unknown')}: {e}")
-
-        # Save to cache
-        if self._attribute_cache and raw_attributes is not None:
-            self._attribute_cache.save_attributes(category_id, raw_attributes)
-
-        return metadata
+        return _get_attribute_metadata_helper(self, category_id, logger)
