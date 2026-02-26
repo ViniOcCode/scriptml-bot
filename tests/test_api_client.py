@@ -40,6 +40,36 @@ def test_validate_item_raises_for_non_json_400_response():
     response.raise_for_status.assert_called_once()
 
 
+def test_post_returns_empty_payload_for_204_success():
+    response = MagicMock(spec=requests.Response)
+    response.status_code = 204
+
+    http_client = MagicMock()
+    http_client.post.return_value = response
+
+    client = MLApiClient(http_client=http_client)
+    result = client.post("/dummy", json={"ok": True})
+
+    assert result == {}
+    response.raise_for_status.assert_called_once()
+    response.json.assert_not_called()
+
+
+def test_post_returns_empty_payload_for_non_json_success():
+    response = MagicMock(spec=requests.Response)
+    response.status_code = 200
+    response.json.side_effect = ValueError("invalid json")
+
+    http_client = MagicMock()
+    http_client.post.return_value = response
+
+    client = MLApiClient(http_client=http_client)
+    result = client.post("/dummy", json={"ok": True})
+
+    assert result == {}
+    response.raise_for_status.assert_called_once()
+
+
 def test_validate_user_product_item_sanitizes_payload_before_validation():
     client = MLApiClient(http_client=MagicMock())
     payload = {
