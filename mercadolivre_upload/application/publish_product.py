@@ -112,6 +112,17 @@ from .publish.internals.publish_item import publish_one as _publish_one_helper
 from .publish.internals.publisher_capabilities import build_publisher_capabilities
 from .publish.internals.runtime_settings import resolve_runtime_settings
 from .publish.internals.shipping import build_shipping_config as _build_shipping_config_helper
+from .publish.internals.state import (
+    annotate_image_diagnostics_artifact as _annotate_image_diagnostics_artifact_helper,
+)
+from .publish.internals.state import (
+    build_rollout_flags_artifact as _build_rollout_flags_artifact_helper,
+)
+from .publish.internals.state import build_stats as _build_stats_helper
+from .publish.internals.state import (
+    get_problematic_attributes as _get_problematic_attributes_helper,
+)
+from .publish.internals.state import reset_execution_state as _reset_execution_state_helper
 from .publish.internals.user_products import (
     build_user_products_payload,
     extract_selected_model,
@@ -276,72 +287,18 @@ class PublishProductUseCase:
 
     def _reset_execution_state(self) -> None:
         """Reset per-run counters and artifacts."""
-        self.published = 0
-        self.failed = 0
-        self.errors = []
-        self.fiscal_results = []
-        self.clip_results = []
-        self.item_results = []
-        self._pending_fiscal = []
-        self._category_policy_cache = {}
-        self._category_schema_contract_cache = {}
-        self._category_non_fillable_attribute_ids_cache = {}
-        self._current_cause_codes = []
-        self._current_preflight_artifact = {"identifier_gate": {"checked": False, "violations": []}}
-        self._current_cause_taxonomy = []
-        self._current_validation_decision = {}
-        self._current_image_diagnostics = None
-        self._current_shipping_policy = None
-        self._current_flow_artifact = {}
-        self._current_publish_category_id = None
-        self._current_publish_sku = None
-        self._current_variation_reference_attributes = []
+        _reset_execution_state_helper(self)
 
     def _build_rollout_flags_artifact(self) -> dict[str, Any]:
         """Build static rollout feature flag snapshot for item/report metadata."""
-        return {
-            "validation_decision_mode": self.validation_decision_mode,
-            "strict_warning_gate_mode": self.strict_warning_gate_mode,
-            "strict_attribute_warnings": self.strict_attribute_warnings,
-            "image_diagnostics_gate_mode": self.image_diagnostics_gate_mode,
-            "flow_user_products_enabled": self.flow_user_products_enabled,
-            "flow_blocked_behavior": self.flow_blocked_behavior,
-            "shipping_non_blocking_codes": sorted(self.shipping_non_blocking_codes),
-            "shipping_mandatory_free_shipping_tags": sorted(
-                self.shipping_mandatory_free_shipping_tags
-            ),
-            "shipping_enforce_mandatory_free_shipping": (
-                self.shipping_enforce_mandatory_free_shipping
-            ),
-            "shipping_allow_runtime_tag_overrides": self.shipping_allow_runtime_tag_overrides,
-            "shipping_allow_runtime_free_shipping_override": (
-                self.shipping_allow_runtime_free_shipping_override
-            ),
-        }
+        return _build_rollout_flags_artifact_helper(self)
 
     def _annotate_image_diagnostics_artifact(self, artifact: dict[str, Any]) -> dict[str, Any]:
         """Attach gate decision metadata to image diagnostics artifact."""
-        normalized = dict(artifact)
-        raw_issues = normalized.get("issues", [])
-        issues = (
-            [str(issue) for issue in raw_issues if str(issue).strip()]
-            if isinstance(raw_issues, list)
-            else []
+        return _annotate_image_diagnostics_artifact_helper(
+            artifact,
+            gate_mode=self.image_diagnostics_gate_mode,
         )
-        gate_blocks = self.image_diagnostics_gate_mode == "enforce"
-        action = "allow"
-        if self.image_diagnostics_gate_mode == "disabled":
-            action = "skip"
-        elif gate_blocks and issues:
-            action = "block"
-
-        normalized["gate_mode"] = self.image_diagnostics_gate_mode
-        normalized["gate_blocks"] = gate_blocks
-        normalized["gate_decision"] = {
-            "action": action,
-            "issue_count": len(issues),
-        }
-        return normalized
 
     @staticmethod
     def _extract_item_identity(product: Product | dict[str, Any]) -> tuple[str | None, str | None]:
@@ -580,39 +537,7 @@ class PublishProductUseCase:
 
     def get_stats(self) -> dict[str, Any]:
         """Get publishing statistics."""
-        stats: dict[str, Any] = {
-            "published": self.published,
-            "failed": self.failed,
-            "total": self.published + self.failed,
-            "errors": self.errors,
-        }
-
-        # Add feedback summary if available
-        if self.feedback:
-            stats["feedback"] = self.feedback.get_feedback_summary()
-
-        # Add fiscal submission results
-        if self.fiscal_results:
-            fiscal_success = sum(1 for r in self.fiscal_results if r.success)
-            fiscal_failed = len(self.fiscal_results) - fiscal_success
-            stats["fiscal"] = {
-                "submitted": len(self.fiscal_results),
-                "success": fiscal_success,
-                "failed": fiscal_failed,
-            }
-
-        # Add clip upload results
-        if self.clip_results:
-            clip_success = sum(r.get("clips_uploaded", 0) for r in self.clip_results)
-            clip_failed = sum(r.get("clips_failed", 0) for r in self.clip_results)
-            stats["clips"] = {
-                "attempted": len(self.clip_results),
-                "success": clip_success,
-                "failed": clip_failed,
-                "details": self.clip_results,
-            }
-
-        return stats
+        return _build_stats_helper(self)
 
     def get_problematic_attributes(self) -> dict[str, int]:
         """Get attributes that frequently cause errors.
@@ -620,9 +545,7 @@ class PublishProductUseCase:
         Returns:
             Dictionary mapping attribute IDs to error counts
         """
-        if self.feedback:
-            return self.feedback.get_problematic_attributes()
-        return {}
+        return _get_problematic_attributes_helper(self)
 
     def _build_variations_from_candidates(
         self,
