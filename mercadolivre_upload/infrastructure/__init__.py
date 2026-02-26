@@ -4,6 +4,17 @@ from typing import Any
 
 # Original exports
 from mercadolivre_upload.infrastructure.config import Settings, get_settings
+from mercadolivre_upload.infrastructure.internals.migration import (
+    Field,
+    FieldType,
+    SchemaVersion,
+    Version,
+)
+from mercadolivre_upload.infrastructure.internals.observability import (
+    BusinessMetricsCollector,
+    HourlyStats,
+    StructuredLogger,
+)
 from mercadolivre_upload.infrastructure.logging import get_logger, setup_logging
 from mercadolivre_upload.infrastructure.metrics import MetricsCollector, collector
 
@@ -12,15 +23,11 @@ from mercadolivre_upload.infrastructure.migration import (
     DEFAULT_SCHEMA_V1,
     DEFAULT_SCHEMA_V2,
     DEFAULT_SCHEMA_V3,
-    Field,
-    FieldType,
     Migration,
     MigrationManager,
     MigrationResult,
-    SchemaVersion,
     V1ToV2Migration,
     V2ToV3Migration,
-    Version,
     create_default_migration_manager,
 )
 
@@ -29,11 +36,8 @@ from mercadolivre_upload.infrastructure.observability import (
     Alert,
     AlertLevel,
     AlertManager,
-    BusinessMetricsCollector,
     Dashboard,
-    HourlyStats,
     ObservabilityManager,
-    StructuredLogger,
     alert_manager,
     business_metrics,
     create_observability_manager,

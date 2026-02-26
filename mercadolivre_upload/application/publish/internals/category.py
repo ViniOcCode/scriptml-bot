@@ -1,9 +1,13 @@
-"""Category-resolution helper functions for publish_product use case."""
+"""Category helpers for publish internals."""
 
+from __future__ import annotations
+
+import re
 from logging import Logger
 from typing import Any
 
 from mercadolivre_upload.domain.product.model import Product
+from mercadolivre_upload.shared.utils.text_utils import PortugueseTextNormalizer
 
 
 def extract_item_identity(product: Product | dict[str, Any]) -> tuple[str | None, str | None]:
@@ -169,3 +173,155 @@ def log_category_resolution_observability(observability: dict[str, Any], logger:
         observability.get("strategy_counts", {}),
         observability.get("fallback_counts", {}),
     )
+
+
+def resolve_category_context(
+    use_case: Any,
+    products: list[Product | dict[str, Any]],
+    category_name: str,
+    logger: Logger,
+) -> dict[str, Any]:
+    """Resolve category with deterministic strategy metadata."""
+    category_input = str(category_name).strip()
+    resolved_id: str | None = None
+    strategy = "unresolved"
+    titles: list[str] = []
+    predictor_attempted = False
+    predictor_matched = False
+    fallback_attempted = False
+    fallback_reason: str | None = None
+
+    if products:
+        for product in products:
+            title = extract_product_title(product)
+            if title:
+                titles.append(title)
+
+    # Strategy 0: Accept direct category IDs (e.g. MLB1234)
+    if re.fullmatch(r"[A-Z]{3}\d+", category_input):
+        resolved_id = category_input
+        strategy = "direct_id"
+    # Strategy 1: Predictor-first title matching against category hint
+    elif titles:
+        predictor_attempted = True
+        logger.info("Extracted %s titles for predictor-first resolution", len(titles))
+        resolved_id = use_case.category_resolver.find_category_with_predictor(
+            category_input, titles
+        )
+        if resolved_id:
+            strategy = "predictor_path_match"
+            predictor_matched = True
+        else:
+            fallback_attempted = True
+            fallback_reason = "predictor_no_match"
+            title_predictor = getattr(
+                use_case.category_resolver, "predict_category_from_title", None
+            )
+            if callable(title_predictor):
+                deduped_titles: list[str] = []
+                seen_titles: set[str] = set()
+                for title in titles:
+                    normalized_title = PortugueseTextNormalizer.normalize(title)
+                    if not normalized_title or normalized_title in seen_titles:
+                        continue
+                    seen_titles.add(normalized_title)
+                    deduped_titles.append(title)
+                    if len(deduped_titles) >= 3:
+                        break
+
+                for title in deduped_titles:
+                    fallback_prediction = title_predictor(title, "MLB")
+                    if isinstance(fallback_prediction, str) and fallback_prediction.strip():
+                        resolved_id = fallback_prediction.strip()
+                        strategy = "predictor_title_fallback"
+                        fallback_reason = "predictor_title_fallback"
+                        logger.info(
+                            "Predictor path miss for '%s'; using bounded title fallback '%s' "
+                            "resolved to %s.",
+                            category_input,
+                            title,
+                            resolved_id,
+                        )
+                        break
+
+            if not resolved_id:
+                logger.info(
+                    "Predictor path matching did not resolve '%s'; "
+                    "returning unresolved context.",
+                    category_input,
+                )
+    else:
+        # Fallback for non-title flows: resolve by category name.
+        fallback_attempted = True
+        fallback_reason = "missing_titles_for_predictor"
+        resolved_id = use_case.category_resolver.find_category(category_input)
+        if resolved_id:
+            strategy = "name_match"
+        else:
+            logger.info(
+                "Category '%s' not found by name and no usable titles were provided.",
+                category_input,
+            )
+
+    category_path: list[Any] = []
+    if resolved_id:
+        resolved_before_leaf = resolved_id
+        leaf_category_id = use_case.category_resolver.resolve_to_leaf(resolved_id)
+        if leaf_category_id != resolved_before_leaf:
+            logger.info(f"Resolved to leaf category: {leaf_category_id}")
+        resolved_id = leaf_category_id
+
+        category_data = use_case._get_policy_category_data(resolved_id)
+        if isinstance(category_data, dict):
+            raw_children = category_data.get("children_categories", [])
+            has_children = isinstance(raw_children, list) and any(
+                isinstance(child, dict) for child in raw_children
+            )
+            if has_children:
+                logger.warning(
+                    "Resolved category %s is still non-leaf (children=%s); "
+                    "blocking publish to avoid unsafe auto-selection.",
+                    resolved_id,
+                    len(raw_children),
+                )
+                fallback_attempted = True
+                fallback_reason = "ambiguous_leaf_resolution"
+                strategy = "unresolved"
+                resolved_id = None
+                category_path = []
+                return {
+                    "category_input": category_input,
+                    "category_resolved_id": resolved_id,
+                    "category_path": category_path,
+                    "resolution_strategy": strategy,
+                    "predictor_attempted": predictor_attempted,
+                    "predictor_titles_count": len(titles),
+                    "predictor_matched": predictor_matched,
+                    "fallback_attempted": fallback_attempted,
+                    "fallback_reason": fallback_reason,
+                }
+            raw_path = category_data.get("path_from_root")
+            if isinstance(raw_path, list):
+                category_path = list(raw_path)
+
+    return {
+        "category_input": category_input,
+        "category_resolved_id": resolved_id,
+        "category_path": category_path,
+        "resolution_strategy": strategy,
+        "predictor_attempted": predictor_attempted,
+        "predictor_titles_count": len(titles),
+        "predictor_matched": predictor_matched,
+        "fallback_attempted": fallback_attempted,
+        "fallback_reason": fallback_reason,
+    }
+
+
+__all__ = [
+    "build_category_resolution_observability",
+    "build_resolution_artifact",
+    "extract_item_identity",
+    "extract_product_title",
+    "log_category_resolution_observability",
+    "resolve_category_context",
+]
