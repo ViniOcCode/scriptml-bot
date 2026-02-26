@@ -139,7 +139,18 @@ class MLApiClient:
                 logger.warning("Validation endpoint returned non-JSON response: %s", exc)
 
         resp.raise_for_status()
-        return cast(dict[str, Any], resp.json())
+        if resp.status_code == 204:
+            return {}
+        try:
+            return cast(dict[str, Any], resp.json())
+        except ValueError:
+            logger.warning(
+                "POST %s returned a non-JSON success response (status %s); "
+                "returning empty payload.",
+                endpoint,
+                resp.status_code,
+            )
+            return {}
 
     def get_sites(self) -> list[dict[str, Any]]:
         """Get available sites."""
