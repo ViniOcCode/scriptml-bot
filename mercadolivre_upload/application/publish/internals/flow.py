@@ -20,15 +20,10 @@ def get_seller_capabilities_artifact(use_case: Any) -> dict[str, Any]:
     if isinstance(cached_artifact, dict):
         return cast(dict[str, Any], cached_artifact)
 
+    capabilities = use_case._publisher_capabilities
     seller_info: dict[str, Any] = {}
     source = "unavailable"
-    for endpoint_name, method_name in (
-        ("publisher/get_users_me", "get_publisher_users_me"),
-        ("users/me", "get_users_me"),
-    ):
-        getter = getattr(use_case.publisher, method_name, None)
-        if not callable(getter):
-            continue
+    for endpoint_name, getter in capabilities.seller_info_getters:
         try:
             payload = getter()
         except Exception as error:
@@ -83,15 +78,12 @@ def get_flow_routing_artifact(use_case: Any) -> dict[str, Any]:
         logger.warning("Invalid flow routing mode '%s'; falling back to auto", mode)
         mode = "auto"
 
+    capabilities = use_case._publisher_capabilities
     seller_capabilities = get_seller_capabilities_artifact(use_case)
     seller_has_tag = bool(seller_capabilities.get("has_user_product_seller_tag"))
     user_products_enabled = use_case.flow_user_products_enabled
-    user_products_validate_supported = callable(
-        getattr(use_case.publisher, "validate_user_product_item", None)
-    )
-    user_products_create_supported = callable(
-        getattr(use_case.publisher, "create_user_product_item", None)
-    )
+    user_products_validate_supported = capabilities.user_products_validate_supported
+    user_products_create_supported = capabilities.user_products_create_supported
     user_products_route_supported = (
         user_products_validate_supported and user_products_create_supported
     )
@@ -215,8 +207,8 @@ def validate_item_for_flow(
 ) -> dict[str, Any]:
     """Validate payload using the selected publish route."""
     if selected_flow == "user_products":
-        validator = getattr(use_case.publisher, "validate_user_product_item", None)
-        if callable(validator):
+        validator = use_case._publisher_capabilities.validate_user_product_item
+        if validator is not None:
             return cast(dict[str, Any], validator(item))
         raise RuntimeError(
             "User-products flow selected but publisher does not implement "
@@ -230,8 +222,8 @@ def create_item_for_flow(
 ) -> dict[str, Any]:
     """Publish payload using the selected publish route."""
     if selected_flow == "user_products":
-        creator = getattr(use_case.publisher, "create_user_product_item", None)
-        if callable(creator):
+        creator = use_case._publisher_capabilities.create_user_product_item
+        if creator is not None:
             return cast(dict[str, Any], creator(item))
         raise RuntimeError(
             "User-products flow selected but publisher does not implement "

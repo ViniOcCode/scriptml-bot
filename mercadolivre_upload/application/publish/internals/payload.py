@@ -55,9 +55,9 @@ def get_available_listing_type_ids(use_case: Any, category_id: str) -> list[str]
     deduped_listing_type_ids = _extract_listing_type_ids(listing_types)
 
     if not deduped_listing_type_ids:
-        site_getter = getattr(use_case.publisher, "get_site_listing_types", None)
+        site_getter = use_case._publisher_capabilities.get_site_listing_types
         site_id = category_id[:3].upper() if isinstance(category_id, str) else ""
-        if callable(site_getter) and site_id:
+        if site_getter is not None and site_id:
             try:
                 site_listing_types = site_getter(site_id)
             except Exception as e:
