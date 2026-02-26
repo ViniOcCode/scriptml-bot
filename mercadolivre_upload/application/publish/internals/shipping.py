@@ -7,7 +7,7 @@ from typing import Any
 
 from mercadolivre_upload.shared.utils.text_utils import PortugueseTextNormalizer
 
-from .publish_product_constants import (
+from .constants import (
     ROW_SHIPPING_COST_HEADERS,
     ROW_SHIPPING_CUSTOM_TOKENS,
     ROW_SHIPPING_FALSE_TOKENS,
