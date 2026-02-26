@@ -197,3 +197,44 @@ def get_flow_routing_artifact(use_case: Any) -> dict[str, Any]:
     artifact = {"flow_routing": flow_routing}
     use_case._flow_routing_artifact = artifact
     return artifact
+
+
+def resolve_selected_flow(use_case: Any) -> str:
+    """Resolve currently selected publish flow with legacy fallback."""
+    flow_artifact = get_flow_routing_artifact(use_case)
+    flow_routing = flow_artifact.get("flow_routing", {})
+    if isinstance(flow_routing, dict):
+        selected_flow = flow_routing.get("selected_flow")
+        if isinstance(selected_flow, str) and selected_flow in IMPLEMENTED_ROUTING_FLOWS:
+            return selected_flow
+    return "legacy"
+
+
+def validate_item_for_flow(
+    use_case: Any, *, item: dict[str, Any], selected_flow: str
+) -> dict[str, Any]:
+    """Validate payload using the selected publish route."""
+    if selected_flow == "user_products":
+        validator = getattr(use_case.publisher, "validate_user_product_item", None)
+        if callable(validator):
+            return cast(dict[str, Any], validator(item))
+        raise RuntimeError(
+            "User-products flow selected but publisher does not implement "
+            "'validate_user_product_item'."
+        )
+    return cast(dict[str, Any], use_case.publisher.validate_item(item))
+
+
+def create_item_for_flow(
+    use_case: Any, *, item: dict[str, Any], selected_flow: str
+) -> dict[str, Any]:
+    """Publish payload using the selected publish route."""
+    if selected_flow == "user_products":
+        creator = getattr(use_case.publisher, "create_user_product_item", None)
+        if callable(creator):
+            return cast(dict[str, Any], creator(item))
+        raise RuntimeError(
+            "User-products flow selected but publisher does not implement "
+            "'create_user_product_item'."
+        )
+    return cast(dict[str, Any], use_case.publisher.create_item(item))
