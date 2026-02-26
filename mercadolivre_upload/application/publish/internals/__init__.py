@@ -13,6 +13,7 @@ __all__ = [
     "preflight",
     "preflight_validation",
     "publisher_capabilities",
+    "runtime_settings",
     "shipping",
     "user_products",
     "validation",
