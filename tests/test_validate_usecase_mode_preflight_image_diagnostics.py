@@ -190,7 +190,10 @@ def test_validation_only_mode_skips_legacy_variations_when_limit_is_tight() -> N
             self,
             _product: Product,
             _category_id: str,
+            *,
+            drop_invalid_domain_values: bool = True,
         ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], list[str]]:
+            del drop_invalid_domain_values
             return (
                 [
                     {"id": "BRAND", "value_name": "Marca X"},

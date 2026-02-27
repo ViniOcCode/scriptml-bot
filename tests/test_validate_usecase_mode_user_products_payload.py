@@ -21,7 +21,10 @@ def test_user_products_flow_builds_distinct_pxv_payload_and_artifacts() -> None:
             self,
             _product: Product,
             _category_id: str,
+            *,
+            drop_invalid_domain_values: bool = True,
         ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], list[str]]:
+            del drop_invalid_domain_values
             return (
                 [
                     {"id": "MODEL", "value_name": "Model X"},

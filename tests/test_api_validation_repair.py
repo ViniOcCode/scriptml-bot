@@ -26,6 +26,26 @@ def test_extract_prune_candidate_ids_conservative_reads_references_and_message()
     assert candidate_ids == {"FRAME_COLOR", "PAINTING_THEME"}
 
 
+def test_extract_prune_candidate_ids_resolves_attribute_index_references() -> None:
+    causes = [
+        {
+            "code": "item.attributes.invalid",
+            "message": "Attribute is not valid",
+            "references": ["item.attributes[1].value_name"],
+        }
+    ]
+    item = {
+        "attributes": [
+            {"id": "FRAME_COLOR", "value_name": "Borda Infinita"},
+            {"id": "PAINTING_THEME", "value_name": "Abstrato"},
+        ]
+    }
+
+    candidate_ids = extract_prune_candidate_ids(causes, detect_mode="conservative", item=item)
+
+    assert candidate_ids == {"PAINTING_THEME"}
+
+
 def test_prune_item_attributes_keeps_required_when_drop_required_disabled() -> None:
     item: dict[str, Any] = {
         "attributes": [
@@ -69,10 +89,6 @@ def test_validate_item_with_api_repair_prunes_once_and_then_passes() -> None:
         return validations[index]
 
     use_case = SimpleNamespace(
-        api_validation_repair_max_attempts=3,
-        api_validation_repair_detect_mode="conservative",
-        api_validation_repair_drop_required_attributes=False,
-        api_validation_repair_scope="all",
         _validate_item_for_flow=_validate_item_for_flow,
     )
     item: dict[str, Any] = {
@@ -94,3 +110,32 @@ def test_validate_item_with_api_repair_prunes_once_and_then_passes() -> None:
     assert artifact["stop_reason"] == "validation_passed"
     assert artifact["pruned_attribute_ids"] == ["FRAME_COLOR"]
     assert item["attributes"] == [{"id": "BRAND", "value_name": "Genérica"}]
+
+
+def test_validate_item_with_api_repair_stops_on_non_attribute_blocking_error() -> None:
+    use_case = SimpleNamespace(
+        _validate_item_for_flow=lambda **_: {
+            "cause": [
+                {
+                    "type": "error",
+                    "code": "shipping.mode.invalid",
+                    "message": "Shipping mode is not allowed for this seller",
+                    "references": ["shipping.mode"],
+                }
+            ]
+        }
+    )
+    item: dict[str, Any] = {"attributes": [{"id": "BRAND", "value_name": "Genérica"}]}
+
+    validation, artifact = validate_item_with_api_repair(
+        use_case=use_case,
+        item=item,
+        selected_flow="legacy",
+        required_attribute_ids=set(),
+    )
+
+    assert validation["cause"][0]["code"] == "shipping.mode.invalid"
+    assert artifact["attempt_count"] == 1
+    assert artifact["stop_reason"] == "non_attribute_blocking_errors"
+    assert artifact["non_attribute_blocking_codes"] == ["shipping.mode.invalid"]
+    assert artifact["pruned_attribute_ids"] == []
