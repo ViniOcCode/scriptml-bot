@@ -79,6 +79,7 @@ def reset_execution_state(use_case: Any) -> None:
     use_case._current_publish_category_id = None
     use_case._current_publish_sku = None
     use_case._current_variation_reference_attributes = []
+    use_case._category_resolution_context_cache = {}
 
 
 def build_stats(use_case: Any) -> dict[str, Any]:
