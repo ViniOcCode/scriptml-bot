@@ -39,7 +39,7 @@
 - Keep Portuguese-normalized matching behavior: header/category/attribute matching consistently uses `PortugueseTextNormalizer`/`TextNormalizer` and supports accented/unaccented variants.
 - In the publish flow, pass an `AttributeCache` instance via `PublishProductUseCase(attribute_cache=...)`; cache mapper initialization is per category and intentionally optional/fallback-safe.
 - `ImageUploader` expects images under `<images>/<SKU>/` first, then falls back to the base images directory if SKU folder is missing.
-- `cli/commands/upload.py` merges split YAML configs (`standard_fields`, `shipping`, `attribute_rules`, `header_detection`) and keeps `generic_mappings.yaml` as a fallback source.
+- `cli/commands/upload.py` merges split YAML configs (`standard_fields`, `shipping`, `attribute_rules`) as the runtime source of truth.
 
 ## Reusable agents
 

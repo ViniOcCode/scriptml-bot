@@ -10,12 +10,11 @@ import logging
 import math
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
 import yaml
 
-from mercadolivre_upload.shared.utils.config_loader import load_yaml_config
+from mercadolivre_upload.shared.utils.config_loader import FISCAL_CONFIG_PATH, load_yaml_config
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +56,7 @@ def _load_fiscal_config() -> dict[str, Any]:
         Full fiscal configuration dictionary
     """
     try:
-        return load_yaml_config(Path("config/fiscal_config.yaml"))
+        return load_yaml_config(FISCAL_CONFIG_PATH)
     except (OSError, yaml.YAMLError) as exc:
         logger.warning("Could not load fiscal config: %s. Using empty config.", exc)
         return {}
