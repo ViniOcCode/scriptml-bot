@@ -23,6 +23,11 @@ def test_resolve_runtime_settings_defaults() -> None:
     assert settings.shipping_enforce_mandatory_free_shipping is True
     assert settings.shipping_allow_runtime_tag_overrides is True
     assert settings.shipping_allow_runtime_free_shipping_override is True
+    assert settings.api_validation_repair_enabled is True
+    assert settings.api_validation_repair_scope == "all"
+    assert settings.api_validation_repair_max_attempts == 3
+    assert settings.api_validation_repair_detect_mode == "conservative"
+    assert settings.api_validation_repair_drop_required_attributes is False
 
 
 def test_resolve_runtime_settings_accepts_legacy_aliases() -> None:
@@ -41,6 +46,13 @@ def test_resolve_runtime_settings_accepts_legacy_aliases() -> None:
             "allow_runtime_tag_overrides": False,
             "allow_runtime_free_shipping_override": False,
         },
+        "api_validation_repair": {
+            "enabled": False,
+            "scope": "UPLOAD_ONLY",
+            "max_attempts": 4,
+            "detect_mode": "AGGRESSIVE",
+            "drop_required_attributes": True,
+        },
     }
 
     settings = resolve_runtime_settings(config, logger=logging.getLogger(__name__))
@@ -56,6 +68,11 @@ def test_resolve_runtime_settings_accepts_legacy_aliases() -> None:
     assert settings.shipping_enforce_mandatory_free_shipping is False
     assert settings.shipping_allow_runtime_tag_overrides is False
     assert settings.shipping_allow_runtime_free_shipping_override is False
+    assert settings.api_validation_repair_enabled is False
+    assert settings.api_validation_repair_scope == "upload_only"
+    assert settings.api_validation_repair_max_attempts == 4
+    assert settings.api_validation_repair_detect_mode == "aggressive"
+    assert settings.api_validation_repair_drop_required_attributes is True
 
 
 def test_resolve_runtime_settings_invalid_values_fall_back_to_safe_defaults() -> None:
@@ -64,6 +81,11 @@ def test_resolve_runtime_settings_invalid_values_fall_back_to_safe_defaults() ->
         "validation_decision_mode": "invalid",
         "flow_routing": {"blocked_behavior": "oops"},
         "image_diagnostics": "skip",
+        "api_validation_repair": {
+            "scope": "somewhere",
+            "max_attempts": 0,
+            "detect_mode": "unknown",
+        },
     }
 
     settings = resolve_runtime_settings(config, logger=logging.getLogger(__name__))
@@ -73,3 +95,6 @@ def test_resolve_runtime_settings_invalid_values_fall_back_to_safe_defaults() ->
     assert settings.validation_decision_mode == "strict"
     assert settings.flow_blocked_behavior == "fail"
     assert settings.image_diagnostics_gate_mode == "disabled"
+    assert settings.api_validation_repair_scope == "all"
+    assert settings.api_validation_repair_max_attempts == 3
+    assert settings.api_validation_repair_detect_mode == "conservative"

@@ -88,6 +88,10 @@ def _ensure_observability_evidence(
     else:
         normalized["validation_decision"] = _default_validation_decision(row_status)
 
+    validation_repair = normalized.get("validation_repair")
+    if isinstance(validation_repair, dict):
+        normalized["validation_repair"] = dict(validation_repair)
+
     policy_hash = normalized.get("policy_hash")
     normalized["policy_hash"] = (
         policy_hash if isinstance(policy_hash, str) and policy_hash else None
