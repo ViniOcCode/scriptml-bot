@@ -21,6 +21,13 @@ from auth.authenticator import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _compat_auth_plaintext_mode(monkeypatch):
+    """Keep compatibility-shim tests on explicit plaintext mode."""
+    monkeypatch.setenv("MERCADO_LIVRE_USE_SECURE_STORAGE", "0")
+    monkeypatch.setenv("MERCADO_LIVRE_AUTO_MIGRATE_TOKENS", "0")
+
+
 class TestAuthCredentials:
     """Testes para AuthCredentials."""
 

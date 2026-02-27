@@ -138,7 +138,10 @@ def auth(
     authenticated = bool(status.get("authenticated"))
     user_id = status.get("user_id")
     if authenticated:
-        console.print(f"Autenticado: {user_id}")
+        if isinstance(user_id, str) and user_id:
+            console.print(f"Autenticado: {user_id}")
+        else:
+            console.print("Autenticado")
     else:
         console.print("Não autenticado")
 
