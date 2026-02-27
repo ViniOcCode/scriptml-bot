@@ -7,7 +7,6 @@ from logging import Logger
 from typing import Any
 
 from mercadolivre_upload.domain.product.model import Product
-from mercadolivre_upload.shared.utils.text_utils import PortugueseTextNormalizer
 
 
 def extract_item_identity(product: Product | dict[str, Any]) -> tuple[str | None, str | None]:
@@ -180,9 +179,21 @@ def resolve_category_context(
     products: list[Product | dict[str, Any]],
     category_name: str,
     logger: Logger,
+    *,
+    use_cache: bool = True,
 ) -> dict[str, Any]:
     """Resolve category with deterministic strategy metadata."""
     category_input = str(category_name).strip()
+    cache_store = getattr(use_case, "_category_resolution_context_cache", None)
+    if use_cache and isinstance(cache_store, dict):
+        cached = cache_store.get(category_input)
+        if isinstance(cached, dict):
+            cached_path = cached.get("category_path")
+            return {
+                **cached,
+                "category_path": list(cached_path) if isinstance(cached_path, list) else [],
+            }
+
     resolved_id: str | None = None
     strategy = "unresolved"
     titles: list[str] = []
@@ -214,56 +225,21 @@ def resolve_category_context(
         else:
             fallback_attempted = True
             fallback_reason = "predictor_no_match"
-            title_predictor = getattr(
-                use_case.category_resolver, "predict_category_from_title", None
-            )
-            if callable(title_predictor):
-                deduped_titles: list[str] = []
-                seen_titles: set[str] = set()
-                for title in titles:
-                    normalized_title = PortugueseTextNormalizer.normalize(title)
-                    if not normalized_title or normalized_title in seen_titles:
-                        continue
-                    seen_titles.add(normalized_title)
-                    deduped_titles.append(title)
-                    if len(deduped_titles) >= 3:
-                        break
-
-                for title in deduped_titles:
-                    fallback_prediction = title_predictor(title, "MLB")
-                    if isinstance(fallback_prediction, str) and fallback_prediction.strip():
-                        resolved_id = fallback_prediction.strip()
-                        strategy = "predictor_title_fallback"
-                        fallback_reason = "predictor_title_fallback"
-                        logger.info(
-                            "Predictor path miss for '%s'; using bounded title fallback '%s' "
-                            "resolved to %s.",
-                            category_input,
-                            title,
-                            resolved_id,
-                        )
-                        break
-
-            if not resolved_id:
-                logger.info(
-                    "Predictor path matching did not resolve '%s'; "
-                    "returning unresolved context.",
-                    category_input,
-                )
-    else:
-        # Fallback for non-title flows: resolve by category name.
-        fallback_attempted = True
-        fallback_reason = "missing_titles_for_predictor"
-        resolved_id = use_case.category_resolver.find_category(category_input)
-        if resolved_id:
-            strategy = "name_match"
-        else:
             logger.info(
-                "Category '%s' not found by name and no usable titles were provided.",
+                "Predictor path matching did not resolve '%s'; returning unresolved context.",
                 category_input,
             )
+    else:
+        # Fail closed when no titles are available for predictor verification.
+        fallback_attempted = True
+        fallback_reason = "missing_titles_for_predictor"
+        logger.info(
+            "Category '%s' cannot be validated because no usable titles were provided.",
+            category_input,
+        )
 
     category_path: list[Any] = []
+    context_result: dict[str, Any]
     if resolved_id:
         resolved_before_leaf = resolved_id
         leaf_category_id = use_case.category_resolver.resolve_to_leaf(resolved_id)
@@ -289,7 +265,7 @@ def resolve_category_context(
                 strategy = "unresolved"
                 resolved_id = None
                 category_path = []
-                return {
+                context_result = {
                     "category_input": category_input,
                     "category_resolved_id": resolved_id,
                     "category_path": category_path,
@@ -300,11 +276,17 @@ def resolve_category_context(
                     "fallback_attempted": fallback_attempted,
                     "fallback_reason": fallback_reason,
                 }
+                if isinstance(cache_store, dict):
+                    cache_store[category_input] = {
+                        **context_result,
+                        "category_path": list(category_path),
+                    }
+                return context_result
             raw_path = category_data.get("path_from_root")
             if isinstance(raw_path, list):
                 category_path = list(raw_path)
 
-    return {
+    context_result = {
         "category_input": category_input,
         "category_resolved_id": resolved_id,
         "category_path": category_path,
@@ -315,6 +297,12 @@ def resolve_category_context(
         "fallback_attempted": fallback_attempted,
         "fallback_reason": fallback_reason,
     }
+    if isinstance(cache_store, dict):
+        cache_store[category_input] = {
+            **context_result,
+            "category_path": list(category_path),
+        }
+    return context_result
 
 
 __all__ = [

@@ -12,7 +12,7 @@ from mercadolivre_upload.cli.commands import validate as validate_cmd
 from tests.cli_report_builders import _build_rows, _make_item_result
 
 
-def test_validate_groups_by_row_category_and_writes_summary(tmp_path, monkeypatch) -> None:
+def test_validate_uses_cli_category_and_writes_row_category_metadata(tmp_path, monkeypatch) -> None:
     rows = _build_rows(3)
     rows[0]["category_id"] = "MLB1000"
     rows[1]["category_id"] = "MLB1000"
@@ -24,80 +24,65 @@ def test_validate_groups_by_row_category_and_writes_summary(tmp_path, monkeypatc
     monkeypatch.setattr(validate_cmd, "load_config", lambda: {})
 
     use_case_instance = MagicMock()
-    use_case_instance.execute.side_effect = [
-        {
-            "validated": 2,
-            "published": 2,
-            "failed": 0,
-            "errors": [],
-            "item_results": [
-                _make_item_result(
-                    0,
-                    "SKU001",
-                    status="success",
-                    cause_codes=["item.pictures.without_main"],
-                    cause_taxonomy=[
-                        {
-                            "type": "warning",
-                            "code": "item.pictures.without_main",
-                            "message": "Main picture is recommended.",
-                            "classification": "informational_warning",
-                        }
-                    ],
-                    validation_decision={"mode": "strict", "action": "allow"},
-                    policy_hash="hash-1000",
-                    policy_summary={"category_id": "MLB1000"},
-                    schema_contract_hash="schema-hash-1000",
-                    schema_contract_summary={
-                        "category_id": "MLB1000",
-                        "required_attribute_count": 1,
-                    },
-                    identifier_gate={"checked": True, "violations": []},
-                    flow_routing={
-                        "mode": "forced",
-                        "selected_flow": "user_products",
-                        "reason": "Using user-products flow",
-                        "selected_model": "Model X",
-                        "up_family_name": "Linha Alpha",
-                    },
-                    image_diagnostics={
-                        "status": "passed",
-                        "available": True,
-                        "checked": 1,
-                        "issues": [],
-                        "results": [],
-                    },
-                    shipping_policy={
-                        "decision": {"source": "shipping_resolver", "selected_mode": "me2"}
-                    },
-                    rollout_flags={
-                        "validation_decision_mode": "strict",
-                        "strict_warning_gate_mode": "enforce",
-                        "image_diagnostics_gate_mode": "enforce",
-                        "flow_user_products_enabled": True,
-                        "flow_blocked_behavior": "fail",
-                    },
-                    category_input="MLB1000",
-                    category_resolved_id="MLB1000",
-                    category_path=[{"id": "MLB1000", "name": "Cat 1000"}],
-                    resolution_strategy="direct_id",
-                    category_resolution_decision={
-                        "category_input": "MLB1000",
-                        "category_resolved_id": "MLB1000",
-                        "strategy": "direct_id",
-                        "predictor_attempted": False,
-                        "predictor_titles_count": 0,
-                        "predictor_matched": False,
-                        "fallback_attempted": False,
-                        "fallback_reason": None,
-                    },
-                ),
-                _make_item_result(1, "SKU002", status="success"),
-            ],
-            "category_resolution": {
-                "decision": {
-                    "category_input": "MLB1000",
-                    "category_resolved_id": "MLB1000",
+    use_case_instance.execute.return_value = {
+        "validated": 3,
+        "published": 3,
+        "failed": 0,
+        "errors": [],
+        "item_results": [
+            _make_item_result(
+                0,
+                "SKU001",
+                status="success",
+                cause_codes=["item.pictures.without_main"],
+                cause_taxonomy=[
+                    {
+                        "type": "warning",
+                        "code": "item.pictures.without_main",
+                        "message": "Main picture is recommended.",
+                        "classification": "informational_warning",
+                    }
+                ],
+                validation_decision={"mode": "strict", "action": "allow"},
+                policy_hash="hash-default",
+                policy_summary={"category_id": "MLB-DEFAULT"},
+                schema_contract_hash="schema-hash-default",
+                schema_contract_summary={
+                    "category_id": "MLB-DEFAULT",
+                    "required_attribute_count": 1,
+                },
+                identifier_gate={"checked": True, "violations": []},
+                flow_routing={
+                    "mode": "forced",
+                    "selected_flow": "user_products",
+                    "reason": "Using user-products flow",
+                    "selected_model": "Model X",
+                    "up_family_name": "Linha Alpha",
+                },
+                image_diagnostics={
+                    "status": "passed",
+                    "available": True,
+                    "checked": 1,
+                    "issues": [],
+                    "results": [],
+                },
+                shipping_policy={
+                    "decision": {"source": "shipping_resolver", "selected_mode": "me2"}
+                },
+                rollout_flags={
+                    "validation_decision_mode": "strict",
+                    "strict_warning_gate_mode": "enforce",
+                    "image_diagnostics_gate_mode": "enforce",
+                    "flow_user_products_enabled": True,
+                    "flow_blocked_behavior": "fail",
+                },
+                category_input="MLB-DEFAULT",
+                category_resolved_id="MLB-DEFAULT",
+                category_path=[{"id": "MLB-DEFAULT", "name": "Default Category"}],
+                resolution_strategy="direct_id",
+                category_resolution_decision={
+                    "category_input": "MLB-DEFAULT",
+                    "category_resolved_id": "MLB-DEFAULT",
                     "strategy": "direct_id",
                     "predictor_attempted": False,
                     "predictor_titles_count": 0,
@@ -105,44 +90,31 @@ def test_validate_groups_by_row_category_and_writes_summary(tmp_path, monkeypatc
                     "fallback_attempted": False,
                     "fallback_reason": None,
                 },
-                "strategy_counts": {
-                    "direct_id": 2,
-                    "predictor_path_match": 0,
-                    "name_match": 0,
-                    "unresolved": 0,
-                },
-                "fallback_counts": {"attempted": 0, "resolved": 0, "unresolved": 0},
-                "predictor_counts": {"attempted": 0, "matched": 0, "unmatched": 0},
+            ),
+            _make_item_result(1, "SKU002", status="success"),
+            _make_item_result(2, "SKU003", status="success"),
+        ],
+        "category_resolution": {
+            "decision": {
+                "category_input": "MLB-DEFAULT",
+                "category_resolved_id": "MLB-DEFAULT",
+                "strategy": "direct_id",
+                "predictor_attempted": False,
+                "predictor_titles_count": 0,
+                "predictor_matched": False,
+                "fallback_attempted": False,
+                "fallback_reason": None,
             },
-        },
-        {
-            "validated": 1,
-            "published": 1,
-            "failed": 0,
-            "errors": [],
-            "item_results": [_make_item_result(0, "SKU003", status="success")],
-            "category_resolution": {
-                "decision": {
-                    "category_input": "MLB2000",
-                    "category_resolved_id": "MLB2000",
-                    "strategy": "predictor_path_match",
-                    "predictor_attempted": True,
-                    "predictor_titles_count": 1,
-                    "predictor_matched": True,
-                    "fallback_attempted": False,
-                    "fallback_reason": None,
-                },
-                "strategy_counts": {
-                    "direct_id": 0,
-                    "predictor_path_match": 1,
-                    "name_match": 0,
-                    "unresolved": 0,
-                },
-                "fallback_counts": {"attempted": 0, "resolved": 0, "unresolved": 0},
-                "predictor_counts": {"attempted": 1, "matched": 1, "unmatched": 0},
+            "strategy_counts": {
+                "direct_id": 3,
+                "predictor_path_match": 0,
+                "name_match": 0,
+                "unresolved": 0,
             },
+            "fallback_counts": {"attempted": 0, "resolved": 0, "unresolved": 0},
+            "predictor_counts": {"attempted": 0, "matched": 0, "unmatched": 0},
         },
-    ]
+    }
     build_use_case_mock = MagicMock(return_value=use_case_instance)
     monkeypatch.setattr(validate_cmd, "build_publish_use_case", build_use_case_mock)
 
@@ -165,13 +137,10 @@ def test_validate_groups_by_row_category_and_writes_summary(tmp_path, monkeypatc
     build_use_case_mock.assert_called_once()
     assert build_use_case_mock.call_args.kwargs["validation_only"] is True
 
-    assert use_case_instance.execute.call_count == 2
+    assert use_case_instance.execute.call_count == 1
     first_rows, first_category = use_case_instance.execute.call_args_list[0].args
-    second_rows, second_category = use_case_instance.execute.call_args_list[1].args
-    assert first_rows == rows[:2]
-    assert second_rows == rows[2:]
-    assert first_category == "MLB1000"
-    assert second_category == "MLB2000"
+    assert first_rows == rows
+    assert first_category == "MLB-DEFAULT"
 
     summary_files = list(report_dir.glob("validation-summary-*.json"))
     assert len(summary_files) == 1
@@ -191,8 +160,8 @@ def test_validate_groups_by_row_category_and_writes_summary(tmp_path, monkeypatc
     }
     assert summary["top_error_codes_by_status"] == {"valid": [], "failed": []}
     assert summary["category_resolution"]["strategy_counts"] == {
-        "direct_id": 2,
-        "predictor_path_match": 1,
+        "direct_id": 3,
+        "predictor_path_match": 0,
         "name_match": 0,
         "unresolved": 0,
     }
@@ -202,23 +171,26 @@ def test_validate_groups_by_row_category_and_writes_summary(tmp_path, monkeypatc
         "unresolved": 0,
     }
     assert summary["category_resolution"]["predictor_counts"] == {
-        "attempted": 1,
-        "matched": 1,
+        "attempted": 0,
+        "matched": 0,
         "unmatched": 0,
     }
-    assert len(summary["category_resolution"]["decisions"]) == 2
+    assert len(summary["category_resolution"]["decisions"]) == 1
+    assert summary["row_category_signals"] == {"detected": 3, "mismatched": 3}
     assert len(summary["items"]) == 3
     assert {item["status"] for item in summary["items"]} == {"valid"}
     assert summary["items"][0]["cause_taxonomy"][0]["classification"] == "informational_warning"
     assert summary["items"][0]["validation_decision"]["action"] == "allow"
-    assert summary["items"][0]["policy_hash"] == "hash-1000"
-    assert summary["items"][0]["policy_summary"]["category_id"] == "MLB1000"
-    assert summary["items"][0]["schema_contract_hash"] == "schema-hash-1000"
-    assert summary["items"][0]["schema_contract_summary"]["category_id"] == "MLB1000"
+    assert summary["items"][0]["policy_hash"] == "hash-default"
+    assert summary["items"][0]["policy_summary"]["category_id"] == "MLB-DEFAULT"
+    assert summary["items"][0]["schema_contract_hash"] == "schema-hash-default"
+    assert summary["items"][0]["schema_contract_summary"]["category_id"] == "MLB-DEFAULT"
     assert summary["items"][0]["identifier_gate"]["checked"] is True
-    assert summary["items"][0]["category_resolved_id"] == "MLB1000"
+    assert summary["items"][0]["category_resolved_id"] == "MLB-DEFAULT"
     assert summary["items"][0]["resolution_strategy"] == "direct_id"
-    assert summary["items"][0]["category_path"] == [{"id": "MLB1000", "name": "Cat 1000"}]
+    assert summary["items"][0]["category_path"] == [
+        {"id": "MLB-DEFAULT", "name": "Default Category"}
+    ]
     assert summary["items"][0]["flow_routing"]["selected_flow"] == "user_products"
     assert summary["items"][0]["flow_routing"]["selected_model"] == "Model X"
     assert summary["items"][0]["flow_routing"]["up_family_name"] == "Linha Alpha"

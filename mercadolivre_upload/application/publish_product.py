@@ -266,6 +266,7 @@ class PublishProductUseCase:
         self._current_publish_category_id: str | None = None
         self._current_publish_sku: str | None = None
         self._current_variation_reference_attributes: list[dict[str, Any]] = []
+        self._category_resolution_context_cache: dict[str, dict[str, Any]] = {}
 
     def _reset_execution_state(self) -> None:
         """Reset per-run counters and artifacts."""
@@ -310,10 +311,20 @@ class PublishProductUseCase:
         log_category_resolution_observability(observability, logger)
 
     def _resolve_category_context(
-        self, products: list[Product | dict[str, Any]], category_name: str
+        self,
+        products: list[Product | dict[str, Any]],
+        category_name: str,
+        *,
+        use_cache: bool = True,
     ) -> dict[str, Any]:
         """Resolve category with deterministic strategy metadata."""
-        return _resolve_category_context_helper(self, products, category_name, logger)
+        return _resolve_category_context_helper(
+            self,
+            products,
+            category_name,
+            logger,
+            use_cache=use_cache,
+        )
 
     def _get_seller_capabilities_artifact(self) -> dict[str, Any]:
         """Read seller capability tags once and reuse within the use case instance."""
