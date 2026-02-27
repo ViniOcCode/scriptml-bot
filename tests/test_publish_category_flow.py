@@ -391,6 +391,93 @@ def test_execute_fails_when_titles_are_missing_for_predictor_validation() -> Non
     }
 
 
+def test_execute_recomputes_category_context_between_runs_after_unresolved() -> None:
+    resolver = _CategoryFlowResolver(find_result=None)
+    predictor_by_titles = {
+        ("Notebook Gamer",): None,
+        ("Livro Infantil",): "MLB5000",
+    }
+
+    def _predict(category_name: str, product_titles: list[str], site_id: str = "MLB") -> str | None:
+        resolver.predictor_calls.append((category_name, product_titles, site_id))
+        return predictor_by_titles.get(tuple(product_titles))
+
+    resolver.find_category_with_predictor = _predict  # type: ignore[method-assign]
+    use_case = PublishProductUseCase(
+        category_resolver=resolver,  # type: ignore[arg-type]
+        publisher=MagicMock(),
+        image_uploader=MagicMock(),
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+
+    def _publish(_product: Product, _category_id: str) -> bool:
+        use_case.published += 1
+        return True
+
+    use_case._publish_one = MagicMock(side_effect=_publish)  # type: ignore[method-assign]
+
+    first_result = use_case.execute([_build_product("Notebook Gamer")], "Nao encontrada")
+    second_result = use_case.execute([_build_product("Livro Infantil")], "Nao encontrada")
+
+    assert first_result["success"] is False
+    assert first_result["errors"] == ["Category not found: Nao encontrada"]
+    assert second_result["success"] is True
+    assert second_result["published"] == 1
+    assert use_case._publish_one.call_count == 1
+    assert use_case._publish_one.call_args.args[1] == "MLB5000"
+    assert second_result["item_results"][0]["resolution_strategy"] == "predictor_path_match"
+    assert second_result["item_results"][0]["category_resolved_id"] == "MLB5000"
+    assert resolver.predictor_calls == [
+        ("Nao encontrada", ["Notebook Gamer"], "MLB"),
+        ("Nao encontrada", ["Livro Infantil"], "MLB"),
+    ]
+
+
+def test_execute_recomputes_category_context_between_runs_after_resolved() -> None:
+    resolver = _CategoryFlowResolver(find_result=None)
+    predictor_by_titles = {
+        ("Notebook Gamer",): "MLB1000",
+        ("Livro Infantil",): None,
+    }
+
+    def _predict(category_name: str, product_titles: list[str], site_id: str = "MLB") -> str | None:
+        resolver.predictor_calls.append((category_name, product_titles, site_id))
+        return predictor_by_titles.get(tuple(product_titles))
+
+    resolver.find_category_with_predictor = _predict  # type: ignore[method-assign]
+    use_case = PublishProductUseCase(
+        category_resolver=resolver,  # type: ignore[arg-type]
+        publisher=MagicMock(),
+        image_uploader=MagicMock(),
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+
+    def _publish(_product: Product, _category_id: str) -> bool:
+        use_case.published += 1
+        return True
+
+    use_case._publish_one = MagicMock(side_effect=_publish)  # type: ignore[method-assign]
+
+    first_result = use_case.execute([_build_product("Notebook Gamer")], "Nao encontrada")
+    second_result = use_case.execute([_build_product("Livro Infantil")], "Nao encontrada")
+
+    assert first_result["success"] is True
+    assert first_result["published"] == 1
+    assert first_result["item_results"][0]["category_resolved_id"] == "MLB1000"
+    assert second_result["success"] is False
+    assert second_result["published"] == 0
+    assert second_result["errors"] == ["Category not found: Nao encontrada"]
+    assert second_result["item_results"][0]["resolution_strategy"] == "unresolved"
+    assert second_result["item_results"][0]["category_resolved_id"] is None
+    assert use_case._publish_one.call_count == 1
+    assert resolver.predictor_calls == [
+        ("Nao encontrada", ["Notebook Gamer"], "MLB"),
+        ("Nao encontrada", ["Livro Infantil"], "MLB"),
+    ]
+
+
 @pytest.mark.parametrize(
     (
         "category_input",
