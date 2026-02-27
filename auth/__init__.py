@@ -1,16 +1,15 @@
-# Compatibility shim: re-export everything from mercadolivre_upload.auth
-from mercadolivre_upload.auth import (
+"""Compatibility shim for legacy auth package imports."""
+
+from mercadolivre_upload.compat.auth_exports import (
     AuthError,
     AuthManager,
+    ConfigError,
     OAuthError,
     OAuthHandler,
+    TokenError,
     TokenExpiredError,
     TokenManager,
 )
-
-# Additional exports for test compatibility (from stub)
-from mercadolivre_upload.auth.exceptions import AuthError as ConfigError
-from mercadolivre_upload.auth.exceptions import TokenExpiredError as TokenError
 
 __all__ = [
     "AuthManager",

@@ -7,14 +7,46 @@ Uses configuration from config/fiscal_config.yaml as the single source of truth 
 """
 
 import logging
+import math
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
 import yaml
 
+from mercadolivre_upload.shared.utils.config_loader import FISCAL_CONFIG_PATH, load_yaml_config
+
 logger = logging.getLogger(__name__)
+
+
+def _is_blank_value(value: Any) -> bool:
+    """Return True when value is empty-like for fiscal payloads."""
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() in {"", "nan", "none", "null"}
+    return isinstance(value, float) and math.isnan(value)
+
+
+def _normalize_optional_text(value: Any) -> str | None:
+    """Normalize optional text fields, dropping empty-like values."""
+    if _is_blank_value(value):
+        return None
+    return str(value).strip()
+
+
+def _parse_float(value: Any) -> float | None:
+    """Parse numeric values from strings/numbers, returning None when empty."""
+    if _is_blank_value(value):
+        return None
+    if isinstance(value, (int, float)):
+        numeric = float(value)
+        return None if math.isnan(numeric) else numeric
+    try:
+        numeric = float(str(value).strip().replace(",", "."))
+    except ValueError:
+        return None
+    return None if math.isnan(numeric) else numeric
 
 
 def _load_fiscal_config() -> dict[str, Any]:
@@ -24,11 +56,9 @@ def _load_fiscal_config() -> dict[str, Any]:
         Full fiscal configuration dictionary
     """
     try:
-        config_path = Path("config/fiscal_config.yaml")
-        with open(config_path, encoding="utf-8") as f:
-            return yaml.safe_load(f) or {}
-    except Exception as e:
-        logger.warning(f"Could not load fiscal config: {e}. Using empty config.")
+        return load_yaml_config(FISCAL_CONFIG_PATH)
+    except (OSError, yaml.YAMLError) as exc:
+        logger.warning("Could not load fiscal config: %s. Using empty config.", exc)
         return {}
 
 
@@ -102,14 +132,14 @@ class FiscalData:
     med_anvisa_code: str | None = None  # ANVISA code or "ISENTO"
     med_exemption_reason: str | None = None  # Reason for exemption
 
-    # Weight information
-    net_weight: float | None = None  # Net weight in grams
-    gross_weight: float | None = None  # Gross weight in grams
+    # Weight information (ML fiscal API expects kilograms)
+    net_weight: float | None = None  # Net weight in kg
+    gross_weight: float | None = None  # Gross weight in kg
 
     # Additional attributes storage
     attributes: dict[str, Any] = field(default_factory=dict)
 
-    def __post_init__(self):  # type: ignore[no-untyped-def]
+    def __post_init__(self) -> None:
         """Normalize fiscal data using config defaults and value mappings."""
         # Load defaults from config (single source of truth)
         defaults = _load_fiscal_defaults()
@@ -164,48 +194,42 @@ class FiscalData:
                     self.origin_detail = ""
 
         # Sanitize CSOSN: extract numeric prefix from "102 - TRIBUTADA..."
-        if self.csosn:
-            csosn_str = str(self.csosn).strip()
+        csosn_str = _normalize_optional_text(self.csosn)
+        if csosn_str:
             csosn_match = re.match(r"^(\d+)", csosn_str)
             if csosn_match:
                 self.csosn = csosn_match.group(1)
-            elif csosn_str.lower() in ("nan", "none", ""):
+            else:
                 self.csosn = None
+        else:
+            self.csosn = None
 
         # Use config default for tax_payer_type if not set
         if not self.tax_payer_type:
             self.tax_payer_type = defaults.get("tax_payer_type", "")
 
         # Optional fields
-        if self.cest:
-            cest_str = str(self.cest).strip()
-            # Skip if CEST is empty, nan, or None
-            if cest_str and cest_str.lower() not in ("nan", "none", ""):
-                self.cest = cest_str
-            else:
-                self.cest = None
-        if self.cfop:
-            self.cfop = str(self.cfop).strip()
-        if self.fci:
-            self.fci = str(self.fci).strip()
-        if self.ex_tipi:
-            self.ex_tipi = str(self.ex_tipi).strip()
-        if self.ean:
-            self.ean = str(self.ean).strip()
-        if self.med_anvisa_code:
-            self.med_anvisa_code = str(self.med_anvisa_code).strip()
-        if self.med_exemption_reason:
-            self.med_exemption_reason = str(self.med_exemption_reason).strip()
+        self.cest = _normalize_optional_text(self.cest)
+        self.cfop = _normalize_optional_text(self.cfop)
+        self.fci = _normalize_optional_text(self.fci)
+        self.ex_tipi = _normalize_optional_text(self.ex_tipi)
+        self.ean = _normalize_optional_text(self.ean)
+        self.med_anvisa_code = _normalize_optional_text(self.med_anvisa_code)
+        self.med_exemption_reason = _normalize_optional_text(self.med_exemption_reason)
 
-        # Ensure cost is float
-        if isinstance(self.cost, str):
-            self.cost = float(self.cost.replace(",", "."))
+        if _is_blank_value(self.tax_rule_id):
+            self.tax_rule_id = None
+        elif isinstance(self.tax_rule_id, str):
+            try:
+                self.tax_rule_id = int(self.tax_rule_id.strip())
+            except ValueError:
+                self.tax_rule_id = None
 
-        # Ensure weights are floats
-        if self.net_weight is not None and isinstance(self.net_weight, str):
-            self.net_weight = float(self.net_weight.replace(",", "."))
-        if self.gross_weight is not None and isinstance(self.gross_weight, str):
-            self.gross_weight = float(self.gross_weight.replace(",", "."))
+        # Ensure cost/weights are numeric and MLB-safe
+        parsed_cost = _parse_float(self.cost)
+        self.cost = parsed_cost if parsed_cost is not None else 0.0
+        self.net_weight = _parse_float(self.net_weight)
+        self.gross_weight = _parse_float(self.gross_weight)
 
     def to_api_payload(self) -> dict[str, Any]:
         """Convert to Mercado Livre API payload format.
@@ -217,11 +241,12 @@ class FiscalData:
             "sku": self.sku,
             "title": self.title,
             "type": self.type,
-            "measurement_unit": self.measurement_unit,
-            "cost": float(self.cost) if self.cost else 0.0,
+            "cost": float(self.cost) if self.cost is not None else 0.0,
             "tax_payer_type": self.tax_payer_type,
             "tax_information": {},
         }
+        if self.measurement_unit:
+            payload["measurement_unit"] = self.measurement_unit
 
         tax_info: dict[str, Any] = payload["tax_information"]
 
@@ -255,11 +280,11 @@ class FiscalData:
         if self.med_exemption_reason:
             tax_info["med_exemption_reason"] = self.med_exemption_reason
 
-        # Weight fields in kg (convert from grams if needed)
+        # Weight fields are sent in kg as expected by MLB fiscal API
         if self.net_weight is not None:
-            tax_info["net_weight"] = self.net_weight / 1000.0  # Convert grams to kg
+            tax_info["net_weight"] = float(self.net_weight)
         if self.gross_weight is not None:
-            tax_info["gross_weight"] = self.gross_weight / 1000.0  # Convert grams to kg
+            tax_info["gross_weight"] = float(self.gross_weight)
 
         return payload
 
@@ -271,7 +296,6 @@ class FiscalData:
         - sku
         - title
         - type
-        - measurement_unit
         - cost
         - tax_information.ncm
         - tax_information.origin_type
@@ -281,8 +305,8 @@ class FiscalData:
             self.sku
             and self.title
             and self.type
-            and self.measurement_unit
             and self.cost is not None
+            and self.cost > 0
             and self.ncm
             and self.origin_type
             and self.origin_detail
@@ -302,9 +326,7 @@ class FiscalData:
             missing.append("title")
         if not self.type:
             missing.append("type")
-        if not self.measurement_unit:
-            missing.append("measurement_unit")
-        if self.cost is None or self.cost == 0:
+        if self.cost is None or self.cost <= 0 or math.isnan(self.cost):
             missing.append("cost")
         if not self.ncm:
             missing.append("ncm")

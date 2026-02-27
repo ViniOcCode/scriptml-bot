@@ -1,10 +1,12 @@
 """Attribute classification by behavior."""
 
 import logging
-from pathlib import Path
 from typing import Any
 
-from mercadolivre_upload.shared.utils.config_loader import load_yaml_config
+from mercadolivre_upload.shared.utils.config_loader import (
+    ATTRIBUTE_RULES_CONFIG_PATH,
+    load_yaml_config,
+)
 
 from .attribute_metadata import AttributeMeta
 
@@ -25,9 +27,7 @@ def _load_classification_config() -> dict[str, Any]:
         Dictionary with logistics_patterns and commercial_patterns
     """
     try:
-        config = load_yaml_config(
-            Path("config/attribute_rules.yaml"), Path("config/generic_mappings.yaml")
-        )
+        config = load_yaml_config(ATTRIBUTE_RULES_CONFIG_PATH)
 
         classification_config = config.get("attribute_classification", {})
 
@@ -104,7 +104,7 @@ class AttributeClassifier:
         Returns:
             Dictionary mapping classification to list of attributes
         """
-        result = {  # type: ignore[var-annotated]
+        result: dict[str, list[AttributeMeta]] = {
             CLASS_EDITORIAL: [],
             CLASS_TECHNICAL: [],
             CLASS_COMMERCIAL: [],
@@ -132,9 +132,3 @@ class AttributeClassifier:
     def is_technical(self, attr: AttributeMeta) -> bool:
         """Check if attribute is technical (specification)."""
         return self.classify(attr) == CLASS_TECHNICAL
-
-
-def classify_attribute(attr: AttributeMeta) -> str:
-    """Convenience function to classify a single attribute."""
-    classifier = AttributeClassifier()
-    return classifier.classify(attr)

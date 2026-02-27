@@ -67,7 +67,10 @@ class AttributeCache:
         expires_at = entry.get("_expires")
         if expires_at is None:
             return False
-        return time.time() >= expires_at  # type: ignore[no-any-return]
+        try:
+            return time.time() >= float(expires_at)
+        except (TypeError, ValueError):
+            return True
 
     def get(self, key: str, default: Any | None = None) -> Any | None:
         """Return cached value for key, or default if missing/expired."""
@@ -77,18 +80,23 @@ class AttributeCache:
                 self._save()
             return default
         entry = self._cache.get(key, {})
-        
+
         # Handle wrapped non-dict values (lists, strings, etc.)
         if "_value" in entry and len(entry) == 3:  # _value, _expires, _created
             return entry["_value"]
-        
+
         # Handle dict values (filter out internal keys)
         payload = {k: v for k, v in entry.items() if not k.startswith("_")}
         return payload if payload else default
 
     def get_many(self, keys: list[str]) -> dict[str, Any]:
         """Return cached values for multiple keys."""
-        return {key: self.get(key) for key in keys if self.get(key) is not None}
+        result: dict[str, Any] = {}
+        for key in keys:
+            value = self.get(key)
+            if value is not None:
+                result[key] = value
+        return result
 
     def set(self, key: str, value: Any, ttl: int | None = None) -> None:
         """Store a value in the cache with optional TTL."""

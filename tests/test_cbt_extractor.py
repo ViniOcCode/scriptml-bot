@@ -115,7 +115,7 @@ class TestCbtIdExtractor:
     def test_extract_api_fallback_handles_error(self):
         """Test that API fallback handles errors gracefully."""
         mock_client = Mock()
-        mock_client.get.side_effect = Exception("API error")
+        mock_client.get.side_effect = RuntimeError("API error")
 
         extractor = CbtIdExtractor(api_client=mock_client)
         result = {"id": "MLB1234567890"}

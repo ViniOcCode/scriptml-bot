@@ -22,6 +22,10 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+class SecureStorageError(Exception):
+    """Raised when secure storage cannot encrypt/decrypt token data safely."""
+
+
 class SecureTokenStorage:
     """Secure storage for OAuth tokens using AES-256 encryption.
 
@@ -64,7 +68,11 @@ class SecureTokenStorage:
         env_key = os.environ.get("ENCRYPTION_KEY")
         if env_key:
             logger.debug("Using encryption key from environment variable")
-            return env_key.encode()[:32].ljust(32, b"\0")
+            env_key_bytes = env_key.encode()
+            # Allow passing a full Fernet key directly.
+            if len(env_key_bytes) == 44:
+                return env_key_bytes
+            return env_key_bytes[:32].ljust(32, b"\0")
 
         # Priority 2: System keyring
         if KEYRING_AVAILABLE:
@@ -86,12 +94,31 @@ class SecureTokenStorage:
                 keyring.set_password(self.KEYRING_SERVICE, self.KEYRING_USERNAME, key.decode())
                 logger.info("Encryption key stored in system keyring")
             except Exception as e:
-                logger.warning(
-                    f"Failed to store key in keyring: {e}. "
-                    "Set ENCRYPTION_KEY environment variable for persistence."
-                )
+                raise SecureStorageError(
+                    "Failed to persist encryption key in keyring. "
+                    "Set ENCRYPTION_KEY or configure a working keyring backend."
+                ) from e
+        else:
+            raise SecureStorageError(
+                "Secure storage requires ENCRYPTION_KEY when keyring is unavailable."
+            )
 
         return key
+
+    def _get_or_create_salt(self) -> bytes:
+        """Get a stable KDF salt for non-Fernet keys."""
+        salt_path = self.token_path.parent / self.SALT_FILE
+        if salt_path.exists():
+            salt = salt_path.read_bytes()
+            if len(salt) == 16:
+                return salt
+            logger.warning(f"Invalid salt file size at {salt_path}; regenerating salt.")
+
+        salt = os.urandom(16)
+        salt_path.parent.mkdir(parents=True, exist_ok=True)
+        salt_path.write_bytes(salt)
+        os.chmod(salt_path, 0o600)
+        return salt
 
     def _get_fernet(self) -> Fernet:
         """Get or create Fernet cipher instance."""
@@ -107,7 +134,7 @@ class SecureTokenStorage:
                 kdf = PBKDF2HMAC(
                     algorithm=hashes.SHA256(),
                     length=32,
-                    salt=os.urandom(16),
+                    salt=self._get_or_create_salt(),
                     iterations=100000,
                 )
                 fernet_key = base64.urlsafe_b64encode(kdf.derive(key))
@@ -134,7 +161,7 @@ class SecureTokenStorage:
 
         except Exception as e:
             logger.error(f"Failed to save tokens: {e}")
-            raise
+            raise SecureStorageError("Unable to save encrypted token file") from e
 
     def load_tokens(self) -> dict[str, Any] | None:
         """Load and decrypt tokens from file.
@@ -155,8 +182,7 @@ class SecureTokenStorage:
 
         except Exception as e:
             logger.error(f"Failed to load tokens: {e}")
-            logger.warning("You may need to re-authenticate")
-            return None
+            raise SecureStorageError("Unable to load or decrypt secure token file") from e
 
     def delete_tokens(self) -> None:
         """Delete encrypted token file."""

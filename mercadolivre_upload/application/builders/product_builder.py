@@ -2,18 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
 from mercadolivre_upload.shared.utils.text_utils import PortugueseTextNormalizer
-
-
-@dataclass
-class MappingResult:
-    """Result of a field mapping operation."""
-
-    mapped: dict[str, Any]
-    errors: list[str]
 
 
 class SmartMapper:
@@ -126,7 +117,7 @@ class ProductBuilder:
             return errors
         try:
             mapped = self._mapper.map_product(data, source_type=source_type)
-        except Exception as exc:
+        except (RuntimeError, ValueError, TypeError, KeyError) as exc:
             return [str(exc)]
         missing = self._validate_required(mapped)
         return [f"Campos obrigatórios faltando: {', '.join(missing)}"] if missing else []

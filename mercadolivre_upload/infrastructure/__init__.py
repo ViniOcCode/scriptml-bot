@@ -1,7 +1,21 @@
 """Infrastructure layer for Mercado Livre Upload."""
 
+import importlib
+from typing import Any
+
 # Original exports
 from mercadolivre_upload.infrastructure.config import Settings, get_settings
+from mercadolivre_upload.infrastructure.internals.migration import (
+    Field,
+    FieldType,
+    SchemaVersion,
+    Version,
+)
+from mercadolivre_upload.infrastructure.internals.observability import (
+    BusinessMetricsCollector,
+    HourlyStats,
+    StructuredLogger,
+)
 from mercadolivre_upload.infrastructure.logging import get_logger, setup_logging
 from mercadolivre_upload.infrastructure.metrics import MetricsCollector, collector
 
@@ -10,41 +24,35 @@ from mercadolivre_upload.infrastructure.migration import (
     DEFAULT_SCHEMA_V1,
     DEFAULT_SCHEMA_V2,
     DEFAULT_SCHEMA_V3,
-    Field,
-    FieldType,
     Migration,
     MigrationManager,
     MigrationResult,
-    SchemaVersion,
     V1ToV2Migration,
     V2ToV3Migration,
-    Version,
     create_default_migration_manager,
 )
 
-# Observability exports
-from mercadolivre_upload.infrastructure.observability import (
-    Alert,
-    AlertLevel,
-    AlertManager,
-    BusinessMetricsCollector,
-    Dashboard,
-    HourlyStats,
-    ObservabilityManager,
-    StructuredLogger,
-    alert_manager,
-    business_metrics,
-    create_observability_manager,
-    log_product_upload,
-    observability_logger,
-)
+# Observability exports are loaded lazily via module __getattr__
+_OBSERVABILITY_EXPORTS = {
+    "Alert",
+    "AlertLevel",
+    "AlertManager",
+    "Dashboard",
+    "ObservabilityManager",
+    "alert_manager",
+    "business_metrics",
+    "create_observability_manager",
+    "log_product_upload",
+    "observability_logger",
+}
 
 # Ensure the cache subpackage is importable even if it's a shim we added at runtime
+AttributeCache: Any | None
 try:
     from .cache.attribute_cache import AttributeCache
-except Exception:  # noqa: BLE001
+except ImportError:
     # If the real cache package exists, it'll be imported; otherwise our shim handles it.
-    AttributeCache = None  # type: ignore[assignment, misc]
+    AttributeCache = None
 
 __all__ = [
     # Original
@@ -86,3 +94,13 @@ __all__ = [
 
 if AttributeCache is not None:
     __all__.append("AttributeCache")
+
+
+def __getattr__(name: str) -> Any:
+    """Lazily expose observability symbols to avoid import-time side effects."""
+    if name in _OBSERVABILITY_EXPORTS:
+        module = importlib.import_module("mercadolivre_upload.infrastructure.observability")
+        value = getattr(module, name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

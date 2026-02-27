@@ -1,131 +1,209 @@
-# Mercado Libre Bulk Upload (ml-upload)
+# Mercado Livre Bulk Upload (`ml-upload`)
 
-A CLI tool to prepare, validate and publish product listings to Mercado Libre from Excel spreadsheets. It handles image uploads, category prediction, attribute mapping, caching, and resilient HTTP uploads to the Mercado Libre API.
+CLI application for validating and publishing Mercado Livre listings from Excel spreadsheets, with category/attribute resolution, image handling, and report generation.
 
-## Quick start
+## What this app does
 
-- Install (development):
+- Reads `.xlsx` and `.xls` spreadsheets and normalizes common Portuguese/English headers.
+- Resolves categories and required metadata before publish.
+- Uploads product images (and optional clips in the publish flow).
+- Supports validation-only runs (`validate`) and publish runs (`upload`).
+- Writes machine-readable reports in `cache/reports/` for retry and auditing.
 
-  ```bash
-  uv pip install -e ".[dev]"
-  # or
-  uv pip install -r requirements.txt
-  ```
+## Requirements
 
-- CLI entrypoint (pyproject): `ml-upload` → `mercadolivre_upload.main:main`
+- Python `>=3.13`
+- [uv](https://docs.astral.sh/uv/)
 
-- Common commands:
+## Installation
 
-  ```bash
-  ml-upload --help
-  ml-upload upload <SPREADSHEET.xlsx> --images <dir> --category "<Cat>" [--dry-run]
-  ml-upload validate <SPREADSHEET.xlsx>
-  ml-upload doctor
-  ml-upload cache --help
-  ```
+```bash
+# Development install (same dependency set used by CI)
+uv pip install -e ".[dev]"
 
-## Authentication flow
-
-- OAuth2 authorization/code exchange is done manually outside the CLI.
-- Store the returned tokens in `tokens.json` (or set `MERCADO_LIVRE_TOKEN_PATH`).
-- The app uses `TokenManager` to auto-refresh access tokens when expired.
-- After refresh, always persist the newest `refresh_token` returned by Mercado Libre.
-
-## Build, test & lint
-
-- Full test suite:
-
-  ```bash
-  uv run pytest
-  ```
-
-- Run a single test / file:
-
-  ```bash
-  uv run pytest tests/test_cli.py -q
-  uv run pytest tests/test_spreadsheet_parser.py::test_parse_row -q
-  ```
-
-- Lint & format:
-
-  ```bash
-  uv run ruff check .
-  uv run black --check .
-  uv run mypy mercadolivre_upload/
-  uv run pre-commit run --all-files
-  ```
-
-## What this project does (overview)
-
-Implements a robust pipeline to publish products on Mercado Libre by transforming spreadsheets into canonical product payloads and publishing them via the Mercado Libre API. Key features:
-
-- Spreadsheet parsing with header detection and resilient row parsing.
-- Title-based and ML-based category prediction and attribute mapping.
-- Image uploading adapters and payload builders for Mercado Libre.
-- Resilient HTTP client with retry/backoff, rate limiting, and `Retry-After` handling.
-- Caching of category attributes and prediction results to speed repeated runs.
-
-## High-level architecture
-
-Clean Architecture with dependency inversion via Protocol ports. Main folders:
-
-```
-mercadolivre_upload/
-├── cli/              # Typer app + commands (upload, validate, doctor, cache)
-├── application/      # Use-cases (PublishProductUseCase), builders, validators
-│   ├── ports.py      # Protocol interfaces (ImageUploaderPort, ItemPublisherPort, …)
-│   └── builders/     # Payload builders: product, attribute, picture, shipping, variation
-├── domain/           # Pure models & rules — no I/O
-├── api/              # ML API clients (sync/async, adapters)
-├── adapters/         # I/O: spreadsheet parsers, image uploaders
-├── auth/             # OAuth, TokenManager, secure token storage helpers
-├── infrastructure/   # Cache, config (Pydantic), http (ResilientHTTPClient), logging
-├── shared/           # Shared utilities
-└── utils/            # Text normalization, error helpers
+# Runtime-only alternative
+uv pip install -r requirements.txt
 ```
 
-### Data flow
+Entrypoint: `ml-upload` -> `mercadolivre_upload.main:main`.
 
-Excel → `DynamicExcelParser` → canonical `Product` model → `PublishProductUseCase` (orchestrates `CategoryResolver`, `AttributeBuilderService`, payload `builders/`, `ImageUploaderPort`, `ItemPublisherPort`) → Mercado Libre API.
+## Quick workflow (recommended)
 
-### Ports & adapters
+### 1) Configure authentication
 
-`application/ports.py` defines Protocol interfaces (`ImageUploaderPort`, `ItemPublisherPort`, `ShippingResolverPort`, `ClipUploaderPort`); infrastructure/adapters implement these ports so use-cases stay infrastructure-agnostic.
+- Secure token storage is enabled by default.
+- Default token path behavior:
+  - if `MERCADO_LIVRE_TOKEN_PATH` is unset, runtime uses `tokens.json.enc`
+  - if `MERCADO_LIVRE_TOKEN_PATH=tokens.json`, runtime stores encrypted tokens in
+    `tokens.json.enc`
+- Persisted token payload stores only:
+  - `access_token`
+  - `refresh_token`
+  - `expires_at`
+- Plaintext mode is explicit opt-out only:
+  - `MERCADO_LIVRE_USE_SECURE_STORAGE=0`
+- Migration behavior:
+  - `MERCADO_LIVRE_AUTO_MIGRATE_TOKENS` defaults to enabled in secure mode
+  - existing plaintext `tokens.json` is migrated automatically to `.enc` (backup created as
+    `tokens.json.backup`)
+- Secure mode errors (key setup/decryption/migration) fail explicitly.
 
-### HTTP resilience
+#### External secret managers (1Password, Vault, etc.)
 
-`infrastructure/http.py` provides `ResilientHTTPClient` with named retry policies (`SAFE_RETRY`, `NO_RETRY`, `UPLOAD_RETRY`, `NON_IDEMPOTENT`), exponential backoff + jitter, `Retry-After` support, and a `TokenBucketLimiter` used by `MLApiClient`.
+No code changes are required. The app already reads sensitive values from environment variables, so
+you can inject them at runtime from your secret manager:
 
-### Caching
+- `MERCADO_LIVRE_CLIENT_ID`
+- `MERCADO_LIVRE_CLIENT_SECRET`
+- `MERCADO_LIVRE_REDIRECT_URI` (if not using the default callback URL)
+- `ENCRYPTION_KEY` (recommended for CI/non-interactive environments, required when keyring is
+  unavailable)
 
-- `AttributeCache` stores category attribute data under `cache/`.
-- `PredictionCache` uses SHA-256 hashed filenames for filesystem safety.
-- `CachedAttributeMapper` reads from `AttributeCache` and is passed cache instances from the CLI into use-cases.
+Example with 1Password CLI:
 
-### Configuration
+```bash
+# .env.1password (secret references, not plaintext)
+MERCADO_LIVRE_CLIENT_ID=op://<vault>/<item>/client_id
+MERCADO_LIVRE_CLIENT_SECRET=op://<vault>/<item>/client_secret
+ENCRYPTION_KEY=op://<vault>/<item>/encryption_key
+MERCADO_LIVRE_REDIRECT_URI=op://<vault>/<item>/redirect_uri
+```
 
-Uses `pydantic-settings` (`BaseSettings`) with `.env` support and YAML configuration files in `config/` (e.g., `attribute_rules.yaml`, `fiscal_config.yaml`, `shipping.yaml`, `header_detection.yaml`).
+```bash
+op run --env-file=.env.1password -- \
+  uv run ml-upload validate anuncios/2.xlsx -i anuncios/ -c "quadros decorativos"
+```
 
-## Conventions
+Important behavior to plan for:
 
-- Line length: 100, target Python: 3.13 (enforced by black + ruff + mypy).
-- Commit messages: `<type>(<scope>): <description>` (e.g., `fix(cli): corrected syntax`).
-- Centralized text normalization (`utils/text.py`) and validators (`domain/validation/`).
-- Async for I/O (image uploads and network calls use `aiohttp`); CPU-bound work remains synchronous.
-- Images layout: `anuncios/<SKU>/foto1.jpg` (SKU = folder name).
-- Secrets: tokens handled via `tokens.json` / keyring; do not commit secrets.
-- Tests: `tests/` with markers `unit`, `integration`, `slow`.
+- Tokens are still persisted locally in an encrypted file (`tokens.json.enc` by default).
+- `ENCRYPTION_KEY` must stay stable to decrypt existing token files.
+- Use `MERCADO_LIVRE_TOKEN_PATH` if you want a custom token-file location.
 
-## Project status (standardization summary)
+#### Access/refresh token lifecycle in secure mode
 
-- Standardization run completed phases 1, 2, 3, 4 and 6; Phase 5 (architecture violations refactor) was deferred and requires planned refactoring.
-- Production tests reported passing in the standardization run.
+- `get_access_token()` reads `access_token`.
+- If token is expired and `auto_refresh=True`, the app uses `refresh_token` to request new
+  credentials and persists updated `access_token`/`refresh_token`/`expires_at`.
+- If `refresh_token` is missing, refresh fails with an explicit auth error.
 
-## Contributing & notes
+### 2) Prepare input files
 
-- If changing public APIs (domain models, builders, use-cases), update tests and run the full test suite before proposing changes.
-- Always verify payloads against the Mercado Libre API documentation when adjusting builders or publishers.
+- Spreadsheet: `.xlsx` or `.xls`.
+- Images: the uploader searches `<images>/<SKU>/` first; if the SKU folder is missing, it falls back to the base images folder.
 
----
+Example layout:
 
-If something important was removed by this consolidation, please restore the original markdown files from your branch or commit history.
+```text
+anuncios/
+├── 12345/
+│   ├── foto1.jpg
+│   └── foto2.png
+└── 67890/
+    └── imagem-principal.jpg
+```
+
+### 3) Validate first
+
+```bash
+uv run ml-upload validate anuncios/2.xlsx -i anuncios/ -c "quadros decorativos"
+```
+
+### 4) Publish
+
+```bash
+uv run ml-upload upload anuncios/2.xlsx -i anuncios/ -c "quadros decorativos" --batch-size 5
+```
+
+### 5) Check generated reports
+
+Default report directory: `cache/reports/`
+
+- Validation run: `validation-summary-<timestamp>.json`
+- Upload run: `upload-summary-<timestamp>.json`
+- Upload failures (only when failures happen): `failed-items-<timestamp>.xlsx`
+
+## CLI reference
+
+```bash
+ml-upload --help
+```
+
+| Command | Purpose |
+| --- | --- |
+| `ml-upload upload` | Publish products |
+| `ml-upload validate` | Validate products without publishing |
+| `ml-upload auth` | Set/refresh token and inspect auth status |
+| `ml-upload cache clear` | Clear attribute cache |
+| `ml-upload cache status` | Show cache status |
+| `ml-upload doctor` | Run environment health checks |
+
+### Common options
+
+- `upload` and `validate`:
+  - `EXCEL` positional argument **or** `--excel/-e`
+  - `--images/-i`
+  - `--category/-c`
+  - `--batch-size` (default: `5`)
+  - `--report-dir` (default: `cache/reports`)
+  - `--detailed`
+- `upload` also supports `--verbose`.
+
+> `--category/-c` must be passed as an option (not as a positional argument).
+
+## Configuration
+
+Runtime YAML configuration is merged from:
+
+- `config/standard_fields.yaml`
+- `config/shipping.yaml`
+- `config/attribute_rules.yaml`
+
+Config ownership map:
+
+- `standard_fields.yaml`: base field mapping/defaults used by upload flow and `SmartAttributeMapper`.
+- `shipping.yaml`: shipping policy toggles consumed by `ShippingResolver`.
+- `attribute_rules.yaml`: attribute classification/sanitization/scoring rules.
+- `fiscal_config.yaml`: fiscal defaults and value mappings consumed by fiscal domain.
+
+Key behavior controlled there includes:
+
+- explicit/automatic field mapping rules
+- shipping and listing behavior
+- warning gates and rollout routing
+- defaults for sale terms, required core fields, and attribute handling
+
+## Architecture snapshot
+
+- CLI entrypoint: `ml-upload` -> `mercadolivre_upload.main:main` -> Typer app in `mercadolivre_upload/cli/app.py`.
+- Composition root for upload/validate wiring: `mercadolivre_upload/cli/commands/upload.py`.
+- Publish orchestration: `PublishProductUseCase` (`mercadolivre_upload/application/publish_product.py`).
+- Protocol ports (clean boundaries): `mercadolivre_upload/application/ports.py`.
+- Resilient HTTP client (retry/backoff/rate limit): `mercadolivre_upload/infrastructure/http.py`.
+- Caches:
+  - category attributes under `cache/categories/`
+  - category predictions under `cache/categories/predictions/`
+
+## Development commands
+
+```bash
+# Tests
+uv run pytest -q
+uv run pytest tests/test_cli.py -q
+
+# Lint, format, typing, security
+uv run ruff check .
+uv run black --check --diff .
+uv run mypy mercadolivre_upload/
+uv run bandit -q -c pyproject.toml -r mercadolivre_upload
+
+# Hooks
+uv run pre-commit run --all-files
+```
+
+## Troubleshooting
+
+- **"Arquivo nao encontrado"**: verify spreadsheet path and extension (`.xlsx`/`.xls`).
+- **No images uploaded for SKU**: confirm image names/extensions and folder structure under `--images`.
+- **Auth errors**: verify token file path, encryption key/keyring setup, and refresh token validity.
+- **Unexpected attribute validation failures**: inspect the generated JSON summary report and adjust mapping rules in `config/standard_fields.yaml` / `config/attribute_rules.yaml`.

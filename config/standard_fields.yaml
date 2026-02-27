@@ -11,6 +11,26 @@ min_confidence_threshold: 0.85
 # - fail: Stop processing with error
 on_unmatched: flag
 
+# Rollout safety controls for publish/validate hardening gates.
+# strict_warning_gate_mode: enforce | report_only
+strict_warning_gate_mode: "enforce"
+
+# Publish flow routing controls.
+flow_routing:
+  user_products_enabled: true
+  blocked_behavior: "fail" # fail | fallback_legacy
+
+# Image diagnostics gate controls.
+image_diagnostics:
+  gate_mode: "report_only" # enforce | report_only | disabled
+
+# API validation repair is permanently enabled in code (always-on).
+
+# Identifier fallback controls.
+identifier_policy:
+  auto_fill_empty_gtin_reason: true
+  default_empty_gtin_reason_value_name: "teste"
+
 # Core item fields that are ALWAYS required for every publication
 # These are set automatically if not found in Excel
 core_item_fields:
@@ -88,6 +108,7 @@ explicit_mappings:
     name: "Tempo de garantia"
     value_name: "30 dias"
     value_type: "number_unit"
+    unit_from_column: "Unidade de tempo de garantia"
     value_struct:
       number: 30
       unit: "dias"
@@ -95,6 +116,30 @@ explicit_mappings:
   "Tipo de anúncio":
     target: "listing_type_id"
     id: "gold_special"
+
+  "Tipo do anúncio":
+    target: "listing_type_id"
+    id: "gold_special"
+
+  "Tipo de anuncio":
+    target: "listing_type_id"
+    id: "gold_special"
+
+  "Tipo do anuncio":
+    target: "listing_type_id"
+    id: "gold_special"
+
+  "Armação":
+    target: "attribute"
+    id: "INCLUDES_FRAME"
+
+  "Vidro":
+    target: "attribute"
+    id: "WITH_GLASS"
+
+  "Frases":
+    target: "attribute"
+    id: "WITH_PHRASES"
 
   # Dimension fields - automatically append units
   "Largura (cm)":
@@ -123,7 +168,19 @@ explicit_mappings:
     target: "attribute"
     id: "GTIN"
 
+  "Código de produtos universal":
+    target: "attribute"
+    id: "GTIN"
+
+  "Codigo de produtos universal":
+    target: "attribute"
+    id: "GTIN"
+
   "ISBN":
+    target: "attribute"
+    id: "GTIN"
+
+  "IBSN":
     target: "attribute"
     id: "GTIN"
 
@@ -151,6 +208,26 @@ explicit_mappings:
   #"Capa do livro":
   #  target: "attribute"
   #  id: "BOOK_COVER"
+
+# Rule-based explicit mappings for normalized header variants
+auto_explicit_mappings:
+  - match:
+      contains:
+        - "peso fisico"
+      excludes:
+        - "peso liquido"
+        - "peso bruto"
+    mapping:
+      target: "attribute"
+      id: "WEIGHT"
+      unit_suffix: " kg"
+
+# Priority used when multiple GTIN columns are present in the same spreadsheet row.
+gtin_source_priority:
+  - "Código de produtos universal"
+  - "EAN / GTIN"
+  - "ISBN"
+  - "IBSN"
 
 # Standard product fields (same across all categories)
 standard_fields:

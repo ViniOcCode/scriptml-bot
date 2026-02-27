@@ -3,9 +3,12 @@
 import base64
 import hashlib
 import logging
+import tempfile
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
+
+import requests
 
 from mercadolivre_upload.api.client import MLApiClient
 
@@ -18,16 +21,20 @@ class ImageUploader:
     def __init__(
         self,
         api_client: MLApiClient | None = None,
-        base_path: str | Path = "/tmp/uploads",  # noqa: S108
+        base_path: str | Path | None = None,
     ):
         """Initialize uploader.
 
         Args:
             api_client: Optional ML API client
-            base_path: Base directory for product images
+            base_path: Base directory for product images.
+                Defaults to a uploads folder in the system temporary directory.
         """
         self.api_client = api_client
-        self.base_path = Path(base_path)
+        resolved_base_path = (
+            Path(base_path) if base_path is not None else Path(tempfile.gettempdir()) / "uploads"
+        )
+        self.base_path = resolved_base_path
         self.base_path.mkdir(parents=True, exist_ok=True)
         self._uploaded_images: list[dict[str, Any]] = []
         self._hash_cache: dict[str, dict[str, Any]] = {}
@@ -37,6 +44,148 @@ class ImageUploader:
         results = self.upload_batch([str(p) for p in self._iter_images_for_sku(sku)])
         # Filter by success AND valid url
         return [result["url"] for result in results if result.get("success") and result.get("url")]
+
+    @staticmethod
+    def _extract_diagnostic_detection_names(response: Any) -> list[str]:
+        """Extract unique diagnostic detection names from API response."""
+        if not isinstance(response, dict):
+            return []
+        diagnostics = response.get("diagnostics", [])
+        if not isinstance(diagnostics, list):
+            return []
+
+        names: list[str] = []
+        for diagnostic in diagnostics:
+            if not isinstance(diagnostic, dict):
+                continue
+            detections = diagnostic.get("detections", [])
+            if not isinstance(detections, list):
+                continue
+            for detection in detections:
+                if not isinstance(detection, dict):
+                    continue
+                name = detection.get("name")
+                if isinstance(name, str) and name and name not in names:
+                    names.append(name)
+        return names
+
+    def diagnose_images(
+        self,
+        *,
+        sku: str,
+        category_id: str,
+        title: str | None,
+        picture_urls: list[str],
+        picture_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Run optional diagnostics for uploaded images."""
+        artifact: dict[str, Any] = {
+            "status": "unavailable",
+            "available": False,
+            "checked": 0,
+            "issues": [],
+            "results": [],
+        }
+
+        if not picture_urls:
+            artifact["status"] = "skipped"
+            return artifact
+
+        if self.api_client is None:
+            message = f"Image diagnostics unavailable for {sku}: API client not configured."
+            logger.warning(message)
+            artifact["message"] = message
+            return artifact
+
+        diagnose_picture = getattr(self.api_client, "diagnose_picture", None)
+        if not callable(diagnose_picture):
+            message = f"Image diagnostics unavailable for {sku}: client has no diagnose_picture."
+            logger.warning(message)
+            artifact["message"] = message
+            return artifact
+
+        issues: list[str] = []
+        results: list[dict[str, Any]] = []
+        had_errors = False
+
+        for index, picture_url in enumerate(picture_urls):
+            picture_id = None
+            if isinstance(picture_ids, list) and index < len(picture_ids):
+                candidate = picture_ids[index]
+                if isinstance(candidate, str) and candidate:
+                    picture_id = candidate
+
+            context: dict[str, Any] = {
+                "category_id": category_id,
+                "picture_type": "thumbnail" if index == 0 else "other",
+            }
+            if isinstance(title, str) and title.strip():
+                context["title"] = title.strip()
+
+            diagnose_kwargs: dict[str, Any] = {"context": context}
+            if picture_id:
+                diagnose_kwargs["picture_id"] = picture_id
+            else:
+                diagnose_kwargs["picture_url"] = picture_url
+
+            try:
+                response = diagnose_picture(**diagnose_kwargs)
+            except Exception as exc:
+                status_code = getattr(getattr(exc, "response", None), "status_code", None)
+                if isinstance(status_code, int) and status_code in {404, 405, 501}:
+                    message = (
+                        "Image diagnostics endpoint unavailable "
+                        f"(status {status_code}) for {sku}; continuing without diagnostic gate."
+                    )
+                    logger.warning(message)
+                    artifact["message"] = message
+                    artifact["issues"] = issues
+                    artifact["results"] = results
+                    artifact["checked"] = len(results)
+                    return artifact
+
+                logger.warning(
+                    "Image diagnostics failed for %s picture %s: %s",
+                    sku,
+                    index + 1,
+                    exc,
+                )
+                had_errors = True
+                results.append(
+                    {
+                        "index": index,
+                        "picture_url": picture_url,
+                        "picture_id": picture_id,
+                        "status": "error",
+                        "error": str(exc),
+                    }
+                )
+                continue
+
+            detections = self._extract_diagnostic_detection_names(response)
+            if detections:
+                issues.append(f"Picture {index + 1} diagnostic issues: {', '.join(detections)}")
+            results.append(
+                {
+                    "index": index,
+                    "picture_url": picture_url,
+                    "picture_id": picture_id,
+                    "status": "issues" if detections else "ok",
+                    "detections": detections,
+                }
+            )
+
+        artifact["available"] = True
+        artifact["checked"] = len(results)
+        artifact["issues"] = issues
+        artifact["results"] = results
+        if issues:
+            artifact["status"] = "failed"
+        elif had_errors:
+            artifact["status"] = "partial"
+        else:
+            artifact["status"] = "passed"
+        return artifact
 
     def _iter_images_for_sku(self, sku: str) -> list[Path]:
         sku_folder = self.base_path / sku
@@ -70,9 +219,9 @@ class ImageUploader:
         return True
 
     def calculate_hash(self, path: str) -> str:
-        """Return MD5 hash of file contents for dedup."""
+        """Return SHA-256 hash of file contents for dedup."""
         content = Path(path).read_bytes()
-        return hashlib.md5(content).hexdigest()  # noqa: S324
+        return hashlib.sha256(content).hexdigest()
 
     def encode_base64(self, path: str) -> str:
         """Encode image file as base64 string."""
@@ -96,7 +245,13 @@ class ImageUploader:
                     "hash": image_hash,
                     "filename": Path(path).name,
                 }
-            except Exception as exc:
+            except (
+                requests.RequestException,
+                RuntimeError,
+                ValueError,
+                TypeError,
+                OSError,
+            ) as exc:
                 logger.error("API upload failed", exc_info=exc)
                 return {"success": False, "error": str(exc)}
         else:

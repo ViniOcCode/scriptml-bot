@@ -5,10 +5,12 @@ Tests for image_uploader.py - 100% coverage.
 import base64
 import hashlib
 import logging
+import tempfile
 from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
+import requests
 
 from mercadolivre_upload.adapters.image_uploader import ImageUploader
 
@@ -49,7 +51,7 @@ class TestImageUploader:
         """Test default initialization."""
         uploader = ImageUploader()
         assert uploader.api_client is None
-        assert uploader.base_path == Path("/tmp/uploads")
+        assert uploader.base_path == Path(tempfile.gettempdir()) / "uploads"
         assert uploader._uploaded_images == []
 
     def test_init_with_api_client(self):
@@ -115,8 +117,8 @@ class TestImageUploader:
         """Test hash calculation."""
         hash_result = uploader.calculate_hash(temp_image)
 
-        # Verify it's a valid MD5 hash (32 hex chars)
-        assert len(hash_result) == 32
+        # Verify it's a valid SHA-256 hash (64 hex chars)
+        assert len(hash_result) == 64
         assert all(c in "0123456789abcdef" for c in hash_result)
 
         # Verify consistency
@@ -129,7 +131,7 @@ class TestImageUploader:
         content = b"test content"
         img_path.write_bytes(content)
 
-        expected_hash = hashlib.md5(content).hexdigest()
+        expected_hash = hashlib.sha256(content).hexdigest()
         assert uploader.calculate_hash(str(img_path)) == expected_hash
 
     # ==================== encode_base64 ====================
@@ -188,7 +190,7 @@ class TestImageUploader:
     def test_upload_with_api_failure(self, uploader_with_api, temp_image, caplog):
         """Test upload with failed API call."""
         caplog.set_level(logging.ERROR)
-        uploader_with_api.api_client.upload_image.side_effect = Exception("API Error")
+        uploader_with_api.api_client.upload_image.side_effect = RuntimeError("API Error")
 
         result = uploader_with_api.upload(temp_image)
 
@@ -231,6 +233,51 @@ class TestImageUploader:
 
         results = uploader.upload_batch([str(img)], product_id="PROD123")
         assert results[0]["success"] is True
+
+    def test_diagnose_images_reports_detected_issues(self, uploader_with_api):
+        """Test diagnostics returns blocking issues when detections exist."""
+        uploader_with_api.api_client.diagnose_picture.return_value = {
+            "diagnostics": [
+                {
+                    "picture_type": "thumbnail",
+                    "action": "diagnostic",
+                    "detections": [{"name": "text_logo"}],
+                }
+            ]
+        }
+
+        result = uploader_with_api.diagnose_images(
+            sku="SKU-1",
+            category_id="MLB1",
+            title="Produto",
+            picture_urls=["https://example.com/image.jpg"],
+            picture_ids=["PIC-1"],
+        )
+
+        assert result["status"] == "failed"
+        assert result["available"] is True
+        assert result["issues"] == ["Picture 1 diagnostic issues: text_logo"]
+        uploader_with_api.api_client.diagnose_picture.assert_called_once()
+
+    def test_diagnose_images_marks_unavailable_on_404(self, uploader_with_api, caplog):
+        """Test diagnostics fallback when endpoint is unavailable."""
+        caplog.set_level(logging.WARNING)
+        error = requests.HTTPError("not found")
+        error.response = Mock(status_code=404)
+        uploader_with_api.api_client.diagnose_picture.side_effect = error
+
+        result = uploader_with_api.diagnose_images(
+            sku="SKU-1",
+            category_id="MLB1",
+            title="Produto",
+            picture_urls=["https://example.com/image.jpg"],
+            picture_ids=["PIC-1"],
+        )
+
+        assert result["status"] == "unavailable"
+        assert result["available"] is False
+        assert "endpoint unavailable" in result["message"].lower()
+        assert "endpoint unavailable" in caplog.text.lower()
 
     # ==================== get_uploaded_images ====================
 

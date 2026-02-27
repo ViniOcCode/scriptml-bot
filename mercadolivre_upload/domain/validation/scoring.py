@@ -2,10 +2,12 @@
 
 import logging
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
-from mercadolivre_upload.shared.utils.config_loader import load_yaml_config
+from mercadolivre_upload.shared.utils.config_loader import (
+    ATTRIBUTE_RULES_CONFIG_PATH,
+    load_yaml_config,
+)
 
 from ..attribute_classifier import (
     CLASS_LOGISTICS,
@@ -23,9 +25,7 @@ def _load_scoring_config() -> dict[str, Any]:
         Dictionary with scoring weights and thresholds
     """
     try:
-        config = load_yaml_config(
-            Path("config/attribute_rules.yaml"), Path("config/generic_mappings.yaml")
-        )
+        config = load_yaml_config(ATTRIBUTE_RULES_CONFIG_PATH)
 
         scoring_config = config.get("scoring", {})
 
@@ -35,7 +35,7 @@ def _load_scoring_config() -> dict[str, Any]:
             "bonuses": scoring_config.get("bonuses", {}),
             "min_score": scoring_config.get("min_score", 40),
         }
-    except Exception as e:
+    except (OSError, TypeError, ValueError) as e:
         logger.warning(f"Could not load scoring config: {e}. Using defaults.")
         return {
             "base_score": 100,
@@ -145,7 +145,7 @@ class SemanticScorer:
         if meta.allowed_values and safe_value not in meta.allowed_values:
             score -= penalties.get("value_not_allowed", 30)
             penalty = penalties.get("value_not_allowed", 30)
-            logger.warning(
+            logger.debug(
                 f"Value '{safe_value}' not in allowed values for {attr_id}, score -{penalty}"
             )
 
@@ -153,7 +153,7 @@ class SemanticScorer:
         if self._is_free_text(safe_value) and self._looks_out_of_context(safe_value, meta):
             score -= penalties.get("free_text_leakage", 40)
             penalty = penalties.get("free_text_leakage", 40)
-            logger.warning(f"Possible semantic leakage in {attr_id}, score -{penalty}")
+            logger.debug(f"Possible semantic leakage in {attr_id}, score -{penalty}")
 
         # Penalty: Aggressive logistics data
         if classification == CLASS_LOGISTICS:
