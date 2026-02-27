@@ -218,6 +218,20 @@ class TestAuthCommand:
         assert "user123" in result.output
 
     @patch("mercadolivre_upload.cli.AuthManager")
+    def test_auth_status_authenticated_without_user_id(self, mock_auth_class):
+        """Test auth status output when user_id is not available."""
+        mock_auth = MagicMock()
+        mock_auth_class.return_value = mock_auth
+
+        mock_auth.get_auth_status.return_value = {"authenticated": True, "user_id": None}
+
+        result = runner.invoke(app, ["auth"])
+
+        assert result.exit_code == 0
+        assert "Autenticado" in result.output
+        assert "None" not in result.output
+
+    @patch("mercadolivre_upload.cli.AuthManager")
     def test_auth_status_not_authenticated(self, mock_auth_class):
         """Test auth status when not authenticated."""
         mock_auth = MagicMock()
