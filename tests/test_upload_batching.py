@@ -191,7 +191,6 @@ def test_upload_batches_and_writes_reports(tmp_path, monkeypatch):
         images=images,
         category="MLB-CAT",
         cache_dir=tmp_path / "cache",
-        dry_run=False,
         detailed=False,
         batch_size=5,
         report_dir=report_dir,

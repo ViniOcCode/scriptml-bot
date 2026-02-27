@@ -54,7 +54,6 @@ class TestUploadCommand:
         assert kwargs["images"] == Path("imgs")
         assert kwargs["category"] == "test-category"
         assert kwargs["cache_dir"] == Path("cache/categories")
-        assert kwargs["dry_run"] is False
         assert kwargs["detailed"] is False
         assert kwargs["batch_size"] == 5
         assert kwargs["report_dir"] == Path("cache/reports")
@@ -77,7 +76,6 @@ class TestUploadCommand:
                     "imgs",
                     "--category",
                     "test-category",
-                    "--dry-run",
                     "--batch-size",
                     "3",
                     "--report-dir",
@@ -87,7 +85,6 @@ class TestUploadCommand:
 
         assert result.exit_code == 0
         kwargs = mock_upload_module.upload.call_args.kwargs
-        assert kwargs["dry_run"] is True
         assert kwargs["batch_size"] == 3
         assert kwargs["report_dir"] == Path("batch-reports")
 
