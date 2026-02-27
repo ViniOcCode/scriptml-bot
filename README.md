@@ -48,6 +48,38 @@ Entrypoint: `ml-upload` -> `mercadolivre_upload.main:main`.
     `tokens.json.backup`)
 - Secure mode errors (key setup/decryption/migration) fail explicitly.
 
+#### External secret managers (1Password, Vault, etc.)
+
+No code changes are required. The app already reads sensitive values from environment variables, so
+you can inject them at runtime from your secret manager:
+
+- `MERCADO_LIVRE_CLIENT_ID`
+- `MERCADO_LIVRE_CLIENT_SECRET`
+- `MERCADO_LIVRE_REDIRECT_URI` (if not using the default callback URL)
+- `ENCRYPTION_KEY` (recommended for CI/non-interactive environments, required when keyring is
+  unavailable)
+
+Example with 1Password CLI:
+
+```bash
+# .env.1password (secret references, not plaintext)
+MERCADO_LIVRE_CLIENT_ID=op://<vault>/<item>/client_id
+MERCADO_LIVRE_CLIENT_SECRET=op://<vault>/<item>/client_secret
+ENCRYPTION_KEY=op://<vault>/<item>/encryption_key
+MERCADO_LIVRE_REDIRECT_URI=op://<vault>/<item>/redirect_uri
+```
+
+```bash
+op run --env-file=.env.1password -- \
+  uv run ml-upload validate anuncios/2.xlsx -i anuncios/ -c "quadros decorativos"
+```
+
+Important behavior to plan for:
+
+- Tokens are still persisted locally in an encrypted file (`tokens.json.enc` by default).
+- `ENCRYPTION_KEY` must stay stable to decrypt existing token files.
+- Use `MERCADO_LIVRE_TOKEN_PATH` if you want a custom token-file location.
+
 #### Access/refresh token lifecycle in secure mode
 
 - `get_access_token()` reads `access_token`.
