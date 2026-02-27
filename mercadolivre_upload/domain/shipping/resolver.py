@@ -5,10 +5,12 @@ Uses configuration from config/shipping.yaml as the single source of truth.
 """
 
 import logging
-from pathlib import Path
 from typing import Any, Protocol
 
-from mercadolivre_upload.shared.utils.config_loader import load_merged_yaml_config
+from mercadolivre_upload.shared.utils.config_loader import (
+    SHIPPING_CONFIG_PATH,
+    load_yaml_config,
+)
 
 logger = logging.getLogger(__name__)
 _SUPPORTED_SHIPPING_MODES = {"me1", "me2", "custom", "not_specified"}
@@ -21,9 +23,7 @@ def _load_shipping_config() -> dict[str, Any]:
         Dictionary with mode_priority and default_mode
     """
     try:
-        config = load_merged_yaml_config(
-            Path("config/shipping.yaml"), fallback=Path("config/generic_mappings.yaml")
-        )
+        config = load_yaml_config(SHIPPING_CONFIG_PATH)
 
         shipping_config = config.get("shipping", {})
 

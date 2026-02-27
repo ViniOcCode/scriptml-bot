@@ -402,7 +402,8 @@ class AttributeMapper:
                                 col,
                                 target_attr_id,
                             )
-                            explicitly_mapped.add(col)
+                            # Keep column eligible for fuzzy fallback in categories where
+                            # explicit mapping points to an unsupported attribute id.
                             continue
 
                         # Sanitize numeric values: convert comma to dot for decimals

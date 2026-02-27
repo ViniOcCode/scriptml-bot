@@ -9,7 +9,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from mercadolivre_upload.shared.utils.config_loader import load_merged_yaml_config, load_yaml_config
+from mercadolivre_upload.shared.utils.config_loader import (
+    FISCAL_CONFIG_PATH,
+    STANDARD_FIELDS_CONFIG_PATH,
+    load_yaml_config,
+)
 from mercadolivre_upload.shared.utils.text_utils import PortugueseTextNormalizer
 
 logger = logging.getLogger(__name__)
@@ -49,7 +53,7 @@ class SmartAttributeMapper:
     def __init__(
         self,
         api_client: Any,  # MLApiClient
-        config_path: str = "config/standard_fields.yaml",
+        config_path: str = str(STANDARD_FIELDS_CONFIG_PATH),
         min_confidence: float = 0.85,
     ):
         """Initialize mapper.
@@ -72,18 +76,15 @@ class SmartAttributeMapper:
         """
         try:
             config_file = Path(config_path)
-            legacy_file = Path("config/generic_mappings.yaml")
-            config = load_merged_yaml_config(config_file, fallback=legacy_file)
+            config = load_yaml_config(config_file)
             if not config:
                 logger.warning(f"Config file not found: {config_path}")
                 return {}
             if config_file.exists():
                 logger.info(f"Loaded config from {config_file}")
-            elif legacy_file.exists():
-                logger.info(f"Loaded config from {legacy_file}")
 
             # Also load fiscal fields from fiscal_config.yaml
-            fiscal_config_path = Path("config/fiscal_config.yaml")
+            fiscal_config_path = FISCAL_CONFIG_PATH
             if fiscal_config_path.exists():
                 fiscal_config = load_yaml_config(fiscal_config_path)
                 # Merge fiscal fields into config

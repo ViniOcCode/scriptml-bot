@@ -2,10 +2,12 @@
 
 import logging
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
-from mercadolivre_upload.shared.utils.config_loader import load_yaml_config
+from mercadolivre_upload.shared.utils.config_loader import (
+    ATTRIBUTE_RULES_CONFIG_PATH,
+    load_yaml_config,
+)
 
 from ..attribute_classifier import (
     CLASS_LOGISTICS,
@@ -23,9 +25,7 @@ def _load_scoring_config() -> dict[str, Any]:
         Dictionary with scoring weights and thresholds
     """
     try:
-        config = load_yaml_config(
-            Path("config/attribute_rules.yaml"), Path("config/generic_mappings.yaml")
-        )
+        config = load_yaml_config(ATTRIBUTE_RULES_CONFIG_PATH)
 
         scoring_config = config.get("scoring", {})
 

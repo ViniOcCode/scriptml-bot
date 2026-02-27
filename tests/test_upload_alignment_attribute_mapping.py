@@ -295,3 +295,21 @@ def test_attribute_mapper_skips_unsupported_explicit_attribute() -> None:
     )
 
     assert mapped_attrs == []
+
+
+def test_attribute_mapper_falls_back_to_fuzzy_when_explicit_id_is_unsupported() -> None:
+    mapper = AttributeMapper(similarity_threshold=0.7)
+
+    mapped_attrs, _ = mapper.map_product_attributes(
+        {"Cor": "Azul"},
+        [{"id": "MAIN_COLOR", "name": "Cor"}],
+        explicit_mappings={
+            "Cor": {
+                "target": "attribute",
+                "id": "COLOR",
+            }
+        },
+        auto_explicit_mappings=[],
+    )
+
+    assert mapped_attrs == [{"id": "MAIN_COLOR", "name": "Cor", "value_name": "Azul"}]

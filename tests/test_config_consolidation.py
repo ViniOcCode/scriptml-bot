@@ -1,4 +1,4 @@
-"""Regression tests for split-vs-legacy config consolidation."""
+"""Regression tests for split config consolidation."""
 
 from __future__ import annotations
 
@@ -32,18 +32,18 @@ def test_load_merged_yaml_config_precedence(tmp_path: Path) -> None:
     config_dir = tmp_path / "config"
     config_dir.mkdir()
 
-    fallback = config_dir / "generic_mappings.yaml"
+    fallback = config_dir / "fiscal_config.yaml"
     primary_a = config_dir / "standard_fields.yaml"
     primary_b = config_dir / "shipping.yaml"
 
     _write(
         fallback,
         """
-        source: legacy
-        shared: legacy
-        legacy_only: true
+        source: fallback
+        shared: fallback
+        fallback_only: true
         nested:
-          owner: legacy
+          owner: fallback
         """,
     )
     _write(
@@ -67,7 +67,7 @@ def test_load_merged_yaml_config_precedence(tmp_path: Path) -> None:
 
     config = load_merged_yaml_config(primary_a, primary_b, fallback=fallback)
 
-    assert config["legacy_only"] is True
+    assert config["fallback_only"] is True
     assert config["split_a_only"] is True
     assert config["split_b_only"] is True
     assert config["source"] == "split-b"
@@ -75,15 +75,15 @@ def test_load_merged_yaml_config_precedence(tmp_path: Path) -> None:
     assert config["nested"] == {"owner": "split-a"}
 
 
-def test_upload_load_config_merges_split_and_legacy(monkeypatch, tmp_path: Path) -> None:
+def test_upload_load_config_merges_split_files_only(monkeypatch, tmp_path: Path) -> None:
     config_dir = tmp_path / "config"
     config_dir.mkdir()
 
     _write(
-        config_dir / "generic_mappings.yaml",
+        config_dir / "fiscal_config.yaml",
         """
-        legacy_only: true
-        shared: legacy
+        fiscal_only: true
+        shared: fiscal
         """,
     )
     _write(
@@ -100,34 +100,32 @@ def test_upload_load_config_merges_split_and_legacy(monkeypatch, tmp_path: Path)
         shared: shipping
         """,
     )
-    _write(config_dir / "attribute_rules.yaml", "attribute_only: true")
     _write(
-        config_dir / "header_detection.yaml",
+        config_dir / "attribute_rules.yaml",
         """
-        header_only: true
-        shared: header
+        attribute_only: true
+        shared: attribute
         """,
     )
 
     monkeypatch.chdir(tmp_path)
     config = upload_command.load_config()
 
-    assert config["legacy_only"] is True
+    assert "fiscal_only" not in config
     assert config["standard_only"] is True
     assert config["shipping_only"] is True
     assert config["attribute_only"] is True
-    assert config["header_only"] is True
-    assert config["shared"] == "header"
+    assert config["shared"] == "attribute"
 
 
-def test_shipping_config_uses_legacy_when_split_missing_section(
+def test_shipping_config_uses_defaults_when_split_missing_section(
     monkeypatch, tmp_path: Path
 ) -> None:
     config_dir = tmp_path / "config"
     config_dir.mkdir()
 
     _write(
-        config_dir / "generic_mappings.yaml",
+        config_dir / "standard_fields.yaml",
         """
         shipping:
           mode_priority: ["me1", "me2"]
@@ -144,27 +142,34 @@ def test_shipping_config_uses_legacy_when_split_missing_section(
         )
     )
 
-    assert resolver.mode_priority == ["me1", "me2"]
-    assert resolver.default_mode == "me1"
-    assert resolver.get_best_shipping_mode() == "me1"
+    assert resolver.mode_priority == ["me2", "me1"]
+    assert resolver.default_mode == "not_specified"
+    assert resolver.get_best_shipping_mode() == "me2"
 
 
-def test_sanitizer_uses_legacy_when_split_missing_keys(monkeypatch, tmp_path: Path) -> None:
+def test_sanitizer_uses_split_keys_only(monkeypatch, tmp_path: Path) -> None:
     config_dir = tmp_path / "config"
     config_dir.mkdir()
 
     _write(
-        config_dir / "generic_mappings.yaml",
+        config_dir / "standard_fields.yaml",
         """
         protected_attributes: ["GTIN", "ISBN"]
         similarity:
           redundancy_threshold: 0.77
         """,
     )
-    _write(config_dir / "attribute_rules.yaml", "attribute_classification: {}")
+    _write(
+        config_dir / "attribute_rules.yaml",
+        """
+        protected_attributes: ["HEIGHT"]
+        similarity:
+          redundancy_threshold: 0.91
+        """,
+    )
 
     monkeypatch.chdir(tmp_path)
     sanitizer = sanitizer_module.AttributeSanitizer()
 
-    assert sanitizer.protected_attributes == {"GTIN", "ISBN"}
-    assert sanitizer.similarity_threshold == 0.77
+    assert sanitizer.protected_attributes == {"HEIGHT"}
+    assert sanitizer.similarity_threshold == 0.91
