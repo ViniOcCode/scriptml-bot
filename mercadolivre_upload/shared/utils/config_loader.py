@@ -8,7 +8,17 @@ from typing import Any
 
 import yaml
 
-DEFAULT_LEGACY_CONFIG_PATH = Path("config/generic_mappings.yaml")
+# Canonical YAML config paths used by the publish/validate runtime flow.
+CONFIG_DIR = Path("config")
+STANDARD_FIELDS_CONFIG_PATH = CONFIG_DIR / "standard_fields.yaml"
+SHIPPING_CONFIG_PATH = CONFIG_DIR / "shipping.yaml"
+ATTRIBUTE_RULES_CONFIG_PATH = CONFIG_DIR / "attribute_rules.yaml"
+FISCAL_CONFIG_PATH = CONFIG_DIR / "fiscal_config.yaml"
+RUNTIME_SPLIT_CONFIG_PATHS = (
+    STANDARD_FIELDS_CONFIG_PATH,
+    SHIPPING_CONFIG_PATH,
+    ATTRIBUTE_RULES_CONFIG_PATH,
+)
 
 
 def load_yaml_config(primary: Path, fallback: Path | None = None) -> dict[str, Any]:
@@ -30,7 +40,7 @@ def load_yaml_config(primary: Path, fallback: Path | None = None) -> dict[str, A
 
 def load_merged_yaml_config(
     *primary_paths: Path,
-    fallback: Path | None = DEFAULT_LEGACY_CONFIG_PATH,
+    fallback: Path | None = None,
 ) -> dict[str, Any]:
     """Load YAML files and merge them with deterministic precedence.
 
