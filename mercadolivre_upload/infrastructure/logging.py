@@ -105,12 +105,15 @@ class ColoredFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         """Formata o registro com cores opcionais."""
-        if self.use_colors:
-            color = self.COLORS.get(record.levelname, self.COLORS["RESET"])
-            reset = self.COLORS["RESET"]
-            record.levelname = f"{color}{record.levelname}{reset}"
+        if not self.use_colors:
+            return super().format(record)
 
-        return super().format(record)
+        colored_record = logging.makeLogRecord(record.__dict__.copy())
+        color = self.COLORS.get(colored_record.levelname, self.COLORS["RESET"])
+        reset = self.COLORS["RESET"]
+        colored_record.levelname = f"{color}{colored_record.levelname}{reset}"
+
+        return super().format(colored_record)
 
 
 def setup_logging(
