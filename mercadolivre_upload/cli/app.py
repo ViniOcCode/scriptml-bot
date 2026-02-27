@@ -58,7 +58,6 @@ def upload(
     images: Path | None = typer.Option(None, "--images", "-i"),  # noqa: B008
     category: str | None = typer.Option(None, "--category", "-c"),  # noqa: B008
     verbose: bool = typer.Option(False, "--verbose", "-v"),  # noqa: B008
-    dry_run: bool = typer.Option(False, "--dry-run", "-n"),  # noqa: B008
     detailed: bool = typer.Option(False, "--detailed", "-d"),  # noqa: B008
     batch_size: int = typer.Option(5, "--batch-size", min=1),  # noqa: B008
     report_dir: Path = typer.Option(Path("cache/reports"), "--report-dir"),  # noqa: B008
@@ -79,7 +78,6 @@ def upload(
         images=images,
         category=category,
         cache_dir=Path("cache/categories"),
-        dry_run=dry_run,
         detailed=detailed,
         batch_size=batch_size,
         report_dir=report_dir,
