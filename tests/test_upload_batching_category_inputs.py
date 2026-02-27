@@ -1,4 +1,4 @@
-"""Tests for upload batching category input grouping."""
+"""Tests for upload batching row-category metadata behavior."""
 
 import json
 from unittest.mock import MagicMock
@@ -7,7 +7,9 @@ from mercadolivre_upload.cli.commands import upload as upload_cmd
 from tests.cli_report_builders import _build_rows, _make_item_result
 
 
-def test_upload_uses_mixed_row_level_category_inputs_and_default_fallback(tmp_path, monkeypatch):
+def test_upload_ignores_row_level_categories_for_execution_and_reports_metadata(
+    tmp_path, monkeypatch
+):
     rows = _build_rows(4)
     rows[0]["category_id"] = "MLB1000"
     rows[1]["my category"] = "MLB1000"
@@ -28,38 +30,20 @@ def test_upload_uses_mixed_row_level_category_inputs_and_default_fallback(tmp_pa
     monkeypatch.setattr(upload_cmd, "SpreadsheetParser", MagicMock(return_value=parser_instance))
 
     use_case_instance = MagicMock()
-    use_case_instance.execute.side_effect = [
-        {
-            "published": 2,
-            "failed": 0,
-            "errors": [],
-            "clips_uploaded": 0,
-            "clips_failed": 0,
-            "clips_details": [],
-            "item_results": [
-                _make_item_result(0, "SKU001", "success"),
-                _make_item_result(1, "SKU002", "success"),
-            ],
-        },
-        {
-            "published": 1,
-            "failed": 0,
-            "errors": [],
-            "clips_uploaded": 0,
-            "clips_failed": 0,
-            "clips_details": [],
-            "item_results": [_make_item_result(0, "SKU003", "success")],
-        },
-        {
-            "published": 1,
-            "failed": 0,
-            "errors": [],
-            "clips_uploaded": 0,
-            "clips_failed": 0,
-            "clips_details": [],
-            "item_results": [_make_item_result(0, "SKU004", "success")],
-        },
-    ]
+    use_case_instance.execute.return_value = {
+        "published": 4,
+        "failed": 0,
+        "errors": [],
+        "clips_uploaded": 0,
+        "clips_failed": 0,
+        "clips_details": [],
+        "item_results": [
+            _make_item_result(0, "SKU001", "success"),
+            _make_item_result(1, "SKU002", "success"),
+            _make_item_result(2, "SKU003", "success"),
+            _make_item_result(3, "SKU004", "success"),
+        ],
+    }
     monkeypatch.setattr(
         upload_cmd,
         "PublishProductUseCase",
@@ -93,16 +77,10 @@ def test_upload_uses_mixed_row_level_category_inputs_and_default_fallback(tmp_pa
         report_dir=report_dir,
     )
 
-    assert use_case_instance.execute.call_count == 3
-    first_products, first_category = use_case_instance.execute.call_args_list[0].args
-    second_products, second_category = use_case_instance.execute.call_args_list[1].args
-    third_products, third_category = use_case_instance.execute.call_args_list[2].args
-    assert first_products == rows[:2]
-    assert second_products == rows[2:3]
-    assert third_products == rows[3:]
-    assert first_category == "MLB1000"
-    assert second_category == "MLB2000"
-    assert third_category == "MLB-DEFAULT"
+    assert use_case_instance.execute.call_count == 1
+    batch_products, batch_category = use_case_instance.execute.call_args_list[0].args
+    assert batch_products == rows
+    assert batch_category == "MLB-DEFAULT"
 
     summary_files = list(report_dir.glob("upload-summary-*.json"))
     failed_files = list(report_dir.glob("failed-items-*.xlsx"))
@@ -116,8 +94,16 @@ def test_upload_uses_mixed_row_level_category_inputs_and_default_fallback(tmp_pa
     assert len(summary_data["items"]) == 4
     categories_by_sku = {item["sku"]: item["category_input"] for item in summary_data["items"]}
     assert categories_by_sku == {
+        "SKU001": "MLB-DEFAULT",
+        "SKU002": "MLB-DEFAULT",
+        "SKU003": "MLB-DEFAULT",
+        "SKU004": "MLB-DEFAULT",
+    }
+    assert summary_data["row_category_signals"] == {"detected": 3, "mismatched": 3}
+    row_metadata = {item["sku"]: item["row_category_detected"] for item in summary_data["items"]}
+    assert row_metadata == {
         "SKU001": "MLB1000",
         "SKU002": "MLB1000",
         "SKU003": "MLB2000",
-        "SKU004": "MLB-DEFAULT",
+        "SKU004": None,
     }

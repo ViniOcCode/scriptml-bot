@@ -238,7 +238,7 @@ def test_execute_returns_unresolved_when_predictor_does_not_match() -> None:
     assert result["success"] is False
     assert resolver.predictor_calls == [("Nao encontrada", ["Notebook Gamer"], "MLB")]
     assert resolver.find_calls == 0
-    assert resolver.title_calls == [("Notebook Gamer", "MLB")]
+    assert resolver.title_calls == []
     assert use_case._publish_one.call_count == 0
     item_result = result["item_results"][0]
     assert item_result["resolution_strategy"] == "unresolved"
@@ -255,7 +255,7 @@ def test_execute_returns_unresolved_when_predictor_does_not_match() -> None:
     }
 
 
-def test_execute_uses_bounded_title_predictor_fallback_when_path_match_fails() -> None:
+def test_execute_fails_when_predictor_path_match_fails_without_fallback() -> None:
     resolver = _CategoryFlowResolver(
         find_result=None,
         predictor_result=None,
@@ -278,20 +278,19 @@ def test_execute_uses_bounded_title_predictor_fallback_when_path_match_fails() -
 
     result = use_case.execute([_build_product("Notebook Gamer")], "Nao encontrada")
 
-    assert result["success"] is True
+    assert result["success"] is False
+    assert result["published"] == 0
+    assert result["errors"] == ["Category not found: Nao encontrada"]
     assert resolver.predictor_calls == [("Nao encontrada", ["Notebook Gamer"], "MLB")]
-    assert resolver.title_calls == [("Notebook Gamer", "MLB")]
-    assert use_case._publish_one.call_count == 1
-    assert use_case._publish_one.call_args.args[1] == "MLB4001"
+    assert resolver.title_calls == []
+    assert use_case._publish_one.call_count == 0
     item_result = result["item_results"][0]
-    assert item_result["resolution_strategy"] == "predictor_title_fallback"
-    assert item_result["category_resolved_id"] == "MLB4001"
+    assert item_result["resolution_strategy"] == "unresolved"
+    assert item_result["category_resolved_id"] is None
     assert item_result["category_resolution_decision"]["predictor_attempted"] is True
     assert item_result["category_resolution_decision"]["predictor_matched"] is False
     assert item_result["category_resolution_decision"]["fallback_attempted"] is True
-    assert (
-        item_result["category_resolution_decision"]["fallback_reason"] == "predictor_title_fallback"
-    )
+    assert item_result["category_resolution_decision"]["fallback_reason"] == "predictor_no_match"
 
 
 def test_execute_blocks_when_leaf_resolution_remains_non_leaf() -> None:
@@ -345,7 +344,7 @@ def test_execute_includes_unresolved_metadata_when_category_not_found() -> None:
     assert result["success"] is False
     assert result["errors"] == ["Category not found: Nao encontrada"]
     assert resolver.find_calls == 0
-    assert resolver.title_calls == [("Notebook Gamer", "MLB")]
+    assert resolver.title_calls == []
     item_result = result["item_results"][0]
     assert item_result["resolution_strategy"] == "unresolved"
     assert item_result["category_input"] == "Nao encontrada"
@@ -353,7 +352,7 @@ def test_execute_includes_unresolved_metadata_when_category_not_found() -> None:
     assert item_result["category_path"] == []
 
 
-def test_execute_records_name_match_fallback_observability_when_titles_are_missing() -> None:
+def test_execute_fails_when_titles_are_missing_for_predictor_validation() -> None:
     resolver = _CategoryFlowResolver(find_result="MLB3000")
     use_case = PublishProductUseCase(
         category_resolver=resolver,  # type: ignore[arg-type]
@@ -371,20 +370,24 @@ def test_execute_records_name_match_fallback_observability_when_titles_are_missi
 
     result = use_case.execute([_build_product("")], "Categoria sem titulo")
 
-    assert result["success"] is True
+    assert result["success"] is False
+    assert result["published"] == 0
+    assert result["errors"] == ["Category not found: Categoria sem titulo"]
+    assert resolver.find_calls == 0
     item_result = result["item_results"][0]
-    assert item_result["resolution_strategy"] == "name_match"
+    assert item_result["resolution_strategy"] == "unresolved"
+    assert item_result["category_resolved_id"] is None
     assert item_result["category_resolution_decision"]["predictor_attempted"] is False
     assert item_result["category_resolution_decision"]["fallback_attempted"] is True
     assert (
         item_result["category_resolution_decision"]["fallback_reason"]
         == "missing_titles_for_predictor"
     )
-    assert result["category_resolution"]["strategy_counts"]["name_match"] == 1
+    assert result["category_resolution"]["strategy_counts"]["unresolved"] == 1
     assert result["category_resolution"]["fallback_counts"] == {
         "attempted": 1,
-        "resolved": 1,
-        "unresolved": 0,
+        "resolved": 0,
+        "unresolved": 1,
     }
 
 
