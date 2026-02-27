@@ -441,7 +441,7 @@ def inject_optional_na_attributes(
         )
 
     if skipped:
-        logger.warning(
+        logger.debug(
             "Skipped N/A auto-fill for %s attributes on %s due non-eligible tags",
             len(skipped),
             sku,

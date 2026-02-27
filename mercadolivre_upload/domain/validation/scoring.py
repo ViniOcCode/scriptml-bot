@@ -145,7 +145,7 @@ class SemanticScorer:
         if meta.allowed_values and safe_value not in meta.allowed_values:
             score -= penalties.get("value_not_allowed", 30)
             penalty = penalties.get("value_not_allowed", 30)
-            logger.warning(
+            logger.debug(
                 f"Value '{safe_value}' not in allowed values for {attr_id}, score -{penalty}"
             )
 
@@ -153,7 +153,7 @@ class SemanticScorer:
         if self._is_free_text(safe_value) and self._looks_out_of_context(safe_value, meta):
             score -= penalties.get("free_text_leakage", 40)
             penalty = penalties.get("free_text_leakage", 40)
-            logger.warning(f"Possible semantic leakage in {attr_id}, score -{penalty}")
+            logger.debug(f"Possible semantic leakage in {attr_id}, score -{penalty}")
 
         # Penalty: Aggressive logistics data
         if classification == CLASS_LOGISTICS:
