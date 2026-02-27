@@ -260,7 +260,7 @@ def _classify_cause_action(*, cause: dict[str, Any], candidate_ids: set[str]) ->
 
 
 def _empty_action_counts() -> dict[str, int]:
-    return {action: 0 for action in _ACTIONS}
+    return dict.fromkeys(_ACTIONS, 0)
 
 
 def _analyze_validation_causes(
