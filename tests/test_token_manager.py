@@ -16,7 +16,6 @@ def _sample_tokens() -> dict[str, object]:
         "access_token": "access-token",
         "refresh_token": "refresh-token",
         "expires_at": 9_999_999_999,
-        "user_id": "123",
     }
 
 
@@ -39,10 +38,23 @@ def test_secure_storage_mode_saves_encrypted_tokens(tmp_path: Path, monkeypatch)
     assert reloaded.load_tokens() == tokens
 
 
+def test_secure_storage_default_is_enabled(tmp_path: Path, monkeypatch) -> None:
+    """Secure mode should be enabled when no explicit env flag is provided."""
+    monkeypatch.delenv("MERCADO_LIVRE_USE_SECURE_STORAGE", raising=False)
+    monkeypatch.setenv("ENCRYPTION_KEY", Fernet.generate_key().decode())
+    token_path = tmp_path / "tokens.json"
+
+    manager = TokenManager(token_path=str(token_path), oauth_handler=MagicMock())
+    manager.save_tokens(_sample_tokens())
+
+    assert (tmp_path / "tokens.json.enc").exists()
+    assert not token_path.exists()
+
+
 def test_secure_storage_auto_migration(tmp_path: Path, monkeypatch) -> None:
-    """Opt-in auto-migration should move plaintext tokens to encrypted storage."""
+    """Default auto-migration should move plaintext tokens to encrypted storage."""
     monkeypatch.setenv("MERCADO_LIVRE_USE_SECURE_STORAGE", "1")
-    monkeypatch.setenv("MERCADO_LIVRE_AUTO_MIGRATE_TOKENS", "1")
+    monkeypatch.delenv("MERCADO_LIVRE_AUTO_MIGRATE_TOKENS", raising=False)
     monkeypatch.setenv("ENCRYPTION_KEY", Fernet.generate_key().decode())
 
     token_path = tmp_path / "tokens.json"
@@ -57,6 +69,25 @@ def test_secure_storage_auto_migration(tmp_path: Path, monkeypatch) -> None:
     assert backup_path.exists()
     assert not token_path.exists()
     assert manager.load_tokens() == tokens
+
+
+def test_save_tokens_drops_non_persisted_fields(tmp_path: Path, monkeypatch) -> None:
+    """Only access/refresh/expires_at should be persisted."""
+    monkeypatch.setenv("MERCADO_LIVRE_USE_SECURE_STORAGE", "0")
+    token_path = tmp_path / "tokens.json"
+    manager = TokenManager(token_path=str(token_path), oauth_handler=MagicMock())
+    manager.save_tokens(
+        {
+            "access_token": "access-token",
+            "refresh_token": "refresh-token",
+            "expires_at": 9_999_999_999,
+            "user_id": "user-123",
+            "unexpected": "ignored",
+        }
+    )
+
+    persisted = json.loads(token_path.read_text(encoding="utf-8"))
+    assert persisted == _sample_tokens()
 
 
 def test_secure_storage_load_failure_is_explicit(tmp_path: Path, monkeypatch) -> None:
