@@ -46,18 +46,17 @@ from mercadolivre_upload.domain.category.resolver import CategoryResolver
 from mercadolivre_upload.domain.fiscal.service import FiscalService
 from mercadolivre_upload.domain.shipping.resolver import ShippingResolver
 from mercadolivre_upload.infrastructure.cache.attribute_cache import AttributeCache
-from mercadolivre_upload.shared.utils.config_loader import load_merged_yaml_config
+from mercadolivre_upload.shared.utils.config_loader import (
+    RUNTIME_SPLIT_CONFIG_PATHS,
+    load_merged_yaml_config,
+)
 
 logger = logging.getLogger(__name__)
 
 
 def load_config() -> dict[str, Any]:
     """Load runtime configs from split files."""
-    return load_merged_yaml_config(
-        Path("config/standard_fields.yaml"),
-        Path("config/shipping.yaml"),
-        Path("config/attribute_rules.yaml"),
-    )
+    return load_merged_yaml_config(*RUNTIME_SPLIT_CONFIG_PATHS)
 
 
 def build_publish_use_case(

@@ -2,10 +2,12 @@
 
 import logging
 from difflib import SequenceMatcher
-from pathlib import Path
 from typing import Any
 
-from mercadolivre_upload.shared.utils.config_loader import load_merged_yaml_config
+from mercadolivre_upload.shared.utils.config_loader import (
+    ATTRIBUTE_RULES_CONFIG_PATH,
+    load_yaml_config,
+)
 
 from ..attribute_classifier import CLASS_EDITORIAL, AttributeClassifier
 from .scoring import ScoredAttribute
@@ -14,11 +16,9 @@ logger = logging.getLogger(__name__)
 
 
 def _load_sanitizer_config() -> dict[str, Any]:
-    """Load sanitizer configuration with split-over-legacy precedence."""
+    """Load sanitizer configuration from split config file."""
     try:
-        return load_merged_yaml_config(
-            Path("config/attribute_rules.yaml"), fallback=Path("config/generic_mappings.yaml")
-        )
+        return load_yaml_config(ATTRIBUTE_RULES_CONFIG_PATH)
     except (OSError, TypeError, ValueError) as e:
         logger.warning(f"Could not load sanitizer config: {e}. Using defaults.")
         return {}

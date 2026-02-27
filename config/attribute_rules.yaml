@@ -104,3 +104,31 @@ similarity:
   # Threshold for considering values redundant (0.0 - 1.0)
   # Higher = more strict (only very similar values are considered redundant)
   redundancy_threshold: 0.9
+
+# =============================================================================
+# DIMENSION PATTERNS
+# =============================================================================
+dimension_patterns:
+  # Keywords that indicate dimension attributes
+  keywords:
+    - "height"
+    - "altura"
+    - "width"
+    - "largura"
+    - "length"
+    - "comprimento"
+    - "depth"
+    - "profundidade"
+  # Keywords that indicate weight attributes
+  weight_keywords:
+    - "weight"
+    - "peso"
+
+  # Regex patterns for dimension values
+  numeric_only: '^\\s*\\d+(?:[\\.,]\\d+)?\\s*$'
+  unit_marker: '\\b(cm|mm|m|in|pouce|polegadas|g|kg)\\b'
+
+  # Default unit to append when none specified
+  default_unit: "cm"
+  weight_default_unit: "kg"
+  package_weight_default_unit: "g"

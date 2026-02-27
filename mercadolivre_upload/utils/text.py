@@ -3,7 +3,6 @@
 Consolida todas as funções normalize() que estavam duplicadas em:
 - domain/text_normalizer.py
 - domain/attribute_mapper.py
-- adapters/spreadsheet/header_detector.py
 """
 
 import re
