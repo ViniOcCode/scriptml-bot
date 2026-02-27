@@ -109,6 +109,8 @@ IMPLEMENTED_ROUTING_FLOWS = {"legacy", "user_products"}
 STRICT_WARNING_GATE_MODES = {"enforce", "report_only"}
 IMAGE_DIAGNOSTIC_GATE_MODES = {"enforce", "report_only", "disabled"}
 FLOW_BLOCKED_BEHAVIORS = {"fail", "fallback_legacy"}
+API_VALIDATION_REPAIR_SCOPES = {"all", "validate_only", "upload_only"}
+API_VALIDATION_REPAIR_DETECT_MODES = {"conservative", "aggressive", "references_only"}
 DEFAULT_MANDATORY_FREE_SHIPPING_TAGS = {"mandatory_free_shipping"}
 SHIPPING_EXPLICIT_NON_BLOCKING_CODES = {
     "item.shipping.mandatory_free_shipping",
