@@ -7,6 +7,7 @@ from copy import deepcopy
 from typing import Any
 
 from mercadolivre_upload.application.builders.product_builder import ProductBuilder
+from mercadolivre_upload.domain.category.errors import CategoryApiUnavailableError
 from mercadolivre_upload.domain.fiscal.data import FiscalData
 from mercadolivre_upload.domain.product.model import Product
 from mercadolivre_upload.shared.utils.text_utils import PortugueseTextNormalizer
@@ -116,6 +117,8 @@ def _build_terminal_item_results(
     resolution_artifact: dict[str, Any],
     policy_artifact: dict[str, Any] | None = None,
     schema_contract_artifact: dict[str, Any] | None = None,
+    cause_codes: list[str] | None = None,
+    cause_taxonomy: list[dict[str, str]] | None = None,
 ) -> list[dict[str, Any]]:
     item_results: list[dict[str, Any]] = []
     for index, product in enumerate(products):
@@ -128,6 +131,17 @@ def _build_terminal_item_results(
             "error": error_msg,
             "rollout_flags": deepcopy(use_case._rollout_flags_artifact),
         }
+        if cause_codes:
+            item_result["cause_codes"] = list(dict.fromkeys(cause_codes))
+        if cause_taxonomy:
+            taxonomy = deepcopy(cause_taxonomy)
+            item_result["cause_taxonomy"] = taxonomy
+            item_result["validation_decision"] = build_validation_decision(
+                taxonomy=taxonomy,
+                validation_decision_mode=use_case.validation_decision_mode,
+                strict_warning_gate_mode=use_case.strict_warning_gate_mode,
+                strict_attribute_warnings=use_case.strict_attribute_warnings,
+            )
         item_result.update(flow_artifact)
         item_result.update(resolution_artifact)
         if policy_artifact:
@@ -149,6 +163,8 @@ def _build_terminal_result(
     flow_routing: dict[str, Any],
     policy_artifact: dict[str, Any] | None = None,
     schema_contract_artifact: dict[str, Any] | None = None,
+    cause_codes: list[str] | None = None,
+    cause_taxonomy: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     item_results = _build_terminal_item_results(
         use_case,
@@ -158,6 +174,8 @@ def _build_terminal_result(
         resolution_artifact=resolution_artifact,
         policy_artifact=policy_artifact,
         schema_contract_artifact=schema_contract_artifact,
+        cause_codes=cause_codes,
+        cause_taxonomy=cause_taxonomy,
     )
     return {
         "success": False,
@@ -341,36 +359,86 @@ def execute_publish(
             flow_routing=flow_routing,
         )
 
-    category_context = use_case._resolve_category_context(products, category_name)
-    resolution_artifact = use_case._build_resolution_artifact(category_context)
+    resolution_artifact = use_case._build_resolution_artifact(
+        {
+            "category_input": str(category_name).strip(),
+            "category_resolved_id": None,
+            "category_path": [],
+            "resolution_strategy": "unresolved",
+            "predictor_attempted": False,
+            "predictor_titles_count": 0,
+            "predictor_matched": False,
+            "fallback_attempted": True,
+            "fallback_reason": "infra_category_api_unavailable",
+        }
+    )
     category_resolution_artifact = use_case._build_category_resolution_observability(
         resolution_artifact,
         len(products),
     )
-    use_case._log_category_resolution_observability(category_resolution_artifact)
+    category_resolution_logged = False
+    policy_artifact: dict[str, Any] | None = None
+    schema_contract_artifact: dict[str, Any] | None = None
+    category_id = ""
 
-    category_input = resolution_artifact["category_input"]
-    category_id = resolution_artifact["category_resolved_id"]
-
-    if not category_id:
-        error_msg = f"Category not found: {category_input}"
-        logger.error(error_msg)
-        return _build_terminal_result(
-            use_case,
-            products=products,
-            error_msg=error_msg,
-            flow_artifact=flow_artifact,
-            resolution_artifact=resolution_artifact,
-            category_resolution_artifact=category_resolution_artifact,
-            flow_routing=flow_routing,
+    try:
+        category_context = use_case._resolve_category_context(products, category_name)
+        resolution_artifact = use_case._build_resolution_artifact(category_context)
+        category_resolution_artifact = use_case._build_category_resolution_observability(
+            resolution_artifact,
+            len(products),
         )
+        use_case._log_category_resolution_observability(category_resolution_artifact)
+        category_resolution_logged = True
 
-    policy_artifact = use_case._get_policy_artifact(category_id)
-    schema_contract_artifact = use_case._get_schema_contract_artifact(category_id)
+        category_input = resolution_artifact["category_input"]
+        category_id_or_none = resolution_artifact["category_resolved_id"]
 
-    is_listing_allowed = getattr(use_case.category_resolver, "is_listing_allowed", None)
-    if callable(is_listing_allowed) and not is_listing_allowed(category_id):
-        error_msg = f"Category not available for listing: {category_id}"
+        if not category_id_or_none:
+            error_msg = f"Category not found: {category_input}"
+            logger.error(error_msg)
+            return _build_terminal_result(
+                use_case,
+                products=products,
+                error_msg=error_msg,
+                flow_artifact=flow_artifact,
+                resolution_artifact=resolution_artifact,
+                category_resolution_artifact=category_resolution_artifact,
+                flow_routing=flow_routing,
+            )
+
+        category_id = category_id_or_none
+        policy_artifact = use_case._get_policy_artifact(category_id)
+        schema_contract_artifact = use_case._get_schema_contract_artifact(category_id)
+
+        is_listing_allowed = getattr(use_case.category_resolver, "is_listing_allowed", None)
+        if callable(is_listing_allowed) and not is_listing_allowed(category_id):
+            error_msg = f"Category not available for listing: {category_id}"
+            logger.error(error_msg)
+            return _build_terminal_result(
+                use_case,
+                products=products,
+                error_msg=error_msg,
+                flow_artifact=flow_artifact,
+                resolution_artifact=resolution_artifact,
+                category_resolution_artifact=category_resolution_artifact,
+                flow_routing=flow_routing,
+                policy_artifact=policy_artifact,
+                schema_contract_artifact=schema_contract_artifact,
+            )
+    except CategoryApiUnavailableError as error:
+        if not category_resolution_logged:
+            use_case._log_category_resolution_observability(category_resolution_artifact)
+        error_msg = f"Category API unavailable: {error}"
+        cause_code = "infra.category_api_unavailable"
+        cause_taxonomy = [
+            {
+                "type": "error",
+                "code": cause_code,
+                "message": error_msg,
+                "classification": "blocking_error",
+            }
+        ]
         logger.error(error_msg)
         return _build_terminal_result(
             use_case,
@@ -382,6 +450,8 @@ def execute_publish(
             flow_routing=flow_routing,
             policy_artifact=policy_artifact,
             schema_contract_artifact=schema_contract_artifact,
+            cause_codes=[cause_code],
+            cause_taxonomy=cause_taxonomy,
         )
 
     logger.info("Publishing %s products to category %s", len(products), category_id)

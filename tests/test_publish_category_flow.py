@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from mercadolivre_upload.application.publish_product import PublishProductUseCase
+from mercadolivre_upload.domain.category.errors import CategoryApiUnavailableError
 from mercadolivre_upload.domain.fiscal.data import FiscalData
 from mercadolivre_upload.domain.product.model import Product
 
@@ -157,6 +158,76 @@ def test_execute_fails_fast_when_category_is_not_allowed_for_listing() -> None:
     assert result["item_results"][0]["category_input"] == "MLB2000"
     assert result["item_results"][0]["category_resolved_id"] == "MLB2000"
     assert use_case._publish_one.call_count == 0
+
+
+def test_execute_returns_terminal_infra_error_when_category_api_is_unavailable() -> None:
+    resolver = _CategoryFlowResolver(
+        find_result=None,
+        predictor_result=None,
+    )
+
+    def _raise_infra_error(
+        _category_name: str,
+        _product_titles: list[str],
+        _site_id: str = "MLB",
+    ) -> str | None:
+        raise CategoryApiUnavailableError("Failed to predict category for 'Notebook': timeout")
+
+    resolver.find_category_with_predictor = _raise_infra_error  # type: ignore[method-assign]
+    use_case = PublishProductUseCase(
+        category_resolver=resolver,  # type: ignore[arg-type]
+        publisher=MagicMock(),
+        image_uploader=MagicMock(),
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+    use_case._publish_one = MagicMock(return_value=True)  # type: ignore[method-assign]
+
+    result = use_case.execute([_build_product("Notebook Gamer")], "Nao encontrada")
+
+    assert result["success"] is False
+    assert result["published"] == 0
+    assert result["failed"] == 1
+    assert result["errors"] == [
+        "Category API unavailable: Failed to predict category for 'Notebook': timeout"
+    ]
+    assert use_case._publish_one.call_count == 0
+    item_result = result["item_results"][0]
+    assert item_result["cause_codes"] == ["infra.category_api_unavailable"]
+    assert item_result["cause_taxonomy"][0]["classification"] == "blocking_error"
+    assert item_result["resolution_strategy"] == "unresolved"
+    assert item_result["category_resolution_decision"]["fallback_reason"] == (
+        "infra_category_api_unavailable"
+    )
+
+
+def test_execute_returns_terminal_infra_error_when_listing_check_fails() -> None:
+    resolver = _CategoryFlowResolver(
+        find_result=None,
+        predictor_result="MLB1000",
+    )
+
+    def _raise_listing_error(_category_id: str) -> bool:
+        raise CategoryApiUnavailableError("Failed to get category MLB1000: timeout")
+
+    resolver.is_listing_allowed = _raise_listing_error  # type: ignore[method-assign]
+    use_case = PublishProductUseCase(
+        category_resolver=resolver,  # type: ignore[arg-type]
+        publisher=MagicMock(),
+        image_uploader=MagicMock(),
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+    use_case._publish_one = MagicMock(return_value=True)  # type: ignore[method-assign]
+
+    result = use_case.execute([_build_product("Notebook Gamer")], "Nao encontrada")
+
+    assert result["success"] is False
+    assert result["errors"] == ["Category API unavailable: Failed to get category MLB1000: timeout"]
+    assert use_case._publish_one.call_count == 0
+    item_result = result["item_results"][0]
+    assert item_result["cause_codes"] == ["infra.category_api_unavailable"]
+    assert item_result["category_resolved_id"] == "MLB1000"
 
 
 def test_execute_accepts_direct_category_id_without_name_lookup() -> None:
