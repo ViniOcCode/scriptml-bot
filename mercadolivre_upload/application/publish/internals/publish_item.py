@@ -454,7 +454,7 @@ def publish_one(use_case: Any, product: Product, category_id: str) -> bool:
         use_case.failed += 1
         return False
     if diagnostic_issues:
-        logger.warning(
+        logger.info(
             "Image diagnostic issues detected for %s but gate mode '%s' allows continuation.",
             product.sku,
             use_case.image_diagnostics_gate_mode,
@@ -527,7 +527,7 @@ def publish_one(use_case: Any, product: Product, category_id: str) -> bool:
             if cause.get("classification") in {"critical_warning", "informational_warning"}
         ]
         if warnings:
-            logger.warning("Validation warnings for %s: %s", product.sku, warnings)
+            logger.debug("Validation warnings for %s: %s", product.sku, warnings)
 
         decision_action = str(use_case._current_validation_decision.get("action", "allow"))
         (

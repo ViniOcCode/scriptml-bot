@@ -140,7 +140,7 @@ class ValidationFeedback:
                 # Apply penalty based on error frequency
                 penalty = min(50, problematic[attr.id] * 10)
                 adjusted.score -= penalty
-                logger.warning(
+                logger.debug(
                     f"Feedback penalty for {attr.id}: -{penalty} "
                     f"({problematic[attr.id]} errors)"
                 )

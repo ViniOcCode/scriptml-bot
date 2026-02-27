@@ -275,7 +275,7 @@ def test_auto_na_policy_fills_optional_and_skips_non_eligible(caplog) -> None:  
     use_case.category_resolver = resolver
 
     item = {"attributes": [{"id": "BRAND", "value_name": "Marca X"}]}
-    with caplog.at_level("WARNING"):
+    with caplog.at_level("DEBUG"):
         conditional_required_ids = PublishProductUseCase._inject_optional_na_attributes(
             use_case,
             category_id="MLB123",
