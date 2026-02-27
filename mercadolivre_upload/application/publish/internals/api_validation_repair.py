@@ -185,25 +185,6 @@ def prune_item_attributes(
     }
 
 
-def is_api_validation_repair_active_for_operation(
-    *,
-    enabled: bool,
-    scope: str,
-    validation_only: bool,
-) -> bool:
-    """Return whether API-driven repair is active for current operation."""
-    if not enabled:
-        return False
-    normalized_scope = str(scope).strip().lower()
-    if normalized_scope == "all":
-        return True
-    if normalized_scope == "validate_only":
-        return validation_only
-    if normalized_scope == "upload_only":
-        return not validation_only
-    return False
-
-
 def _extract_cause_codes(causes: list[dict[str, Any]]) -> list[str]:
     codes: list[str] = []
     seen_codes: set[str] = set()
@@ -321,7 +302,6 @@ def validate_item_with_api_repair(
 
 __all__ = [
     "extract_prune_candidate_ids",
-    "is_api_validation_repair_active_for_operation",
     "prune_item_attributes",
     "validate_item_with_api_repair",
 ]

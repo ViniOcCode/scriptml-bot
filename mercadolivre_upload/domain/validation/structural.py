@@ -83,7 +83,7 @@ class StructuralValidator:
             if attr_id not in self.metadata:
                 msg = f"Unknown attribute '{attr_id}' - dropping"
                 warnings.append(msg)
-                logger.warning(msg)
+                logger.debug(msg)
                 continue
 
             meta = self.metadata[attr_id]
@@ -92,7 +92,7 @@ class StructuralValidator:
             if value and not meta.validate_type(value):
                 msg = f"Attribute '{attr_id}': value type mismatch ({meta.value_type}) - dropping"
                 warnings.append(msg)
-                logger.warning(msg)
+                logger.debug(msg)
                 continue
 
             # Value not in allowed domain
@@ -100,14 +100,14 @@ class StructuralValidator:
                 if drop_invalid_domain_values:
                     msg = f"Attribute '{attr_id}': value '{value}' not in allowed domain - dropping"
                     warnings.append(msg)
-                    logger.warning(msg)
+                    logger.debug(msg)
                     continue
                 msg = (
                     f"Attribute '{attr_id}': value '{value}' not in allowed domain - "
                     "keeping for API validation"
                 )
                 warnings.append(msg)
-                logger.warning(msg)
+                logger.debug(msg)
 
             # Exceeds max_length
             truncated_value = value
@@ -117,7 +117,7 @@ class StructuralValidator:
                     f"Attribute '{attr_id}': truncated from {len(value)} to {meta.max_length} chars"
                 )
                 warnings.append(msg)
-                logger.warning(msg)
+                logger.debug(msg)
 
             # Validation pattern
             if (
@@ -127,7 +127,7 @@ class StructuralValidator:
             ):
                 msg = f"Attribute '{attr_id}': value '{value}' doesn't match pattern - dropping"
                 warnings.append(msg)
-                logger.warning(msg)
+                logger.debug(msg)
                 continue
 
             # Keep the (possibly truncated) attribute
