@@ -102,9 +102,7 @@ class TokenManager:
             try:
                 self._secure_storage.save_tokens(tokens)
             except SecureStorageError as err:
-                raise AuthError(
-                    f"Secure token storage error at {self.token_path}: {err}"
-                ) from err
+                raise AuthError(f"Secure token storage error at {self.token_path}: {err}") from err
         else:
             with open(self.token_path, "w", encoding="utf-8") as f:
                 json.dump(tokens, f, indent=2)
