@@ -55,7 +55,11 @@ class AttributeBuilderService:
         self._cache_mapper = cache_mapper
 
     def build_attributes(
-        self, product: Product, category_id: str
+        self,
+        product: Product,
+        category_id: str,
+        *,
+        drop_invalid_domain_values: bool = True,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], list[str]]:
         """Build sanitized attributes using semantic validation pipeline.
 
@@ -174,7 +178,10 @@ class AttributeBuilderService:
         attrs_for_validation = self._deduplicate_attributes(attrs_for_validation, attr_metadata)
 
         validator = StructuralValidator(attr_metadata)
-        struct_result = validator.validate(attrs_for_validation)
+        struct_result = validator.validate(
+            attrs_for_validation,
+            drop_invalid_domain_values=drop_invalid_domain_values,
+        )
 
         warnings.extend(struct_result.warnings)
         if struct_result.blocking_errors:

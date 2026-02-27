@@ -58,6 +58,10 @@ def _merge_item_observability_fields(
     if isinstance(validation_decision, dict):
         target["validation_decision"] = dict(validation_decision)
 
+    validation_repair = source.get("validation_repair")
+    if isinstance(validation_repair, dict):
+        target["validation_repair"] = dict(validation_repair)
+
     merge_category_resolution_fields(target, source, category_input)
 
     category_resolution_decision = source.get("category_resolution_decision")

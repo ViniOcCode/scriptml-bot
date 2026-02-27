@@ -7,6 +7,10 @@ from typing import Any
 
 from mercadolivre_upload.domain.product.model import Product
 
+from .api_validation_repair import (
+    is_api_validation_repair_active_for_operation,
+    validate_item_with_api_repair,
+)
 from .decisioning import (
     build_validation_decision,
     extract_exception_error_detail,
@@ -170,25 +174,46 @@ def publish_one(use_case: Any, product: Product, category_id: str) -> bool:
     use_case._current_cause_codes = []
     use_case._current_cause_taxonomy = []
     use_case._current_validation_decision = {}
+    use_case._current_validation_repair = {}
     use_case._current_publish_category_id = category_id
     use_case._current_publish_sku = str(product.sku).strip() if product.sku else None
     use_case._current_variation_reference_attributes = []
     selected_flow = use_case._resolve_selected_flow()
+    api_repair_active = is_api_validation_repair_active_for_operation(
+        enabled=bool(use_case.api_validation_repair_enabled),
+        scope=str(use_case.api_validation_repair_scope),
+        validation_only=bool(use_case.validation_only),
+    )
     use_case._current_flow_artifact = {
         "payload_builder": (
             "user_products_pxv" if selected_flow == "user_products" else "legacy_variations"
         )
     }
 
-    (
-        ml_attributes,
-        sale_terms_from_mapping,
-        attr_warnings,
-        attr_errors,
-    ) = use_case._attribute_builder.build_attributes(
-        product,
-        category_id,
-    )
+    build_attributes = use_case._attribute_builder.build_attributes
+    try:
+        (
+            ml_attributes,
+            sale_terms_from_mapping,
+            attr_warnings,
+            attr_errors,
+        ) = build_attributes(
+            product,
+            category_id,
+            drop_invalid_domain_values=not api_repair_active,
+        )
+    except TypeError as error:
+        if "drop_invalid_domain_values" not in str(error):
+            raise
+        (
+            ml_attributes,
+            sale_terms_from_mapping,
+            attr_warnings,
+            attr_errors,
+        ) = build_attributes(
+            product,
+            category_id,
+        )
 
     if attr_errors:
         logger.error("Attribute validation failed for %s: %s", product.sku, attr_errors)
@@ -428,8 +453,35 @@ def publish_one(use_case: Any, product: Product, category_id: str) -> bool:
     logger.debug("Full item payload for %s: %s", product.sku, item)
 
     validation_result = None
+    required_attribute_ids: set[str] = set()
+    compiled_contract = use_case._get_schema_contract_compiled(category_id)
+    schema_contract = compiled_contract.get("schema_contract", {})
+    if isinstance(schema_contract, dict):
+        required_ids_raw = schema_contract.get("required_attribute_ids", [])
+        if isinstance(required_ids_raw, list):
+            required_attribute_ids.update(
+                {
+                    str(attr_id).strip().upper()
+                    for attr_id in required_ids_raw
+                    if isinstance(attr_id, str) and str(attr_id).strip()
+                }
+            )
+    if isinstance(conditional_required_ids, set):
+        required_attribute_ids.update(
+            {str(attr_id).strip().upper() for attr_id in conditional_required_ids if str(attr_id)}
+        )
+
     try:
-        validation = use_case._validate_item_for_flow(item=item, selected_flow=selected_flow)
+        if api_repair_active:
+            validation, validation_repair_artifact = validate_item_with_api_repair(
+                use_case=use_case,
+                item=item,
+                selected_flow=selected_flow,
+                required_attribute_ids=required_attribute_ids,
+            )
+            use_case._current_validation_repair = validation_repair_artifact
+        else:
+            validation = use_case._validate_item_for_flow(item=item, selected_flow=selected_flow)
         logger.debug("Validation response for %s: %s", product.sku, validation)
 
         raw_causes = validation.get("cause", [])

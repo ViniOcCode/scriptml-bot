@@ -1,6 +1,7 @@
 """Publish internals namespace."""
 
 __all__ = [
+    "api_validation_repair",
     "category",
     "constants",
     "decisioning",

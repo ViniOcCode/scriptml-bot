@@ -8,6 +8,8 @@ from typing import Any
 
 from ...shipping_policy import resolve_shipping_policy_settings
 from .constants import (
+    API_VALIDATION_REPAIR_DETECT_MODES,
+    API_VALIDATION_REPAIR_SCOPES,
     DEFAULT_MANDATORY_FREE_SHIPPING_TAGS,
     FLOW_BLOCKED_BEHAVIORS,
     IMAGE_DIAGNOSTIC_GATE_MODES,
@@ -31,6 +33,11 @@ class PublishRuntimeSettings:
     shipping_enforce_mandatory_free_shipping: bool
     shipping_allow_runtime_tag_overrides: bool
     shipping_allow_runtime_free_shipping_override: bool
+    api_validation_repair_enabled: bool
+    api_validation_repair_scope: str
+    api_validation_repair_max_attempts: int
+    api_validation_repair_detect_mode: str
+    api_validation_repair_drop_required_attributes: bool
 
 
 def resolve_runtime_settings(
@@ -133,6 +140,55 @@ def resolve_runtime_settings(
         default_mandatory_free_shipping_tags=DEFAULT_MANDATORY_FREE_SHIPPING_TAGS,
     )
 
+    repair_config = normalized_config.get("api_validation_repair", {})
+    if not isinstance(repair_config, dict):
+        repair_config = {}
+
+    api_validation_repair_enabled = bool(repair_config.get("enabled", True))
+
+    raw_repair_scope = repair_config.get("scope", "all")
+    if isinstance(raw_repair_scope, str) and raw_repair_scope.strip():
+        api_validation_repair_scope = raw_repair_scope.strip().lower()
+    else:
+        api_validation_repair_scope = "all"
+    if api_validation_repair_scope not in API_VALIDATION_REPAIR_SCOPES:
+        logger.warning(
+            "Invalid api_validation_repair scope '%s'; falling back to all.",
+            api_validation_repair_scope,
+        )
+        api_validation_repair_scope = "all"
+
+    raw_max_attempts = repair_config.get("max_attempts", 3)
+    try:
+        api_validation_repair_max_attempts = int(raw_max_attempts)
+    except (TypeError, ValueError):
+        logger.warning(
+            "Invalid api_validation_repair max_attempts '%s'; falling back to 3.",
+            raw_max_attempts,
+        )
+        api_validation_repair_max_attempts = 3
+    if api_validation_repair_max_attempts < 1:
+        logger.warning(
+            "api_validation_repair max_attempts must be >= 1; falling back to 3.",
+        )
+        api_validation_repair_max_attempts = 3
+
+    raw_detect_mode = repair_config.get("detect_mode", "conservative")
+    if isinstance(raw_detect_mode, str) and raw_detect_mode.strip():
+        api_validation_repair_detect_mode = raw_detect_mode.strip().lower()
+    else:
+        api_validation_repair_detect_mode = "conservative"
+    if api_validation_repair_detect_mode not in API_VALIDATION_REPAIR_DETECT_MODES:
+        logger.warning(
+            "Invalid api_validation_repair detect_mode '%s'; falling back to conservative.",
+            api_validation_repair_detect_mode,
+        )
+        api_validation_repair_detect_mode = "conservative"
+
+    api_validation_repair_drop_required_attributes = bool(
+        repair_config.get("drop_required_attributes", False)
+    )
+
     return PublishRuntimeSettings(
         strict_warning_gate_mode=strict_warning_mode,
         strict_attribute_warnings=strict_attribute_warnings,
@@ -150,5 +206,12 @@ def resolve_runtime_settings(
         shipping_allow_runtime_tag_overrides=shipping_policy_settings.allow_runtime_tag_overrides,
         shipping_allow_runtime_free_shipping_override=(
             shipping_policy_settings.allow_runtime_free_shipping_override
+        ),
+        api_validation_repair_enabled=api_validation_repair_enabled,
+        api_validation_repair_scope=api_validation_repair_scope,
+        api_validation_repair_max_attempts=api_validation_repair_max_attempts,
+        api_validation_repair_detect_mode=api_validation_repair_detect_mode,
+        api_validation_repair_drop_required_attributes=(
+            api_validation_repair_drop_required_attributes
         ),
     )

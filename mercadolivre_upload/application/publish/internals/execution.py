@@ -244,6 +244,8 @@ def _build_item_result(
         item_result["cause_taxonomy"] = deepcopy(use_case._current_cause_taxonomy)
     if use_case._current_validation_decision:
         item_result["validation_decision"] = deepcopy(use_case._current_validation_decision)
+    if use_case._current_validation_repair:
+        item_result["validation_repair"] = deepcopy(use_case._current_validation_repair)
     if isinstance(use_case._current_image_diagnostics, dict):
         item_result["image_diagnostics"] = deepcopy(use_case._current_image_diagnostics)
     if isinstance(use_case._current_shipping_policy, dict):
