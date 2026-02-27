@@ -275,7 +275,7 @@ def test_auto_na_policy_fills_optional_and_skips_non_eligible(caplog) -> None:  
     use_case.category_resolver = resolver
 
     item = {"attributes": [{"id": "BRAND", "value_name": "Marca X"}]}
-    with caplog.at_level("DEBUG"):
+    with caplog.at_level("INFO"):
         conditional_required_ids = PublishProductUseCase._inject_optional_na_attributes(
             use_case,
             category_id="MLB123",
@@ -294,7 +294,7 @@ def test_auto_na_policy_fills_optional_and_skips_non_eligible(caplog) -> None:  
     assert "ISBN" not in attrs_by_id
     assert resolver.last_conditional_payload is not None
     assert resolver.last_conditional_payload["description"] == {"plain_text": "Desc"}
-    assert any("Skipped N/A auto-fill" in message for message in caplog.messages)
+    assert any("Auto-filled N/A" in message for message in caplog.messages)
 
 
 def test_auto_na_policy_skips_non_fillable_tags() -> None:
