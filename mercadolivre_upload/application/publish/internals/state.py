@@ -118,5 +118,16 @@ def build_stats(use_case: Any) -> dict[str, Any]:
 def get_problematic_attributes(use_case: Any) -> dict[str, int]:
     """Return attributes that frequently cause errors."""
     if use_case.feedback:
-        return use_case.feedback.get_problematic_attributes()
+        raw_problematic = use_case.feedback.get_problematic_attributes()
+        if isinstance(raw_problematic, dict):
+            problematic: dict[str, int] = {}
+            for key, raw_value in raw_problematic.items():
+                key_text = str(key).strip()
+                if not key_text:
+                    continue
+                try:
+                    problematic[key_text] = int(raw_value)
+                except (TypeError, ValueError):
+                    continue
+            return problematic
     return {}
