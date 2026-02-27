@@ -96,7 +96,7 @@ ml-upload --help
   - `--batch-size` (default: `5`)
   - `--report-dir` (default: `cache/reports`)
   - `--detailed`
-- `upload` also supports `--dry-run` and `--verbose`.
+- `upload` also supports `--verbose`.
 
 > `--category/-c` must be passed as an option (not as a positional argument).
 

@@ -185,7 +185,6 @@ def upload(
     images: Path = typer.Option(..., "--images", "-i", help="Images directory"),  # noqa: B008
     category: str = typer.Option(..., "--category", "-c", help="Category name"),  # noqa: B008
     cache_dir: Path = typer.Option(Path("cache/categories"), "--cache-dir"),  # noqa: B008
-    dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Validate only"),  # noqa: B008
     detailed: bool = typer.Option(False, "--detailed", "-d"),  # noqa: B008
     batch_size: int = typer.Option(5, "--batch-size", min=1, help="Items per batch"),  # noqa: B008
     report_dir: Path = typer.Option(Path("cache/reports"), "--report-dir"),  # noqa: B008
@@ -207,17 +206,12 @@ def upload(
         images=images,
         cache_dir=cache_dir,
         config=config,
-        dry_run=dry_run,
     )
 
     # Parse products
     parser = SpreadsheetParser()
     products = parse_products_or_exit(parser=parser, excel=excel, err_console=err_console)
     console.print(f"Found {len(products)} products")
-
-    if dry_run:
-        console.print("[yellow]Dry run mode - validating only[/yellow]")
-        return
 
     _prime_category_resolution_context(use_case, products, category)
 

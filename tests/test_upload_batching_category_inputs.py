@@ -71,7 +71,6 @@ def test_upload_ignores_row_level_categories_for_execution_and_reports_metadata(
         images=images,
         category="MLB-DEFAULT",
         cache_dir=tmp_path / "cache",
-        dry_run=False,
         detailed=False,
         batch_size=5,
         report_dir=report_dir,
