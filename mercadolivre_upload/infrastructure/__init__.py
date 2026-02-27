@@ -1,5 +1,6 @@
 """Infrastructure layer for Mercado Livre Upload."""
 
+import importlib
 from typing import Any
 
 # Original exports
@@ -31,19 +32,19 @@ from mercadolivre_upload.infrastructure.migration import (
     create_default_migration_manager,
 )
 
-# Observability exports
-from mercadolivre_upload.infrastructure.observability import (
-    Alert,
-    AlertLevel,
-    AlertManager,
-    Dashboard,
-    ObservabilityManager,
-    alert_manager,
-    business_metrics,
-    create_observability_manager,
-    log_product_upload,
-    observability_logger,
-)
+# Observability exports are loaded lazily via module __getattr__
+_OBSERVABILITY_EXPORTS = {
+    "Alert",
+    "AlertLevel",
+    "AlertManager",
+    "Dashboard",
+    "ObservabilityManager",
+    "alert_manager",
+    "business_metrics",
+    "create_observability_manager",
+    "log_product_upload",
+    "observability_logger",
+}
 
 # Ensure the cache subpackage is importable even if it's a shim we added at runtime
 AttributeCache: Any | None
@@ -93,3 +94,13 @@ __all__ = [
 
 if AttributeCache is not None:
     __all__.append("AttributeCache")
+
+
+def __getattr__(name: str) -> Any:
+    """Lazily expose observability symbols to avoid import-time side effects."""
+    if name in _OBSERVABILITY_EXPORTS:
+        module = importlib.import_module("mercadolivre_upload.infrastructure.observability")
+        value = getattr(module, name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

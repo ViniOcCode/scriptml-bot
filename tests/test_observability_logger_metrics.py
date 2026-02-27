@@ -3,6 +3,7 @@
 import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -54,6 +55,23 @@ class TestStructuredLogger:
         assert logger.max_bytes == 1024
         assert logger.backup_count == 3
         assert temp_log_dir.exists()
+
+    def test_initialization_falls_back_to_console_when_file_handler_fails(self, temp_log_dir):
+        """Testa fallback para console-only quando handler de arquivo falha."""
+        with patch(
+            "mercadolivre_upload.infrastructure.internals.observability.logger."
+            "logging.handlers.RotatingFileHandler",
+            side_effect=PermissionError("denied"),
+        ):
+            logger = StructuredLogger(
+                name="test_fallback",
+                log_dir=temp_log_dir,
+                level="INFO",
+            )
+
+        assert logger._file_logging_enabled is False
+        assert logger._file_logging_error is not None
+        logger.info("console-only logging still works")
 
     def test_log_levels(self, structured_logger, temp_log_dir):
         """Testa diferentes níveis de log."""

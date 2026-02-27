@@ -50,7 +50,6 @@ class StructuredLogger:
         """
         self.name = name
         self.log_dir = Path(log_dir) if log_dir else DEFAULT_LOG_DIR
-        self.log_dir.mkdir(parents=True, exist_ok=True)
         self.max_bytes = max_bytes
         self.backup_count = backup_count
 
@@ -59,22 +58,34 @@ class StructuredLogger:
         self._logger.setLevel(getattr(logging, level.upper()))
         self._logger.handlers.clear()
 
-        # Handler para arquivo JSON
-        log_file = self.log_dir / f"{name}.jsonl"
-        file_handler = logging.handlers.RotatingFileHandler(
-            filename=log_file,
-            maxBytes=max_bytes,
-            backupCount=backup_count,
-            encoding="utf-8",
-        )
-        file_handler.setFormatter(JSONFormatter())
-        self._logger.addHandler(file_handler)
-
         # Handler para console (formato legível)
         console_handler = logging.StreamHandler(sys.stdout)
         console_format = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
         console_handler.setFormatter(logging.Formatter(console_format))
         self._logger.addHandler(console_handler)
+
+        self._file_logging_enabled = False
+        self._file_logging_error: str | None = None
+        try:
+            self.log_dir.mkdir(parents=True, exist_ok=True)
+            log_file = self.log_dir / f"{name}.jsonl"
+            file_handler = logging.handlers.RotatingFileHandler(
+                filename=log_file,
+                maxBytes=max_bytes,
+                backupCount=backup_count,
+                encoding="utf-8",
+            )
+            file_handler.setFormatter(JSONFormatter())
+            self._logger.addHandler(file_handler)
+            self._file_logging_enabled = True
+        except OSError as exc:
+            self._file_logging_error = str(exc)
+            self._logger.warning(
+                "StructuredLogger file handler disabled for %s (%s). "
+                "Continuing with console-only logging.",
+                name,
+                exc,
+            )
 
         # Contexto base
         self._base_context = {
