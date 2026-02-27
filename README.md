@@ -31,11 +31,29 @@ Entrypoint: `ml-upload` -> `mercadolivre_upload.main:main`.
 
 ### 1) Configure authentication
 
-- Place Mercado Livre tokens in `tokens.json` (or set `MERCADO_LIVRE_TOKEN_PATH`).
-- Optional secure token storage (opt-in):
-  - `MERCADO_LIVRE_USE_SECURE_STORAGE=1`
-  - `MERCADO_LIVRE_AUTO_MIGRATE_TOKENS=1` (migrates existing plaintext token file)
-  - secure mode errors (key setup/decryption/migration) fail explicitly
+- Secure token storage is enabled by default.
+- Default token path behavior:
+  - if `MERCADO_LIVRE_TOKEN_PATH` is unset, runtime uses `tokens.json.enc`
+  - if `MERCADO_LIVRE_TOKEN_PATH=tokens.json`, runtime stores encrypted tokens in
+    `tokens.json.enc`
+- Persisted token payload stores only:
+  - `access_token`
+  - `refresh_token`
+  - `expires_at`
+- Plaintext mode is explicit opt-out only:
+  - `MERCADO_LIVRE_USE_SECURE_STORAGE=0`
+- Migration behavior:
+  - `MERCADO_LIVRE_AUTO_MIGRATE_TOKENS` defaults to enabled in secure mode
+  - existing plaintext `tokens.json` is migrated automatically to `.enc` (backup created as
+    `tokens.json.backup`)
+- Secure mode errors (key setup/decryption/migration) fail explicitly.
+
+#### Access/refresh token lifecycle in secure mode
+
+- `get_access_token()` reads `access_token`.
+- If token is expired and `auto_refresh=True`, the app uses `refresh_token` to request new
+  credentials and persists updated `access_token`/`refresh_token`/`expires_at`.
+- If `refresh_token` is missing, refresh fails with an explicit auth error.
 
 ### 2) Prepare input files
 
@@ -155,5 +173,5 @@ uv run pre-commit run --all-files
 
 - **"Arquivo nao encontrado"**: verify spreadsheet path and extension (`.xlsx`/`.xls`).
 - **No images uploaded for SKU**: confirm image names/extensions and folder structure under `--images`.
-- **Auth errors**: verify token file path and refresh token validity.
+- **Auth errors**: verify token file path, encryption key/keyring setup, and refresh token validity.
 - **Unexpected attribute validation failures**: inspect the generated JSON summary report and adjust mapping rules in `config/standard_fields.yaml` / `config/attribute_rules.yaml`.
