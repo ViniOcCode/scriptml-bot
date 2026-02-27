@@ -8,7 +8,7 @@ from typing import Any
 
 from .exceptions import AuthError, TokenExpiredError
 from .oauth import OAuthHandler
-from .secure_storage import SecureTokenStorage, migrate_plaintext_tokens
+from .secure_storage import SecureStorageError, SecureTokenStorage, migrate_plaintext_tokens
 
 
 def _is_truthy_env(value: str | None) -> bool:
@@ -56,7 +56,12 @@ class TokenManager:
             )
             auto_migrate = _is_truthy_env(os.getenv("MERCADO_LIVRE_AUTO_MIGRATE_TOKENS"))
             if auto_migrate and self.token_path.exists() and not secure_path.exists():
-                migrate_plaintext_tokens(self.token_path, secure_path)
+                migrated = migrate_plaintext_tokens(self.token_path, secure_path)
+                if not migrated:
+                    raise AuthError(
+                        f"Secure token migration failed for {self.token_path}. "
+                        "Fix token file contents or disable auto-migration."
+                    )
 
             self.token_path = secure_path
             self._secure_storage = SecureTokenStorage(token_path=self.token_path)
@@ -73,7 +78,12 @@ class TokenManager:
         """
         if self._tokens is None:
             if self._secure_storage is not None:
-                loaded = self._secure_storage.load_tokens()
+                try:
+                    loaded = self._secure_storage.load_tokens()
+                except SecureStorageError as err:
+                    raise AuthError(
+                        f"Secure token storage error at {self.token_path}: {err}"
+                    ) from err
                 if loaded is None:
                     raise FileNotFoundError(f"Token file not found: {self.token_path}")
                 self._tokens = loaded
@@ -89,7 +99,12 @@ class TokenManager:
             tokens: Dictionary containing access_token, refresh_token, and expires_at
         """
         if self._secure_storage is not None:
-            self._secure_storage.save_tokens(tokens)
+            try:
+                self._secure_storage.save_tokens(tokens)
+            except SecureStorageError as err:
+                raise AuthError(
+                    f"Secure token storage error at {self.token_path}: {err}"
+                ) from err
         else:
             with open(self.token_path, "w", encoding="utf-8") as f:
                 json.dump(tokens, f, indent=2)
