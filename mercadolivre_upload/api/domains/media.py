@@ -17,12 +17,28 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+IMAGE_MIME_BY_SUFFIX = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+}
+
+
+def _resolve_image_mime_type(path: Path) -> str:
+    """Resolve deterministic MIME type for image uploads."""
+    mime_type, _ = mimetypes.guess_type(str(path))
+    if isinstance(mime_type, str) and mime_type.startswith("image/"):
+        return mime_type
+    return IMAGE_MIME_BY_SUFFIX.get(path.suffix.lower(), "image/jpeg")
+
 
 def upload_image(client: "MLApiClient", image_path: str) -> dict[str, Any]:
     """Upload an image with retry on transient errors."""
     path = Path(image_path)
     with open(path, "rb") as file_handle:
-        files = {"file": (path.name, file_handle, "image/jpeg")}
+        files = {"file": (path.name, file_handle, _resolve_image_mime_type(path))}
         url = f"{client.base_url}/pictures/items/upload"
         response = client.http.post(
             url,
