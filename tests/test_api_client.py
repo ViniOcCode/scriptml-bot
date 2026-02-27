@@ -297,6 +297,24 @@ def test_upload_image_normalizes_url_from_variations(tmp_path):
     assert result["url"] == "https://img.example/test.jpg"
 
 
+def test_upload_image_uses_mime_type_from_extension(tmp_path):
+    image_path = tmp_path / "image.png"
+    image_path.write_bytes(b"fake")
+
+    response = MagicMock(spec=requests.Response)
+    response.json.return_value = {"id": "123", "secure_url": "https://img.example/test.png"}
+
+    http_client = MagicMock()
+    http_client.post.return_value = response
+
+    client = MLApiClient(http_client=http_client)
+    client.upload_image(str(image_path))
+
+    _, kwargs = http_client.post.call_args
+    file_tuple = kwargs["files"]["file"]
+    assert file_tuple[2] == "image/png"
+
+
 def test_diagnose_picture_posts_picture_url_payload():
     http_client = MagicMock()
     client = MLApiClient(http_client=http_client)
