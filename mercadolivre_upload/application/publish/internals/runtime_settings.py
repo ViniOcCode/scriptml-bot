@@ -31,11 +31,6 @@ class PublishRuntimeSettings:
     shipping_enforce_mandatory_free_shipping: bool
     shipping_allow_runtime_tag_overrides: bool
     shipping_allow_runtime_free_shipping_override: bool
-    api_validation_repair_enabled: bool
-    api_validation_repair_scope: str
-    api_validation_repair_max_attempts: int
-    api_validation_repair_detect_mode: str
-    api_validation_repair_drop_required_attributes: bool
 
 
 def resolve_runtime_settings(
@@ -138,20 +133,6 @@ def resolve_runtime_settings(
         default_mandatory_free_shipping_tags=DEFAULT_MANDATORY_FREE_SHIPPING_TAGS,
     )
 
-    raw_repair_config = normalized_config.get("api_validation_repair")
-    if raw_repair_config not in (None, {}, []):
-        logger.info(
-            "api_validation_repair config is deprecated and ignored; "
-            "API-driven validation repair is permanently enabled."
-        )
-
-    # Permanent defaults: keep runtime fields for report/backward-compat stability.
-    api_validation_repair_enabled = True
-    api_validation_repair_scope = "all"
-    api_validation_repair_max_attempts = 3
-    api_validation_repair_detect_mode = "conservative"
-    api_validation_repair_drop_required_attributes = False
-
     return PublishRuntimeSettings(
         strict_warning_gate_mode=strict_warning_mode,
         strict_attribute_warnings=strict_attribute_warnings,
@@ -169,12 +150,5 @@ def resolve_runtime_settings(
         shipping_allow_runtime_tag_overrides=shipping_policy_settings.allow_runtime_tag_overrides,
         shipping_allow_runtime_free_shipping_override=(
             shipping_policy_settings.allow_runtime_free_shipping_override
-        ),
-        api_validation_repair_enabled=api_validation_repair_enabled,
-        api_validation_repair_scope=api_validation_repair_scope,
-        api_validation_repair_max_attempts=api_validation_repair_max_attempts,
-        api_validation_repair_detect_mode=api_validation_repair_detect_mode,
-        api_validation_repair_drop_required_attributes=(
-            api_validation_repair_drop_required_attributes
         ),
     )

@@ -21,6 +21,8 @@ def test_validation_only_mode_normalizes_gtin_and_surfaces_identifier_gate() -> 
             self,
             _product: Product,
             _category_id: str,
+            *,
+            drop_invalid_domain_values: bool = True,
         ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], list[str]]:
             return ([{"id": "GTIN", "value_name": " 1234-5678 9012 "}], [], [], [])
 
@@ -63,6 +65,8 @@ def test_validation_only_mode_does_not_require_empty_gtin_reason_when_gtin_prese
             self,
             _product: Product,
             _category_id: str,
+            *,
+            drop_invalid_domain_values: bool = True,
         ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], list[str]]:
             return ([{"id": "GTIN", "value_name": "1234567890123"}], [], [], [])
 
@@ -106,6 +110,8 @@ def test_validation_only_mode_accepts_valid_empty_gtin_reason_when_gtin_required
             self,
             _product: Product,
             _category_id: str,
+            *,
+            drop_invalid_domain_values: bool = True,
         ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], list[str]]:
             return (
                 [{"id": "EMPTY_GTIN_REASON", "value_id": "17055158", "value_name": "Outro motivo"}],
@@ -169,6 +175,8 @@ def test_validation_only_mode_auto_fills_default_empty_gtin_reason_when_configur
             self,
             _product: Product,
             _category_id: str,
+            *,
+            drop_invalid_domain_values: bool = True,
         ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], list[str]]:
             return ([{"id": "BRAND", "value_name": "Marca X"}], [], [], [])
 
@@ -226,6 +234,8 @@ def test_validation_only_mode_auto_fills_default_empty_gtin_reason_without_allow
             self,
             _product: Product,
             _category_id: str,
+            *,
+            drop_invalid_domain_values: bool = True,
         ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], list[str]]:
             return ([{"id": "BRAND", "value_name": "Marca X"}], [], [], [])
 
@@ -276,6 +286,8 @@ def test_validation_only_mode_blocks_invalid_empty_gtin_reason_metadata() -> Non
             self,
             _product: Product,
             _category_id: str,
+            *,
+            drop_invalid_domain_values: bool = True,
         ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], list[str]]:
             return (
                 [{"id": "EMPTY_GTIN_REASON", "value_id": "999999", "value_name": "Inválido"}],
@@ -326,6 +338,8 @@ def test_validation_only_mode_blocks_variation_identifier_incoherence() -> None:
             self,
             _product: Product,
             _category_id: str,
+            *,
+            drop_invalid_domain_values: bool = True,
         ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], list[str]]:
             return (
                 [
