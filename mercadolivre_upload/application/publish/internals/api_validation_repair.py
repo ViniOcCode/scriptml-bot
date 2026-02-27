@@ -23,7 +23,7 @@ _ATTRIBUTE_INDEX_REFERENCE_PATTERN = re.compile(r"item\.attributes\[(\d+)\]", re
 
 _MESSAGE_ATTR_PATTERNS_CONSERVATIVE = (
     re.compile(r"attribute\s*\[([A-Z][A-Z0-9_]{1,63})\]", re.IGNORECASE),
-    re.compile(r"attribute\s+([A-Z][A-Z0-9_]{1,63})\b", re.IGNORECASE),
+    re.compile(r"attribute\s+([A-Z][A-Z0-9_]{2,63})\b", re.IGNORECASE),
 )
 _MESSAGE_ATTR_PATTERNS_AGGRESSIVE = (
     re.compile(r"\[([A-Z][A-Z0-9_]{1,63})\]"),
