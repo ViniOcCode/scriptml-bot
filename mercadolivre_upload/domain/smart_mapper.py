@@ -9,7 +9,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from mercadolivre_upload.shared.utils.config_loader import load_yaml_config
+from mercadolivre_upload.shared.utils.config_loader import (
+    FISCAL_CONFIG_PATH,
+    STANDARD_FIELDS_CONFIG_PATH,
+    load_yaml_config,
+)
 from mercadolivre_upload.shared.utils.text_utils import PortugueseTextNormalizer
 
 logger = logging.getLogger(__name__)
@@ -49,7 +53,7 @@ class SmartAttributeMapper:
     def __init__(
         self,
         api_client: Any,  # MLApiClient
-        config_path: str = "config/standard_fields.yaml",
+        config_path: str = str(STANDARD_FIELDS_CONFIG_PATH),
         min_confidence: float = 0.85,
     ):
         """Initialize mapper.
@@ -72,27 +76,23 @@ class SmartAttributeMapper:
         """
         try:
             config_file = Path(config_path)
-            legacy_file = Path("config/generic_mappings.yaml")
-            config = _load_yaml_config(config_file, legacy_file)
+            config = load_yaml_config(config_file)
             if not config:
                 logger.warning(f"Config file not found: {config_path}")
                 return {}
             if config_file.exists():
                 logger.info(f"Loaded config from {config_file}")
-            elif legacy_file.exists():
-                logger.info(f"Loaded config from {legacy_file}")
 
             # Also load fiscal fields from fiscal_config.yaml
-            fiscal_config_path = Path("config/fiscal_config.yaml")
+            fiscal_config_path = FISCAL_CONFIG_PATH
             if fiscal_config_path.exists():
-                with open(fiscal_config_path, encoding="utf-8") as f:
-                    fiscal_config = yaml.safe_load(f)
+                fiscal_config = load_yaml_config(fiscal_config_path)
                 # Merge fiscal fields into config
                 config["fiscal_fields"] = fiscal_config.get("fiscal_fields", {})
                 logger.info(f"Loaded fiscal config from {fiscal_config_path}")
 
-            return config  # type: ignore[no-any-return]
-        except Exception as e:
+            return config
+        except (OSError, TypeError, ValueError) as e:
             logger.error(f"Failed to load config: {e}")
             return {}
 
@@ -151,10 +151,19 @@ class SmartAttributeMapper:
             return self._category_cache[category_id]
 
         try:
-            attributes = self.api.get_category_attributes(category_id)
+            raw_attributes = self.api.get_category_attributes(category_id)
+            if not isinstance(raw_attributes, list):
+                logger.error(
+                    "Unexpected attribute payload type for %s: %s",
+                    category_id,
+                    type(raw_attributes).__name__,
+                )
+                return []
+
+            attributes = [attr for attr in raw_attributes if isinstance(attr, dict)]
             self._category_cache[category_id] = attributes
             logger.debug(f"Cached {len(attributes)} attributes for {category_id}")
-            return attributes  # type: ignore[no-any-return]
+            return attributes
         except Exception as e:
             logger.error(f"Failed to fetch attributes for {category_id}: {e}")
             return []
@@ -327,7 +336,7 @@ class SmartAttributeMapper:
         """Generate a summary of the mapping results."""
         total = len(mappings) + len(unmapped)
 
-        by_type = {}  # type: ignore[var-annotated]
+        by_type: dict[str, int] = {}
         for m in mappings:
             by_type[m.mapping_type] = by_type.get(m.mapping_type, 0) + 1
 

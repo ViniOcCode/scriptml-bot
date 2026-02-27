@@ -21,6 +21,13 @@ from auth.authenticator import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _compat_auth_plaintext_mode(monkeypatch):
+    """Keep compatibility-shim tests on explicit plaintext mode."""
+    monkeypatch.setenv("MERCADO_LIVRE_USE_SECURE_STORAGE", "0")
+    monkeypatch.setenv("MERCADO_LIVRE_AUTO_MIGRATE_TOKENS", "0")
+
+
 class TestAuthCredentials:
     """Testes para AuthCredentials."""
 
@@ -307,9 +314,33 @@ class TestAuthManager:
         data = json.loads(temp_token_file.read_text())
         assert data["access_token"] == "test_token"
 
-    @patch("mercadolivre_upload.auth.oauth.requests.post")
-    def test_make_token_request_success(self, mock_post):
+    def test_make_token_request_success(self):
         """Testa refresh token bem-sucedido via OAuthHandler."""
+        from mercadolivre_upload.auth.oauth import TOKEN_REQUEST_RETRY_POLICY, OAuthHandler
+
+        mock_response = Mock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {
+            "access_token": "token",
+            "refresh_token": "refresh",
+            "expires_in": 21600,
+        }
+        mock_http = Mock()
+        mock_http.post.return_value = mock_response
+
+        handler = OAuthHandler(
+            client_id="test_app",
+            client_secret="test_secret",
+            http_client=mock_http,
+        )
+        result = handler.refresh_token("refresh_token")
+        assert result["access_token"] == "token"
+        call_kwargs = mock_http.post.call_args.kwargs
+        assert call_kwargs["data"]["grant_type"] == "refresh_token"
+        assert call_kwargs["policy"] == TOKEN_REQUEST_RETRY_POLICY
+
+    def test_exchange_code_uses_make_token_request(self):
+        """Testa exchange_code usando _make_token_request."""
         from mercadolivre_upload.auth.oauth import OAuthHandler
 
         mock_response = Mock()
@@ -319,24 +350,39 @@ class TestAuthManager:
             "refresh_token": "refresh",
             "expires_in": 21600,
         }
-        mock_post.return_value = mock_response
+        mock_http = Mock()
+        mock_http.post.return_value = mock_response
 
-        handler = OAuthHandler(client_id="test_app", client_secret="test_secret")
-        result = handler.refresh_token("refresh_token")
+        handler = OAuthHandler(
+            client_id="test_app",
+            client_secret="test_secret",
+            redirect_uri="http://localhost:8000/callback",
+            http_client=mock_http,
+        )
+        result = handler.exchange_code("auth_code")
         assert result["access_token"] == "token"
+        call_kwargs = mock_http.post.call_args.kwargs
+        assert call_kwargs["data"]["grant_type"] == "authorization_code"
+        assert call_kwargs["data"]["code"] == "auth_code"
 
-    @patch("mercadolivre_upload.auth.oauth.requests.post")
-    def test_make_token_request_http_error(self, mock_post):
+    def test_make_token_request_http_error(self):
         """Testa erro HTTP na requisição de token."""
         import requests
 
         from mercadolivre_upload.auth.oauth import OAuthHandler
 
         mock_response = Mock()
-        mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError("400 Client Error")
-        mock_post.return_value = mock_response
+        mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError(
+            "400 Client Error"
+        )
+        mock_http = Mock()
+        mock_http.post.return_value = mock_response
 
-        handler = OAuthHandler(client_id="test_app", client_secret="test_secret")
+        handler = OAuthHandler(
+            client_id="test_app",
+            client_secret="test_secret",
+            http_client=mock_http,
+        )
 
         with pytest.raises(AuthError) as exc_info:
             handler.refresh_token("refresh_token")

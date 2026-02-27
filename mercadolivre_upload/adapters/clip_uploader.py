@@ -88,11 +88,11 @@ class ClipUploader:
         return clips
 
     def _calculate_hash(self, path: Path) -> str:
-        """Calculate MD5 hash for deduplication."""
+        """Calculate SHA-256 hash for deduplication."""
         if str(path) in self._hash_cache:
             return self._hash_cache[str(path)]
         content = path.read_bytes()
-        file_hash = hashlib.md5(content).hexdigest()  # noqa: S324
+        file_hash = hashlib.sha256(content).hexdigest()
         self._hash_cache[str(path)] = file_hash
         return file_hash
 
@@ -148,16 +148,29 @@ class ClipUploader:
 
         except requests.HTTPError as e:
             status_code = e.response.status_code if e.response else "unknown"
-            try:
-                error_body = e.response.json() if e.response else {}
-                error_msg = error_body.get("message", str(error_body))
-            except Exception:
-                error_msg = e.response.text if e.response else str(e)
+            if e.response is None:
+                error_msg = str(e)
+            else:
+                try:
+                    error_body = e.response.json()
+                except ValueError:
+                    error_msg = e.response.text
+                else:
+                    if isinstance(error_body, dict):
+                        error_msg = str(error_body.get("message", error_body))
+                    else:
+                        error_msg = str(error_body)
             result.status = "http_error"
             result.error = f"[{status_code}] {error_msg}"
             logger.error(f"HTTP error uploading clip for {item_id}: {result.error}")
 
-        except Exception as e:
+        except (
+            requests.RequestException,
+            RuntimeError,
+            ValueError,
+            TypeError,
+            OSError,
+        ) as e:
             result.status = "error"
             result.error = f"{type(e).__name__}: {e}"
             logger.error(

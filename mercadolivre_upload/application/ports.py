@@ -18,12 +18,40 @@ class ImageUploaderPort(Protocol):
 class ItemPublisherPort(Protocol):
     """Port for item publishing operations."""
 
+    def get_users_me(self) -> dict[str, Any]:
+        """Get current seller/user capabilities payload."""
+        ...
+
     def validate_item(self, item: dict[str, Any]) -> dict[str, Any]:
         """Validate item payload."""
         ...
 
+    def validate_user_product_item(self, item: dict[str, Any]) -> dict[str, Any]:
+        """Validate item payload using user-products route."""
+        ...
+
     def create_item(self, item: dict[str, Any]) -> dict[str, Any]:
         """Create/publish item."""
+        ...
+
+    def create_user_product_item(self, item: dict[str, Any]) -> dict[str, Any]:
+        """Create/publish item using user-products route."""
+        ...
+
+    def get_available_listing_types(self, category_id: str) -> list[dict[str, Any]]:
+        """Get listing types available for current user in a category."""
+        ...
+
+    def get_site_listing_types(self, site_id: str = "MLB") -> list[dict[str, Any]]:
+        """Get listing types available for a site."""
+        ...
+
+    def get_category_sale_terms(self, category_id: str) -> list[dict[str, Any]]:
+        """Get sale terms metadata for a category."""
+        ...
+
+    def create_item_description(self, item_id: str, plain_text: str) -> dict[str, Any]:
+        """Create/update item description using description endpoint."""
         ...
 
 

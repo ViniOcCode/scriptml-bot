@@ -7,10 +7,14 @@ from urllib.parse import urlencode
 import requests
 from dotenv import find_dotenv, load_dotenv
 
+from mercadolivre_upload.infrastructure.http import ResilientHTTPClient, RetryPolicy
+
 from .exceptions import OAuthError
 
 # Load environment variables from .env file (searches up from this file)
 load_dotenv(find_dotenv(usecwd=True))
+
+TOKEN_REQUEST_RETRY_POLICY = RetryPolicy(max_retries=1, base_delay=0.5, max_delay=5.0)
 
 
 class OAuthHandler:
@@ -26,13 +30,14 @@ class OAuthHandler:
     """
 
     AUTH_URL = "https://auth.mercadolivre.com.br/authorization"
-    TOKEN_URL = "https://api.mercadolibre.com/oauth/token"  # noqa: S105  # noqa: S105
+    TOKEN_URL = "https://api.mercadolibre.com/oauth/token"  # noqa: S105  # nosec B105
 
     def __init__(
         self,
         client_id: str | None = None,
         client_secret: str | None = None,
         redirect_uri: str | None = None,
+        http_client: ResilientHTTPClient | None = None,
     ):
         """Initialize the OAuth handler.
 
@@ -40,12 +45,14 @@ class OAuthHandler:
             client_id: ML client ID. Defaults to env var.
             client_secret: ML client secret. Defaults to env var.
             redirect_uri: OAuth redirect URI. Defaults to env var.
+            http_client: Optional resilient HTTP client for token requests.
         """
         self.client_id = client_id or os.getenv("MERCADO_LIVRE_CLIENT_ID")
         self.client_secret = client_secret or os.getenv("MERCADO_LIVRE_CLIENT_SECRET")
         self.redirect_uri = redirect_uri or os.getenv(
             "MERCADO_LIVRE_REDIRECT_URI", "http://localhost:8000/callback"
         )
+        self.http_client = http_client or ResilientHTTPClient(timeout=30)
 
     def get_authorization_url(self, state: str | None = None) -> str:
         """Generate the authorization URL for OAuth flow.
@@ -137,12 +144,20 @@ class OAuthHandler:
             OAuthError: If request fails or response is invalid
         """
         try:
-            response = requests.post(self.TOKEN_URL, data=payload, timeout=30)
+            response = self.http_client.post(
+                self.TOKEN_URL,
+                data=payload,
+                policy=TOKEN_REQUEST_RETRY_POLICY,
+                timeout=30,
+            )
             response.raise_for_status()
         except requests.exceptions.RequestException as e:
             raise OAuthError(f"Token request failed: {e}") from e
 
-        data = response.json()
+        try:
+            data = response.json()
+        except ValueError as e:
+            raise OAuthError("Invalid token response: invalid JSON") from e
 
         if "access_token" not in data:
             error_msg = data.get("message", data.get("error", "Unknown error"))

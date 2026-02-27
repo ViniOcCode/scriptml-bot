@@ -19,6 +19,7 @@ classifiers = [
 
 dependencies = [
     "openpyxl>=3.0.0",
+    "xlrd>=2.0.1",
     "pandas>=1.5.0",
     "python-dotenv>=1.0.0",
     "pyyaml>=6.0.0",
@@ -51,8 +52,8 @@ dev = [
 ml-upload = "mercadolivre_upload.main:main"
 
 [tool.setuptools]
-# Use a minimal explicit package list to avoid referencing missing subpackages during build.
-packages = ["mercadolivre_upload"]
+# Discover all runtime packages under mercadolivre_upload.
+packages = { find = { include = ["mercadolivre_upload*"] } }
 
 [project.urls]
 Homepage = "https://github.com/vinicius/scriptml"
@@ -127,13 +128,21 @@ warn_redundant_casts = true
 warn_unused_configs = true
 show_error_codes = true
 show_column_numbers = true
-ignore_missing_imports = true
+ignore_missing_imports = false
+disable_error_code = ["import-untyped"]
 
 # Per-module options
 [[tool.mypy.overrides]]
 module = "tests.*"
 strict = false
 disallow_untyped_defs = false
+
+[[tool.mypy.overrides]]
+module = [
+    "mercadolivre_upload.infrastructure.metrics",
+    "mercadolivre_upload.domain.validation.base",
+]
+disable_error_code = ["import-not-found"]
 
 # =============================================================================
 # PYTEST - Testing framework
@@ -150,7 +159,7 @@ addopts = """
     --cov=mercadolivre_upload
     --cov-report=term-missing
     --cov-report=html:htmlcov
-    --cov-fail-under=20
+    --cov-fail-under=60
 """
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
@@ -180,7 +189,7 @@ exclude_lines = [
     "if TYPE_CHECKING:",
 ]
 precision = 2
-fail_under = 20
+fail_under = 60
 
 [tool.coverage.html]
 directory = "htmlcov"

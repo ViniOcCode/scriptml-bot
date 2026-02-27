@@ -402,7 +402,7 @@ def format_price(value, currency: str = "R$") -> str:  # type: ignore[no-untyped
     """Format a numeric value as a Brazilian currency string."""
     try:
         v = float(value)
-    except Exception:
+    except (TypeError, ValueError):
         return f"{currency} 0,00"
     # Format with thousands separator and comma decimals
     int_part = int(v)
@@ -448,11 +448,6 @@ def is_valid_title(title: str, min_length: int = 10, max_length: int = 60) -> bo
     # excessive punctuation
     punct_ratio = sum(1 for c in t if not c.isalnum() and not c.isspace()) / max(1, len(t))
     return not punct_ratio > 0.1
-
-
-def extract_keywords_portuguese(text: str) -> list[str]:
-    """Extract keywords from Portuguese text."""
-    return extract_keywords(text)
 
 
 # Alias for backward compatibility with domain layer

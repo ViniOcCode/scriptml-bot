@@ -11,9 +11,9 @@ All configuration is read from infrastructure.config.Settings or passed explicit
 """
 
 import logging
-import random
 import time
 from dataclasses import dataclass
+from secrets import randbelow
 from threading import Lock
 from typing import Any
 
@@ -250,6 +250,6 @@ class ResilientHTTPClient:
         delay = min(delay, policy.max_delay)
 
         if policy.jitter:
-            delay *= 0.5 + random.random()  # noqa: S311
+            delay *= 0.5 + (randbelow(1000) / 1000)
 
         return delay

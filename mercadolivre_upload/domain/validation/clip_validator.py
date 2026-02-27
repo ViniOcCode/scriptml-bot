@@ -9,7 +9,7 @@ Validates video files against ML API requirements:
 
 import json
 import logging
-import subprocess
+import subprocess  # nosec B404
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -56,7 +56,8 @@ class ClipValidator:
         """Check if ffprobe is available on the system (cached)."""
         if self._ffprobe_available is None:
             try:
-                subprocess.run(  # noqa: S603
+                # ffprobe is executed with explicit args and shell=False.
+                subprocess.run(  # noqa: S603  # nosec B603
                     [self._ffprobe_path, "-version"],
                     capture_output=True,
                     timeout=5,
@@ -152,7 +153,8 @@ class ClipValidator:
     def _probe_video(self, path: Path) -> VideoProperties | None:
         """Extract video properties using ffprobe."""
         try:
-            result = subprocess.run(  # noqa: S603
+            # ffprobe is executed with explicit args and shell=False.
+            result = subprocess.run(  # noqa: S603  # nosec B603
                 [
                     self._ffprobe_path,
                     "-v",

@@ -8,14 +8,167 @@ import logging
 import re
 from typing import Any
 
-from mercadolivre_upload.shared.utils.text_utils import TextNormalizer
+from mercadolivre_upload.shared.utils.text_utils import PortugueseTextNormalizer, TextNormalizer
 
 logger = logging.getLogger(__name__)
 
+_VARIATION_HINT_PREFIX = "varia por"
+_OPERATIONAL_HEADER_PATTERNS = (
+    "forma de envio",
+    "custo de envio",
+    "tarifa de venda",
+    "retirar pessoalmente",
+    "quantidade de caracteres",
+    "unidade de altura",
+    "unidade de largura",
+    "unidade de comprimento",
+    "unidade de profundidade",
+    "unidade de peso",
+    "unidade de tempo de garantia",
+)
+
 
 def _normalize_column_name(column_name: str) -> str:
-    """Normalize column names to a canonical form used by explicit mappings."""
-    return re.sub(r"[^a-zA-Z0-9_\s]", "", str(column_name)).strip().lower()
+    """Normalize column names to a canonical form used by mappings."""
+    return PortugueseTextNormalizer.normalize(str(column_name).replace("_", " "))
+
+
+def _normalize_keywords(raw_keywords: Any) -> list[str]:
+    """Normalize keyword rule entries into a list of comparable tokens."""
+    if raw_keywords is None:
+        return []
+    if isinstance(raw_keywords, str):
+        raw_keywords = [raw_keywords]
+
+    normalized = []
+    for keyword in raw_keywords:
+        token = _normalize_column_name(str(keyword))
+        if token:
+            normalized.append(token)
+    return normalized
+
+
+def _matches_auto_mapping_rule(column_name: str, rule: dict[str, Any]) -> bool:
+    """Return whether a column matches an auto explicit mapping rule."""
+    normalized = _normalize_column_name(column_name)
+    contains = _normalize_keywords(rule.get("contains"))
+    excludes = _normalize_keywords(rule.get("excludes"))
+
+    if not contains:
+        return False
+    if not all(token in normalized for token in contains):
+        return False
+    return not any(token in normalized for token in excludes)
+
+
+def _resolve_auto_explicit_mappings(
+    excel_columns: list[str],
+    auto_explicit_mappings: list[dict[str, Any]] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Build normalized auto explicit mappings for matching columns."""
+    normalized_mappings: dict[str, dict[str, Any]] = {}
+    if not auto_explicit_mappings:
+        return normalized_mappings
+
+    for column in excel_columns:
+        normalized_column = _normalize_column_name(column)
+        for rule in auto_explicit_mappings:
+            if not isinstance(rule, dict):
+                continue
+
+            match = rule.get("match", {})
+            mapping = rule.get("mapping", {})
+            if not isinstance(match, dict) or not isinstance(mapping, dict) or not mapping:
+                continue
+
+            if _matches_auto_mapping_rule(column, match):
+                normalized_mappings[normalized_column] = mapping
+                break
+
+    return normalized_mappings
+
+
+def _is_operational_header(column_name: str) -> bool:
+    """Return whether header is operational metadata and should not be fuzzy-mapped."""
+    normalized = _normalize_column_name(column_name)
+    return normalized in _OPERATIONAL_HEADER_PATTERNS
+
+
+def _extract_variation_hint(column_name: str) -> str | None:
+    """Extract normalized variation attribute hint from a column name."""
+    normalized = _normalize_column_name(column_name)
+    if not normalized.startswith(_VARIATION_HINT_PREFIX):
+        return None
+    hint = normalized[len(_VARIATION_HINT_PREFIX) :].strip()
+    return hint or None
+
+
+def _extract_variation_candidates(value: Any) -> list[dict[str, Any]]:
+    """Extract raw variation candidates from a multi-value spreadsheet cell."""
+    if value is None:
+        return []
+
+    tokens = [part.strip() for part in re.split(r"[,;/|]", str(value)) if part.strip()]
+    if len(tokens) <= 1:
+        return []
+
+    unique_tokens: list[str] = []
+    seen: set[str] = set()
+    for token in tokens:
+        normalized = PortugueseTextNormalizer.normalize(token)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        unique_tokens.append(token)
+
+    if len(unique_tokens) <= 1:
+        return []
+    return [{"id": None, "name": token} for token in unique_tokens]
+
+
+def _clean_cell_text(value: Any) -> str:
+    """Normalize raw cell values into plain stripped text."""
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _parse_number_unit_sale_term(
+    raw_value: Any,
+    *,
+    unit_hint: Any = None,
+) -> tuple[str, dict[str, Any] | None]:
+    """Parse number_unit sale-term values from cell value + optional unit hint."""
+    value_text = _clean_cell_text(raw_value)
+    unit_text = _clean_cell_text(unit_hint)
+
+    number_value: int | float | None = None
+    parsed_unit = ""
+    if value_text:
+        match = re.match(r"^\s*(\d+(?:[.,]\d+)?)\s*([^\d].*)?$", value_text)
+        if match:
+            number_text = match.group(1).replace(",", ".")
+            try:
+                numeric_value = float(number_text)
+            except ValueError:
+                numeric_value = None
+            if numeric_value is not None:
+                number_value = int(numeric_value) if numeric_value.is_integer() else numeric_value
+            inline_unit = _clean_cell_text(match.group(2))
+            if inline_unit:
+                parsed_unit = inline_unit
+
+    if unit_text:
+        parsed_unit = unit_text
+
+    if number_value is None:
+        return value_text or unit_text, None
+
+    value_name = f"{number_value} {parsed_unit}".strip()
+    value_struct: dict[str, Any] = {"number": number_value}
+    if parsed_unit:
+        value_struct["unit"] = parsed_unit
+    return value_name, value_struct
 
 
 class AttributeMapper:
@@ -43,7 +196,8 @@ class AttributeMapper:
         Returns:
             Tuple of (best_attribute_definition, similarity_score) or (None, 0.0)
         """
-        excel_normalized = TextNormalizer.normalize(excel_column)
+        hint = _extract_variation_hint(excel_column)
+        excel_normalized = TextNormalizer.normalize(hint or excel_column)
         best_match = None
         best_score = 0.0
 
@@ -82,6 +236,10 @@ class AttributeMapper:
         mapping = {}
 
         for col in excel_columns:
+            if _is_operational_header(col):
+                logger.debug(f"Skipping operational column: {col}")
+                continue
+
             attr_def, score = self.find_best_match(col, ml_attributes)
 
             if attr_def and score >= self.threshold:
@@ -100,6 +258,7 @@ class AttributeMapper:
         product_attributes: dict[str, str],
         ml_attributes: list[dict[str, Any]],
         explicit_mappings: dict[str, dict[str, Any]] | None = None,
+        auto_explicit_mappings: list[dict[str, Any]] | None = None,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """Map product attributes to ML format using fuzzy matching.
 
@@ -107,16 +266,27 @@ class AttributeMapper:
             product_attributes: Dictionary of {column_name: value} from Excel
             ml_attributes: List of ML attribute definitions from API
             explicit_mappings: Optional dict of {excel_column: mapping_config} for direct mapping
+            auto_explicit_mappings: Optional rule list for contains-based explicit mapping
 
         Returns:
             Tuple of (ml_attributes_list, sale_terms_list)
         """
         excel_columns = list(product_attributes.keys())
-        ml_attributes_list = []
-        sale_terms_list = []
+        ml_attributes_list: list[dict[str, Any]] = []
+        sale_terms_list: list[dict[str, Any]] = []
+        available_attribute_ids = {
+            attr_id
+            for attr in ml_attributes
+            if isinstance(attr, dict)
+            for attr_id in [attr.get("id")]
+            if isinstance(attr_id, str) and attr_id
+        }
 
         # Track which columns have been explicitly mapped
         explicitly_mapped = set()
+        normalized_product_values = {
+            _normalize_column_name(column): value for column, value in product_attributes.items()
+        }
 
         # 1. First, apply explicit mappings (bypass fuzzy matching)
         # Normalize explicit mapping keys to match parser's column cleaning
@@ -129,6 +299,13 @@ class AttributeMapper:
                 normalized_col = _normalize_column_name(col)
                 normalized_explicit_mappings[normalized_col] = mapping_config
 
+        auto_normalized_mappings = _resolve_auto_explicit_mappings(
+            excel_columns,
+            auto_explicit_mappings=auto_explicit_mappings,
+        )
+        for normalized_col, mapping_config in auto_normalized_mappings.items():
+            normalized_explicit_mappings.setdefault(normalized_col, mapping_config)
+
         if normalized_explicit_mappings:
             for col, value in product_attributes.items():
                 # Apply same cleaning as parser
@@ -138,53 +315,68 @@ class AttributeMapper:
                     target = mapping_config.get("target", "attribute")
 
                     if target == "sale_terms":
-                        # Build sale term from config with full ML API format
+                        sale_term_id = str(mapping_config["id"])
                         sale_term = {
-                            "id": mapping_config["id"],
-                            "name": mapping_config.get("name", mapping_config["id"]),
+                            "id": sale_term_id,
+                            "name": mapping_config.get("name", sale_term_id),
                         }
+                        value_id = mapping_config.get("value_id")
+                        sale_term["value_id"] = value_id
 
-                        # Determine value_name
-                        if "value_name" in mapping_config:
-                            sale_term["value_name"] = mapping_config["value_name"]
-                        elif value:
-                            sale_term["value_name"] = value
-                        else:
-                            sale_term["value_name"] = ""
+                        configured_value_type = str(
+                            mapping_config.get("value_type", "list")
+                        ).strip()
+                        sale_term_value_type = configured_value_type.lower() or "list"
 
-                        # Build values array
-                        if "value_struct" in mapping_config:
-                            sale_term["value_struct"] = mapping_config["value_struct"]
-                            sale_term["values"] = [
-                                {
-                                    "id": mapping_config.get("value_id"),
-                                    "name": sale_term["value_name"],
-                                    "struct": mapping_config["value_struct"],
-                                }
-                            ]
-                            sale_term["value_type"] = "number_unit"
-                        else:
-                            sale_term["value_id"] = mapping_config.get("value_id")
-                            sale_term["values"] = [
-                                {
-                                    "id": mapping_config.get("value_id"),
-                                    "name": sale_term["value_name"],
-                                    "struct": None,
-                                }
-                            ]
-                            sale_term["value_type"] = mapping_config.get("value_type", "list")
+                        excel_value_name = _clean_cell_text(value)
+                        fallback_value_name = _clean_cell_text(mapping_config.get("value_name"))
+                        sale_term_value_name = excel_value_name or fallback_value_name
+
+                        sale_term_value_struct: dict[str, Any] | None = None
+                        if sale_term_value_type == "number_unit":
+                            unit_hint = None
+                            raw_unit_column = mapping_config.get("unit_from_column")
+                            if isinstance(raw_unit_column, str) and raw_unit_column.strip():
+                                unit_hint = normalized_product_values.get(
+                                    _normalize_column_name(raw_unit_column)
+                                )
+                            parsed_value_name, parsed_value_struct = _parse_number_unit_sale_term(
+                                value,
+                                unit_hint=unit_hint,
+                            )
+                            if parsed_value_name:
+                                sale_term_value_name = parsed_value_name
+                            if parsed_value_struct is not None:
+                                sale_term_value_struct = parsed_value_struct
+                            else:
+                                configured_struct = mapping_config.get("value_struct")
+                                if isinstance(configured_struct, dict):
+                                    sale_term_value_struct = dict(configured_struct)
+
+                        sale_term["value_name"] = sale_term_value_name
+                        if sale_term_value_struct is not None:
+                            sale_term["value_struct"] = sale_term_value_struct
+                        sale_term["values"] = [
+                            {
+                                "id": value_id,
+                                "name": sale_term_value_name,
+                                "struct": sale_term_value_struct,
+                            }
+                        ]
+                        sale_term["value_type"] = sale_term_value_type
 
                         sale_terms_list.append(sale_term)
-                        logger.info(
-                            f"Explicitly mapped '{col}' -> sale_terms[{mapping_config['id']}]"
-                        )
+                        logger.info(f"Explicitly mapped '{col}' -> sale_terms[{sale_term_id}]")
                     elif target == "listing_type_id":
                         # Map listing type (Tipo de anúncio) - use cell value, not hardcoded ID
                         # Map common Portuguese values to ML API values
                         listing_type_map = {
                             "clássico": "gold_special",
                             "classico": "gold_special",
-                            "premium": "gold_premium",
+                            "premium": "gold_pro",
+                            "gold pro": "gold_pro",
+                            "diamante": "gold_premium",
+                            "gold premium": "gold_premium",
                             "grátis": "free",
                             "gratis": "free",
                         }
@@ -199,6 +391,21 @@ class AttributeMapper:
 
                     else:
                         # Regular attribute mapping
+                        target_attr_id = mapping_config["id"]
+                        if (
+                            available_attribute_ids
+                            and target_attr_id not in available_attribute_ids
+                        ):
+                            logger.info(
+                                "Skipping explicit mapping '%s' -> %s (attribute not supported "
+                                "by current category)",
+                                col,
+                                target_attr_id,
+                            )
+                            # Keep column eligible for fuzzy fallback in categories where
+                            # explicit mapping points to an unsupported attribute id.
+                            continue
+
                         # Sanitize numeric values: convert comma to dot for decimals
                         # Check if looks like a number with comma (Brazilian format)
                         if (
@@ -221,12 +428,13 @@ class AttributeMapper:
 
                         ml_attributes_list.append(
                             {
-                                "id": mapping_config["id"],
-                                "name": mapping_config.get("name", mapping_config["id"]),
+                                "id": target_attr_id,
+                                "name": mapping_config.get("name", target_attr_id),
                                 "value_name": value or mapping_config.get("value_name", ""),
+                                "_source_column": col,
                             }
                         )
-                        logger.info(f"Explicitly mapped '{col}' -> {mapping_config['id']}")
+                        logger.info(f"Explicitly mapped '{col}' -> {target_attr_id}")
 
                     explicitly_mapped.add(col)
 
@@ -239,13 +447,22 @@ class AttributeMapper:
         for col, attr_def in column_to_attr.items():
             value = product_attributes.get(col)  # type: ignore[assignment]
             if value:
+                attr_id = attr_def["id"]
                 ml_attributes_list.append(
                     {
-                        "id": attr_def["id"],
+                        "id": attr_id,
                         "name": attr_def["name"],
                         "value_name": value,
                     }
                 )
+                if isinstance(attr_id, str):
+                    variation_hint = _extract_variation_hint(col)
+                    if variation_hint:
+                        variation_candidates = _extract_variation_candidates(value)
+                        if variation_candidates:
+                            ml_attributes_list.append(
+                                {"_variation_candidates": {attr_id: variation_candidates}}
+                            )
 
         return ml_attributes_list, sale_terms_list
 
@@ -253,20 +470,26 @@ class AttributeMapper:
         self,
         product_attributes: dict[str, str],
         explicit_mappings: dict[str, dict[str, Any]] | None = None,
+        auto_explicit_mappings: list[dict[str, Any]] | None = None,
     ) -> set[str]:
-        """Return spreadsheet columns that are covered by explicit mappings."""
-        if not explicit_mappings:
-            return set()
+        """Return columns covered by explicit mappings and configured auto-rules."""
+        normalized_explicit = {}
+        if explicit_mappings:
+            normalized_explicit = {
+                _normalize_column_name(column): mapping
+                for column, mapping in explicit_mappings.items()
+                if mapping
+            }
 
-        normalized_explicit = {
-            _normalize_column_name(column): mapping
-            for column, mapping in explicit_mappings.items()
-            if mapping
-        }
+        auto_mappings = _resolve_auto_explicit_mappings(
+            list(product_attributes.keys()),
+            auto_explicit_mappings=auto_explicit_mappings,
+        )
 
         mapped_columns = set()
         for column in product_attributes:
-            if _normalize_column_name(column) in normalized_explicit:
+            normalized_column = _normalize_column_name(column)
+            if normalized_column in normalized_explicit or normalized_column in auto_mappings:
                 mapped_columns.add(column)
 
         return mapped_columns

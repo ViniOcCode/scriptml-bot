@@ -4,9 +4,32 @@ Uses AttributeCache to map Excel column headers to Mercado Livre API
 attribute definitions with value mapping support.
 """
 
+import re
 from typing import Any, Protocol
 
 from mercadolivre_upload.shared.utils.text_utils import PortugueseTextNormalizer
+
+from .cache_attribute_mapper_helpers import (
+    build_value_candidates as _build_value_candidates_helper,
+)
+from .cache_attribute_mapper_helpers import (
+    extract_numeric_value as _extract_numeric_value_helper,
+)
+from .cache_attribute_mapper_helpers import (
+    extract_variation_hint_from_normalized as _extract_variation_hint_from_normalized_helper,
+)
+from .cache_attribute_mapper_helpers import (
+    is_blocked_header as _is_blocked_header_helper,
+)
+from .cache_attribute_mapper_helpers import (
+    match_candidate_to_allowed_value as _match_candidate_to_allowed_value_helper,
+)
+from .cache_attribute_mapper_helpers import (
+    simplify_match_text as _simplify_match_text,
+)
+from .cache_attribute_mapper_helpers import (
+    token_overlap as _token_overlap,
+)
 
 # Type aliases for clarity
 AttributeDef = dict[str, Any]
@@ -52,6 +75,7 @@ class CachedAttributeMapper:
         self.category_id = category_id
         self._cache: dict[str, Any] = {}
         self._name_index: NameIndex = {}
+        self._simplified_name_index: NameIndex = {}
         self._value_index: ValueIndex = {}
 
         # Load cache and build indexes on initialization
@@ -91,6 +115,7 @@ class CachedAttributeMapper:
             Dictionary mapping normalized names to attribute definitions
         """
         self._name_index = {}
+        self._simplified_name_index = {}
         self._value_index = {}
 
         attributes = self._cache.get("attributes", [])
@@ -105,9 +130,12 @@ class CachedAttributeMapper:
             # Index by normalized name
             normalized_name = PortugueseTextNormalizer.normalize(name)
             self._name_index[normalized_name] = attr
+            simplified_name = _simplify_match_text(normalized_name)
+            if simplified_name and simplified_name not in self._simplified_name_index:
+                self._simplified_name_index[simplified_name] = attr
 
-            # Build value index for list-type attributes
-            if attr.get("value_type") == "list" and "values" in attr:
+            # Build value index for attributes that expose allowed values.
+            if "values" in attr and isinstance(attr.get("values"), list) and attr.get("values"):
                 value_map: dict[str, ValueDef] = {}
                 for value in attr["values"]:
                     value_name = value.get("name", "")
@@ -138,31 +166,47 @@ class CachedAttributeMapper:
             return None
 
         normalized_header = PortugueseTextNormalizer.normalize(excel_header)
+        variation_hint = self._extract_variation_hint_from_normalized(normalized_header)
+        if variation_hint:
+            normalized_header = variation_hint
+        elif self._is_blocked_header(normalized_header):
+            return None
 
         # Exact match on normalized name
         if normalized_header in self._name_index:
             return self._name_index[normalized_header]
 
-        # Near-exact match: look for high similarity
+        simplified_header = _simplify_match_text(normalized_header)
+        if simplified_header in self._simplified_name_index:
+            return self._simplified_name_index[simplified_header]
+
+        # Near-exact match: high similarity + token overlap (avoid loose substring matches).
         best_match: AttributeDef | None = None
         best_score = 0.0
 
         for normalized_name, attr in self._name_index.items():
-            # Check for substring containment (high score for contained matches)
-            if normalized_header in normalized_name or normalized_name in normalized_header:
-                score = 0.95
-                if score > best_score:
-                    best_score = score
-                    best_match = attr
-            else:
-                # Use similarity for fuzzy matching
-                attr_name = attr.get("name", "")
-                score = PortugueseTextNormalizer.similarity(excel_header, attr_name)
-                if score > best_score and score >= 0.85:  # High threshold for near-exact
-                    best_score = score
-                    best_match = attr
+            simplified_name = _simplify_match_text(normalized_name)
+            overlap = _token_overlap(
+                simplified_header or normalized_header,
+                simplified_name or normalized_name,
+            )
+            if overlap < 0.6:
+                continue
+
+            score = max(
+                PortugueseTextNormalizer.similarity(normalized_header, normalized_name),
+                PortugueseTextNormalizer.similarity(simplified_header, simplified_name),
+            )
+            if score > best_score and score >= 0.9:
+                best_score = score
+                best_match = attr
 
         return best_match
+
+    def extract_variation_hint(self, excel_header: str) -> str | None:
+        """Extract normalized variation attribute hint from a header."""
+        normalized_header = PortugueseTextNormalizer.normalize(excel_header)
+        return self._extract_variation_hint_from_normalized(normalized_header)
 
     def map_value(self, attribute_id: str, excel_value: str) -> MLPayload:
         """Map Excel cell value to ML API value payload.
@@ -228,16 +272,13 @@ class CachedAttributeMapper:
                     ],
                 }
 
-        # Handle list-type attributes
-        if value_type == "list" and attribute_id in self._value_index:
-            normalized_input = PortugueseTextNormalizer.normalize(excel_value)
-            value_map = self._value_index[attribute_id]
-
-            # Try exact match first
-            if normalized_input in value_map:
-                matched_value = value_map[normalized_input]
-                value_id = matched_value.get("id")
-                value_name = matched_value.get("name")
+        # Handle attributes that expose allowed values (even when value_type is string).
+        if attribute_id in self._value_index:
+            matched_values = self.map_all_values(attribute_id, excel_value)
+            if matched_values:
+                first_match = matched_values[0]
+                value_id = first_match.get("id")
+                value_name = first_match.get("name")
                 return {
                     "id": attribute_id,
                     "name": attr_name,
@@ -246,35 +287,16 @@ class CachedAttributeMapper:
                     "values": [{"id": value_id, "name": value_name, "struct": None}],
                 }
 
-            # Try partial/fuzzy matching
-            best_match: ValueDef | None = None
-            best_score = 0.0
+            # No allowed value match found: return empty value so caller can skip safely.
+            return {
+                "id": attribute_id,
+                "name": attr_name,
+                "value_id": None,
+                "value_name": None,
+                "values": [],
+            }
 
-            for normalized_value, value_def in value_map.items():
-                # Check for containment
-                if normalized_input in normalized_value or normalized_value in normalized_input:
-                    score = 0.9
-                else:
-                    score = PortugueseTextNormalizer.similarity(
-                        excel_value, value_def.get("name", "")
-                    )
-
-                if score > best_score:
-                    best_score = score
-                    best_match = value_def
-
-            if best_match and best_score >= 0.8:
-                value_id = best_match.get("id")
-                value_name = best_match.get("name")
-                return {
-                    "id": attribute_id,
-                    "name": attr_name,
-                    "value_id": value_id,
-                    "value_name": value_name,
-                    "values": [{"id": value_id, "name": value_name, "struct": None}],
-                }
-
-        # For string/number types or when no value match found
+        # For string/number types
         return {
             "id": attribute_id,
             "name": attr_name,
@@ -282,6 +304,43 @@ class CachedAttributeMapper:
             "value_name": excel_value,
             "values": [{"id": None, "name": excel_value, "struct": None}],
         }
+
+    def map_all_values(self, attribute_id: str, excel_value: str) -> list[ValueDef]:
+        """Return all allowed values matched from a potentially multi-value cell."""
+        value_map = self._value_index.get(attribute_id)
+        if not value_map:
+            return []
+
+        raw_value = str(excel_value).strip()
+        if not raw_value:
+            return []
+
+        parts = [part.strip() for part in re.split(r"[,;/|]", raw_value) if part.strip()]
+        search_candidates = parts if len(parts) > 1 else [raw_value]
+        fallback_to_raw = len(parts) > 1
+
+        matched: list[ValueDef] = []
+        seen: set[tuple[Any, Any]] = set()
+
+        for candidate in search_candidates:
+            value_def = self._match_candidate_to_allowed_value(candidate, value_map)
+            if not value_def:
+                continue
+            key = (value_def.get("id"), value_def.get("name"))
+            if key in seen:
+                continue
+            seen.add(key)
+            matched.append(value_def)
+
+        if matched:
+            return matched
+
+        if fallback_to_raw:
+            value_def = self._match_candidate_to_allowed_value(raw_value, value_map)
+            if value_def:
+                return [value_def]
+
+        return []
 
     def map_product_attributes(self, product_attributes: dict[str, str]) -> list[MLPayload]:
         """Map all product attributes from Excel to ML API format.
@@ -362,6 +421,7 @@ class CachedAttributeMapper:
         """
         self._cache = {}
         self._name_index = {}
+        self._simplified_name_index = {}
         self._value_index = {}
         self.load_cache()
         self.build_name_index()
@@ -378,24 +438,22 @@ class CachedAttributeMapper:
         Returns:
             Numeric value as int or float, or None if no number found
         """
-        if not excel_value:
-            return None
+        return _extract_numeric_value_helper(excel_value)
 
-        import re
+    def _is_blocked_header(self, normalized_header: str) -> bool:
+        """Return whether a header is operational metadata, not a product attribute."""
+        return _is_blocked_header_helper(normalized_header)
 
-        # Convert to string and strip whitespace
-        value_str = str(excel_value).strip()
+    def _extract_variation_hint_from_normalized(self, normalized_header: str) -> str | None:
+        """Extract normalized variation hint from a normalized header."""
+        return _extract_variation_hint_from_normalized_helper(normalized_header)
 
-        # Try to extract a number (integer or decimal)
-        # Match patterns like "23", "23.5", "0.3", etc.
-        match = re.match(r"^([\d]+(?:\.\d+)?)", value_str.replace(",", "."))
+    def _match_candidate_to_allowed_value(
+        self, candidate: str, value_map: dict[str, ValueDef]
+    ) -> ValueDef | None:
+        """Match a candidate string to the best allowed value."""
+        return _match_candidate_to_allowed_value_helper(candidate, value_map)
 
-        if match:
-            num_str = match.group(1)
-            # Return as int if it's a whole number, otherwise float
-            if "." in num_str:
-                return float(num_str)
-            else:
-                return int(num_str)
-
-        return None
+    def _build_value_candidates(self, excel_value: str) -> list[str]:
+        """Build candidate values for enum matching from potentially multi-value cells."""
+        return _build_value_candidates_helper(excel_value)

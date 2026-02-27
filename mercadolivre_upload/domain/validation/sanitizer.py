@@ -2,10 +2,12 @@
 
 import logging
 from difflib import SequenceMatcher
-from pathlib import Path
 from typing import Any
 
-from mercadolivre_upload.shared.utils.config_loader import load_yaml_config
+from mercadolivre_upload.shared.utils.config_loader import (
+    ATTRIBUTE_RULES_CONFIG_PATH,
+    load_yaml_config,
+)
 
 from ..attribute_classifier import CLASS_EDITORIAL, AttributeClassifier
 from .scoring import ScoredAttribute
@@ -13,22 +15,23 @@ from .scoring import ScoredAttribute
 logger = logging.getLogger(__name__)
 
 
-def _load_protected_attributes() -> set:  # type: ignore[type-arg]
+def _load_sanitizer_config() -> dict[str, Any]:
+    """Load sanitizer configuration from split config file."""
+    try:
+        return load_yaml_config(ATTRIBUTE_RULES_CONFIG_PATH)
+    except (OSError, TypeError, ValueError) as e:
+        logger.warning(f"Could not load sanitizer config: {e}. Using defaults.")
+        return {}
+
+
+def _load_protected_attributes() -> set[str]:
     """Load protected attributes from config file.
 
     Returns:
         Set of attribute IDs that should never be dropped
     """
-    try:
-        config = load_yaml_config(
-            Path("config/attribute_rules.yaml"), Path("config/generic_mappings.yaml")
-        )
-
-        protected = config.get("protected_attributes", [])
-        return set(protected)
-    except Exception as e:
-        logger.warning(f"Could not load protected attributes from config: {e}. Using empty set.")
-        return set()
+    protected = _load_sanitizer_config().get("protected_attributes", [])
+    return set(protected) if isinstance(protected, list) else set()
 
 
 def _load_similarity_threshold() -> float:
@@ -38,12 +41,10 @@ def _load_similarity_threshold() -> float:
         Threshold value for redundancy detection
     """
     try:
-        config = _load_yaml_config(
-            Path("config/attribute_rules.yaml"), Path("config/generic_mappings.yaml")
+        return float(
+            _load_sanitizer_config().get("similarity", {}).get("redundancy_threshold", 0.9)
         )
-
-        return config.get("similarity", {}).get("redundancy_threshold", 0.9)  # type: ignore[no-any-return]
-    except Exception as e:
+    except (TypeError, ValueError) as e:
         logger.warning(f"Could not load similarity threshold from config: {e}. Using default 0.9.")
         return 0.9
 
@@ -96,11 +97,14 @@ class AttributeSanitizer:
         seen_values: dict[str, str] = {}  # value -> id
 
         for attr in scored_attrs:
+            can_be_redundant = self._can_be_redundant(attr)
+
             # Never drop protected attributes
             if attr.id in self.protected_attributes:
                 logger.debug(f"Keeping protected attribute {attr.id}")
                 result.append(attr)
-                seen_values[attr.value.lower()] = attr.id
+                if can_be_redundant:
+                    seen_values[attr.value.lower()] = attr.id
                 continue
 
             # Drop low-score attributes (but keep protected ones above)
@@ -109,7 +113,11 @@ class AttributeSanitizer:
                 continue
 
             # Drop only truly redundant editorial attributes
-            if attr.classification == CLASS_EDITORIAL and self._is_redundant(attr, seen_values):
+            if (
+                attr.classification == CLASS_EDITORIAL
+                and can_be_redundant
+                and self._is_redundant(attr, seen_values)
+            ):
                 logger.debug(f"Dropping redundant editorial {attr.id}")
                 continue
 
@@ -119,10 +127,19 @@ class AttributeSanitizer:
                 logger.debug(f"Keeping logistics attribute {attr.id}")
 
             result.append(attr)
-            seen_values[attr.value.lower()] = attr.id
+            if can_be_redundant:
+                seen_values[attr.value.lower()] = attr.id
 
         logger.info(f"Sanitized {len(scored_attrs)} -> {len(result)} attributes")
         return result
+
+    def _can_be_redundant(self, attr: ScoredAttribute) -> bool:
+        """Return whether attribute value should participate in redundancy detection."""
+        if attr.meta.value_type in {"boolean", "number", "number_unit"}:
+            return False
+        if attr.meta.allowed_values:
+            return False
+        return len(attr.value.strip()) > 4
 
     def _is_redundant(self, attr: ScoredAttribute, seen_values: dict[str, str]) -> bool:
         """Check for semantic similarity with already-kept attributes."""

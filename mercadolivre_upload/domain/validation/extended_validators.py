@@ -299,7 +299,12 @@ class ImageValidator(ExtendedValidator):
 class CategoryValidator(ExtendedValidator):
     """Category validator."""
 
-    CATEGORY_ID_PATTERN = re.compile(r"^ML[BCDU]\d+$")
+    CATEGORY_ID_PATTERN = re.compile(r"^[A-Z]{3}\d+$")
+
+    def __init__(self, site_id: str | None = None) -> None:
+        """Initialize optional site-restricted validator."""
+        normalized = str(site_id).strip().upper() if site_id else ""
+        self._site_id = normalized or None
 
     def validate(self, data: dict[str, Any]) -> list[ValidationResult]:
         """Validate product category."""
@@ -327,12 +332,24 @@ class CategoryValidator(ExtendedValidator):
             return results
 
         category_id = category_id.strip()
+        normalized_category_id = category_id.upper()
 
-        if not self.CATEGORY_ID_PATTERN.match(category_id):
+        if not self.CATEGORY_ID_PATTERN.fullmatch(normalized_category_id):
             results.append(
                 ValidationResult(
                     field="category_id",
-                    message=f"Formato inválido: '{category_id}' (esperado: MLB12345)",
+                    message=f"Formato inválido: '{category_id}' (esperado: AAA12345)",
+                    severity=ValidationSeverity.ERROR,
+                )
+            )
+        elif self._site_id and not normalized_category_id.startswith(self._site_id):
+            results.append(
+                ValidationResult(
+                    field="category_id",
+                    message=(
+                        f"Categoria '{normalized_category_id}' não pertence ao site "
+                        f"'{self._site_id}'"
+                    ),
                     severity=ValidationSeverity.ERROR,
                 )
             )

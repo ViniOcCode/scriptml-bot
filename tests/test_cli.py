@@ -20,127 +20,148 @@ class TestCliCallback:
     def test_callback_exists(self):
         """Test that callback command exists."""
         result = runner.invoke(app, [])
-        # Callback doesn't produce output, just sets up
-        assert result.exit_code in [0, 2]  # 0 for help, 2 for missing command
+        assert result.exit_code in [0, 2]
 
 
 class TestUploadCommand:
     """Tests for upload command."""
 
-    @patch("mercadolivre_upload.cli.PublishProductService")
-    def test_upload_success(self, mock_service_class):
-        """Test successful upload."""
-        mock_service = MagicMock()
-        mock_service_class.return_value = mock_service
-
-        result_mock = MagicMock()
-        result_mock.success_count = 5
-        result_mock.failure_count = 0
-        mock_service.publish_from_file.return_value = result_mock
-
-        # Create a temporary file
-        with runner.isolated_filesystem():
-            Path("test.xlsx").write_text("dummy")
-            result = runner.invoke(app, ["upload", "test.xlsx"])
-
-        assert result.exit_code == 0
-        mock_service.publish_from_file.assert_called_once()
-
-    @patch("mercadolivre_upload.cli.PublishProductService")
-    def test_upload_with_verbose(self, mock_service_class):
-        """Test upload with verbose flag."""
-        mock_service = MagicMock()
-        mock_service_class.return_value = mock_service
-
-        result_mock = MagicMock()
-        result_mock.success_count = 3
-        result_mock.failure_count = 0
-        mock_service.publish_from_file.return_value = result_mock
+    @patch("mercadolivre_upload.cli.app.import_module")
+    def test_upload_delegates_to_new_command(self, mock_import_module):
+        """Test upload delegates to new flow command."""
+        mock_upload_module = MagicMock()
+        mock_import_module.return_value = mock_upload_module
 
         with runner.isolated_filesystem():
             Path("test.xlsx").write_text("dummy")
-            result = runner.invoke(app, ["upload", "test.xlsx", "--verbose"])
+            result = runner.invoke(
+                app,
+                [
+                    "upload",
+                    "test.xlsx",
+                    "--images",
+                    "imgs",
+                    "--category",
+                    "test-category",
+                ],
+            )
 
         assert result.exit_code == 0
-        assert "Processando arquivo" in result.output
+        mock_import_module.assert_called_once_with("mercadolivre_upload.cli.commands.upload")
+        mock_upload_module.upload.assert_called_once()
+        kwargs = mock_upload_module.upload.call_args.kwargs
+        assert kwargs["excel"] == Path("test.xlsx")
+        assert kwargs["images"] == Path("imgs")
+        assert kwargs["category"] == "test-category"
+        assert kwargs["cache_dir"] == Path("cache/categories")
+        assert kwargs["detailed"] is False
+        assert kwargs["batch_size"] == 5
+        assert kwargs["report_dir"] == Path("cache/reports")
 
-    @patch("mercadolivre_upload.cli.PublishProductService")
-    def test_upload_with_dry_run(self, mock_service_class):
-        """Test upload with dry-run flag."""
-        mock_service = MagicMock()
-        mock_service_class.return_value = mock_service
-
-        result_mock = MagicMock()
-        result_mock.success_count = 2
-        result_mock.failure_count = 0
-        mock_service.publish_from_file.return_value = result_mock
+    @patch("mercadolivre_upload.cli.app.import_module")
+    def test_upload_accepts_excel_option(self, mock_import_module):
+        """Test upload accepts --excel option."""
+        mock_upload_module = MagicMock()
+        mock_import_module.return_value = mock_upload_module
 
         with runner.isolated_filesystem():
             Path("test.xlsx").write_text("dummy")
-            result = runner.invoke(app, ["upload", "test.xlsx", "--dry-run"])
+            result = runner.invoke(
+                app,
+                [
+                    "upload",
+                    "--excel",
+                    "test.xlsx",
+                    "--images",
+                    "imgs",
+                    "--category",
+                    "test-category",
+                    "--batch-size",
+                    "3",
+                    "--report-dir",
+                    "batch-reports",
+                ],
+            )
 
         assert result.exit_code == 0
-        mock_service_class.assert_called_once_with(config_path=None, dry_run=True)
+        kwargs = mock_upload_module.upload.call_args.kwargs
+        assert kwargs["batch_size"] == 3
+        assert kwargs["report_dir"] == Path("batch-reports")
 
-    @patch("mercadolivre_upload.cli.PublishProductService")
-    def test_upload_with_config(self, mock_service_class):
-        """Test upload with config file."""
-        mock_service = MagicMock()
-        mock_service_class.return_value = mock_service
-
-        result_mock = MagicMock()
-        result_mock.success_count = 1
-        result_mock.failure_count = 0
-        mock_service.publish_from_file.return_value = result_mock
-
+    def test_upload_requires_new_flow_params(self):
+        """Test upload requires --images and --category."""
         with runner.isolated_filesystem():
             Path("test.xlsx").write_text("dummy")
-            Path("config.yaml").write_text("key: value")
-            result = runner.invoke(app, ["upload", "test.xlsx", "--config", "config.yaml"])
+            result = runner.invoke(app, ["upload", "test.xlsx", "--images", "imgs"])
 
-        assert result.exit_code == 0
-        mock_service_class.assert_called_once()
-        call_kwargs = mock_service_class.call_args.kwargs
-        assert str(call_kwargs.get("config_path")) == "config.yaml"
+        assert result.exit_code == 1
+        assert "Parametros obrigatorios: --images e --category" in result.output
 
     def test_upload_file_not_found(self):
         """Test upload with non-existent file."""
-        result = runner.invoke(app, ["upload", "nonexistent.xlsx"])
+        result = runner.invoke(
+            app,
+            ["upload", "nonexistent.xlsx", "--images", "imgs", "--category", "test-category"],
+        )
 
         assert result.exit_code == 1
         assert "Arquivo não encontrado" in result.output
 
-    @patch("mercadolivre_upload.cli.PublishProductService")
-    def test_upload_with_failures(self, mock_service_class):
-        """Test upload with some failures."""
-        mock_service = MagicMock()
-        mock_service_class.return_value = mock_service
 
-        result_mock = MagicMock()
-        result_mock.success_count = 2
-        result_mock.failure_count = 3
-        mock_service.publish_from_file.return_value = result_mock
+class TestValidateCommand:
+    """Tests for validate command."""
 
-        with runner.isolated_filesystem():
-            Path("test.xlsx").write_text("dummy")
-            result = runner.invoke(app, ["upload", "test.xlsx"])
-
-        # When failures exist, the command raises SystemExit
-        assert result.exit_code == 1  # CLI raises code 1 from raise typer.Exit in except
-
-    @patch("mercadolivre_upload.cli.PublishProductService")
-    def test_upload_error(self, mock_service_class):
-        """Test upload with exception."""
-        mock_service = MagicMock()
-        mock_service_class.return_value = mock_service
-        mock_service.publish_from_file.side_effect = Exception("API Error")
+    @patch("mercadolivre_upload.cli.app.import_module")
+    def test_validate_delegates_to_new_command(self, mock_import_module):
+        """Test validate delegates to new flow command."""
+        mock_validate_module = MagicMock()
+        mock_import_module.return_value = mock_validate_module
 
         with runner.isolated_filesystem():
             Path("test.xlsx").write_text("dummy")
-            result = runner.invoke(app, ["upload", "test.xlsx"])
+            result = runner.invoke(
+                app,
+                [
+                    "validate",
+                    "test.xlsx",
+                    "--images",
+                    "imgs",
+                    "--category",
+                    "test-category",
+                    "--detailed",
+                ],
+            )
+
+        assert result.exit_code == 0
+        mock_import_module.assert_called_once_with("mercadolivre_upload.cli.commands.validate")
+        mock_validate_module.validate.assert_called_once()
+        kwargs = mock_validate_module.validate.call_args.kwargs
+        assert kwargs["excel"] == Path("test.xlsx")
+        assert kwargs["images"] == Path("imgs")
+        assert kwargs["category"] == "test-category"
+        assert kwargs["cache_dir"] == Path("cache/categories")
+        assert kwargs["detailed"] is True
+        assert kwargs["batch_size"] == 5
+        assert kwargs["report_dir"] == Path("cache/reports")
+
+    def test_validate_requires_new_flow_params(self):
+        """Test validate requires --images and --category."""
+        with runner.isolated_filesystem():
+            Path("test.xlsx").write_text("dummy")
+            result = runner.invoke(app, ["validate", "test.xlsx", "--images", "imgs"])
 
         assert result.exit_code == 1
-        assert "Erro durante publicação" in result.output
+        assert "Parametros obrigatorios: --images e --category" in result.output
+
+    def test_validate_file_not_found(self):
+        """Test validate with non-existent file."""
+        result = runner.invoke(
+            app,
+            ["validate", "nonexistent.xlsx", "--images", "imgs", "--category", "test-category"],
+        )
+
+        assert result.exit_code == 1
+        assert "Arquivo não encontrado" in result.output
 
 
 class TestAuthCommand:
@@ -188,10 +209,7 @@ class TestAuthCommand:
         mock_auth = MagicMock()
         mock_auth_class.return_value = mock_auth
 
-        status_mock = MagicMock()
-        status_mock.authenticated = True
-        status_mock.user_id = "user123"
-        mock_auth.get_auth_status.return_value = status_mock
+        mock_auth.get_auth_status.return_value = {"authenticated": True, "user_id": "user123"}
 
         result = runner.invoke(app, ["auth"])
 
@@ -200,101 +218,31 @@ class TestAuthCommand:
         assert "user123" in result.output
 
     @patch("mercadolivre_upload.cli.AuthManager")
+    def test_auth_status_authenticated_without_user_id(self, mock_auth_class):
+        """Test auth status output when user_id is not available."""
+        mock_auth = MagicMock()
+        mock_auth_class.return_value = mock_auth
+
+        mock_auth.get_auth_status.return_value = {"authenticated": True, "user_id": None}
+
+        result = runner.invoke(app, ["auth"])
+
+        assert result.exit_code == 0
+        assert "Autenticado" in result.output
+        assert "None" not in result.output
+
+    @patch("mercadolivre_upload.cli.AuthManager")
     def test_auth_status_not_authenticated(self, mock_auth_class):
         """Test auth status when not authenticated."""
         mock_auth = MagicMock()
         mock_auth_class.return_value = mock_auth
 
-        status_mock = MagicMock()
-        status_mock.authenticated = False
-        mock_auth.get_auth_status.return_value = status_mock
+        mock_auth.get_auth_status.return_value = {"authenticated": False, "user_id": None}
 
         result = runner.invoke(app, ["auth"])
 
         assert result.exit_code == 0
         assert "Não autenticado" in result.output
-
-
-class TestValidateCommand:
-    """Tests for validate command."""
-
-    @patch("mercadolivre_upload.cli.PublishProductService")
-    def test_validate_success(self, mock_service_class):
-        """Test successful validation."""
-        mock_service = MagicMock()
-        mock_service_class.return_value = mock_service
-
-        validation_mock = MagicMock()
-        validation_mock.is_valid = True
-        validation_mock.errors = []
-        mock_service.validate_file.return_value = validation_mock
-
-        with runner.isolated_filesystem():
-            Path("test.xlsx").write_text("dummy")
-            result = runner.invoke(app, ["validate", "test.xlsx"])
-
-        assert result.exit_code == 0
-        assert "Arquivo válido" in result.output
-
-    @patch("mercadolivre_upload.cli.PublishProductService")
-    def test_validate_with_errors(self, mock_service_class):
-        """Test validation with errors."""
-        mock_service = MagicMock()
-        mock_service_class.return_value = mock_service
-
-        validation_mock = MagicMock()
-        validation_mock.is_valid = False
-        validation_mock.errors = ["Linha 1: preço inválido", "Linha 2: título vazio"]
-        mock_service.validate_file.return_value = validation_mock
-
-        with runner.isolated_filesystem():
-            Path("test.xlsx").write_text("dummy")
-            result = runner.invoke(app, ["validate", "test.xlsx"])
-
-        assert result.exit_code == 1
-        assert "2 erros" in result.output
-        assert "preço inválido" in result.output
-
-    @patch("mercadolivre_upload.cli.PublishProductService")
-    def test_validate_with_output(self, mock_service_class):
-        """Test validation with output file."""
-        mock_service = MagicMock()
-        mock_service_class.return_value = mock_service
-
-        validation_mock = MagicMock()
-        validation_mock.is_valid = False
-        validation_mock.errors = ["Erro 1", "Erro 2"]
-        mock_service.validate_file.return_value = validation_mock
-
-        with runner.isolated_filesystem():
-            Path("test.xlsx").write_text("dummy")
-            result = runner.invoke(app, ["validate", "test.xlsx", "--output", "errors.txt"])
-
-            assert Path("errors.txt").exists()
-            assert "Erro 1" in Path("errors.txt").read_text()
-
-        assert result.exit_code == 1
-
-    def test_validate_file_not_found(self):
-        """Test validate with non-existent file."""
-        result = runner.invoke(app, ["validate", "nonexistent.xlsx"])
-
-        assert result.exit_code == 1
-        assert "Arquivo não encontrado" in result.output
-
-    @patch("mercadolivre_upload.cli.PublishProductService")
-    def test_validate_error(self, mock_service_class):
-        """Test validate with exception."""
-        mock_service = MagicMock()
-        mock_service_class.return_value = mock_service
-        mock_service.validate_file.side_effect = Exception("Parse error")
-
-        with runner.isolated_filesystem():
-            Path("test.xlsx").write_text("dummy")
-            result = runner.invoke(app, ["validate", "test.xlsx"])
-
-        assert result.exit_code == 1
-        assert "Erro na validação" in result.output
 
 
 class TestMain:
@@ -316,8 +264,6 @@ class TestMainBlock:
     def test_main_block_execution(self):
         """Test that __main__ block executes main function."""
         import subprocess
-        import sys
-        from pathlib import Path
 
         cli_path = Path(__file__).parent.parent / "cli.py"
 
@@ -327,5 +273,4 @@ class TestMainBlock:
             text=True,
         )
 
-        # Should run the app (will show help or error)
         assert result.returncode in [0, 1, 2]
