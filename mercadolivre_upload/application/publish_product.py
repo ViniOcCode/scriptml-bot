@@ -205,6 +205,15 @@ class PublishProductUseCase:
         self.shipping_allow_runtime_free_shipping_override = (
             runtime_settings.shipping_allow_runtime_free_shipping_override
         )
+        self.api_validation_repair_enabled = runtime_settings.api_validation_repair_enabled
+        self.api_validation_repair_scope = runtime_settings.api_validation_repair_scope
+        self.api_validation_repair_max_attempts = (
+            runtime_settings.api_validation_repair_max_attempts
+        )
+        self.api_validation_repair_detect_mode = runtime_settings.api_validation_repair_detect_mode
+        self.api_validation_repair_drop_required_attributes = (
+            runtime_settings.api_validation_repair_drop_required_attributes
+        )
 
         self._rollout_flags_artifact = self._build_rollout_flags_artifact()
         self.dry_run = dry_run
@@ -258,6 +267,7 @@ class PublishProductUseCase:
         }
         self._current_cause_taxonomy: list[dict[str, str]] = []
         self._current_validation_decision: dict[str, Any] = {}
+        self._current_validation_repair: dict[str, Any] = {}
         self._current_image_diagnostics: dict[str, Any] | None = None
         self._current_shipping_policy: dict[str, Any] | None = None
         self._seller_capabilities_artifact: dict[str, Any] | None = None

@@ -25,6 +25,13 @@ def build_rollout_flags_artifact(use_case: Any) -> dict[str, Any]:
         "shipping_allow_runtime_free_shipping_override": (
             use_case.shipping_allow_runtime_free_shipping_override
         ),
+        "api_validation_repair_enabled": use_case.api_validation_repair_enabled,
+        "api_validation_repair_scope": use_case.api_validation_repair_scope,
+        "api_validation_repair_max_attempts": use_case.api_validation_repair_max_attempts,
+        "api_validation_repair_detect_mode": use_case.api_validation_repair_detect_mode,
+        "api_validation_repair_drop_required_attributes": (
+            use_case.api_validation_repair_drop_required_attributes
+        ),
     }
 
 
@@ -73,6 +80,7 @@ def reset_execution_state(use_case: Any) -> None:
     use_case._current_preflight_artifact = {"identifier_gate": {"checked": False, "violations": []}}
     use_case._current_cause_taxonomy = []
     use_case._current_validation_decision = {}
+    use_case._current_validation_repair = {}
     use_case._current_image_diagnostics = None
     use_case._current_shipping_policy = None
     use_case._current_flow_artifact = {}

@@ -43,11 +43,18 @@ class StructuralValidator:
         }
         return not bool(tags.intersection(NON_FILLABLE_TAGS))
 
-    def validate(self, attributes: list[dict[str, Any]]) -> ValidationResult:
+    def validate(
+        self,
+        attributes: list[dict[str, Any]],
+        *,
+        drop_invalid_domain_values: bool = True,
+    ) -> ValidationResult:
         """Validate attributes against structural rules.
 
         Args:
             attributes: List of attribute dicts with 'id' and 'value_name' keys
+            drop_invalid_domain_values: When False, keep out-of-domain values and
+                let API validation decide if they are acceptable.
 
         Returns:
             ValidationResult with valid flag, errors, warnings, and sanitized attrs
@@ -90,10 +97,17 @@ class StructuralValidator:
 
             # Value not in allowed domain
             if value and meta.allowed_values and not meta.allows_value(value):
-                msg = f"Attribute '{attr_id}': value '{value}' not in allowed domain - dropping"
+                if drop_invalid_domain_values:
+                    msg = f"Attribute '{attr_id}': value '{value}' not in allowed domain - dropping"
+                    warnings.append(msg)
+                    logger.warning(msg)
+                    continue
+                msg = (
+                    f"Attribute '{attr_id}': value '{value}' not in allowed domain - "
+                    "keeping for API validation"
+                )
                 warnings.append(msg)
                 logger.warning(msg)
-                continue
 
             # Exceeds max_length
             truncated_value = value
