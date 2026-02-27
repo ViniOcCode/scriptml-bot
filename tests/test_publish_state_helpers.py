@@ -4,6 +4,13 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from mercadolivre_upload.application.publish.internals.api_validation_repair import (
+    API_VALIDATION_REPAIR_DETECT_MODE,
+    API_VALIDATION_REPAIR_DROP_REQUIRED_ATTRIBUTES,
+    API_VALIDATION_REPAIR_ENABLED,
+    API_VALIDATION_REPAIR_MAX_ATTEMPTS,
+    API_VALIDATION_REPAIR_SCOPE,
+)
 from mercadolivre_upload.application.publish.internals.state import (
     annotate_image_diagnostics_artifact,
     build_rollout_flags_artifact,
@@ -39,11 +46,6 @@ def test_build_rollout_flags_artifact_uses_normalized_runtime_values() -> None:
         shipping_enforce_mandatory_free_shipping=False,
         shipping_allow_runtime_tag_overrides=False,
         shipping_allow_runtime_free_shipping_override=True,
-        api_validation_repair_enabled=True,
-        api_validation_repair_scope="validate_only",
-        api_validation_repair_max_attempts=4,
-        api_validation_repair_detect_mode="aggressive",
-        api_validation_repair_drop_required_attributes=False,
     )
 
     artifact = build_rollout_flags_artifact(use_case)
@@ -51,8 +53,13 @@ def test_build_rollout_flags_artifact_uses_normalized_runtime_values() -> None:
     assert artifact["shipping_non_blocking_codes"] == ["a_code", "b_code"]
     assert artifact["shipping_mandatory_free_shipping_tags"] == ["tag_a", "tag_z"]
     assert artifact["image_diagnostics_gate_mode"] == "report_only"
-    assert artifact["api_validation_repair_scope"] == "validate_only"
-    assert artifact["api_validation_repair_max_attempts"] == 4
+    assert artifact["api_validation_repair_enabled"] is API_VALIDATION_REPAIR_ENABLED
+    assert artifact["api_validation_repair_scope"] == API_VALIDATION_REPAIR_SCOPE
+    assert artifact["api_validation_repair_max_attempts"] == API_VALIDATION_REPAIR_MAX_ATTEMPTS
+    assert artifact["api_validation_repair_detect_mode"] == API_VALIDATION_REPAIR_DETECT_MODE
+    assert artifact["api_validation_repair_drop_required_attributes"] is (
+        API_VALIDATION_REPAIR_DROP_REQUIRED_ATTRIBUTES
+    )
 
 
 def test_annotate_image_diagnostics_artifact_marks_gate_decision() -> None:

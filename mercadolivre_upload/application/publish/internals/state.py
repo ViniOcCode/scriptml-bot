@@ -4,6 +4,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from .api_validation_repair import (
+    API_VALIDATION_REPAIR_DETECT_MODE,
+    API_VALIDATION_REPAIR_DROP_REQUIRED_ATTRIBUTES,
+    API_VALIDATION_REPAIR_ENABLED,
+    API_VALIDATION_REPAIR_MAX_ATTEMPTS,
+    API_VALIDATION_REPAIR_SCOPE,
+)
+
 
 def build_rollout_flags_artifact(use_case: Any) -> dict[str, Any]:
     """Build static rollout feature flag snapshot for item/report metadata."""
@@ -25,12 +33,12 @@ def build_rollout_flags_artifact(use_case: Any) -> dict[str, Any]:
         "shipping_allow_runtime_free_shipping_override": (
             use_case.shipping_allow_runtime_free_shipping_override
         ),
-        "api_validation_repair_enabled": use_case.api_validation_repair_enabled,
-        "api_validation_repair_scope": use_case.api_validation_repair_scope,
-        "api_validation_repair_max_attempts": use_case.api_validation_repair_max_attempts,
-        "api_validation_repair_detect_mode": use_case.api_validation_repair_detect_mode,
+        "api_validation_repair_enabled": API_VALIDATION_REPAIR_ENABLED,
+        "api_validation_repair_scope": API_VALIDATION_REPAIR_SCOPE,
+        "api_validation_repair_max_attempts": API_VALIDATION_REPAIR_MAX_ATTEMPTS,
+        "api_validation_repair_detect_mode": API_VALIDATION_REPAIR_DETECT_MODE,
         "api_validation_repair_drop_required_attributes": (
-            use_case.api_validation_repair_drop_required_attributes
+            API_VALIDATION_REPAIR_DROP_REQUIRED_ATTRIBUTES
         ),
     }
 

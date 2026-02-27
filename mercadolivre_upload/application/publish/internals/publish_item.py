@@ -203,29 +203,16 @@ def publish_one(use_case: Any, product: Product, category_id: str) -> bool:
     }
 
     build_attributes = use_case._attribute_builder.build_attributes
-    try:
-        (
-            ml_attributes,
-            sale_terms_from_mapping,
-            attr_warnings,
-            attr_errors,
-        ) = build_attributes(
-            product,
-            category_id,
-            drop_invalid_domain_values=False,
-        )
-    except TypeError as error:
-        if "drop_invalid_domain_values" not in str(error):
-            raise
-        (
-            ml_attributes,
-            sale_terms_from_mapping,
-            attr_warnings,
-            attr_errors,
-        ) = build_attributes(
-            product,
-            category_id,
-        )
+    (
+        ml_attributes,
+        sale_terms_from_mapping,
+        attr_warnings,
+        attr_errors,
+    ) = build_attributes(
+        product,
+        category_id,
+        drop_invalid_domain_values=False,
+    )
 
     if attr_errors:
         logger.error("Attribute validation failed for %s: %s", product.sku, attr_errors)
