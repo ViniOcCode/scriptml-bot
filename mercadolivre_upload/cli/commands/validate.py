@@ -14,7 +14,6 @@ from mercadolivre_upload.adapters.spreadsheet.parser import SpreadsheetParser
 from mercadolivre_upload.cli.commands.batch_reporting import (
     _extract_group_flow_routing,
     _extract_rollout_flags_snapshot,
-    _group_products_by_category,
     _merge_item_observability_fields,
     _resolve_cause_codes,
     _update_cause_code_counters,
@@ -25,8 +24,9 @@ from mercadolivre_upload.cli.commands.common import (
     parse_products_or_exit,
 )
 from mercadolivre_upload.cli.commands.upload import (
-    _extract_row_category,
+    _build_row_category_metadata,
     _extract_row_identity,
+    _prime_category_resolution_context,
     build_publish_use_case,
     load_config,
 )
@@ -81,6 +81,7 @@ def validate(
 
     products = parse_products_or_exit(parser=parser, excel=excel, err_console=err_console)
     console.print(f"Found {len(products)} products")
+    _prime_category_resolution_context(use_case, products, category)
 
     total_items = len(products)
     total_batches = (total_items + batch_size - 1) // batch_size if total_items else 0
@@ -92,6 +93,7 @@ def validate(
     warning_code_counts: dict[str, dict[str, int]] = {"valid": {}, "failed": {}}
     error_code_counts: dict[str, dict[str, int]] = {"valid": {}, "failed": {}}
     category_resolution_summary = _empty_category_resolution_summary()
+    row_category_signals = {"detected": 0, "mismatched": 0}
     total_validated = 0
     total_failed = 0
 
@@ -103,103 +105,90 @@ def validate(
         item_results: list[dict[str, Any]] = []
         for index, row in enumerate(batch_products):
             sku, title = _extract_row_identity(row)
-            input_category = _extract_row_category(row) or category
+            row_category_metadata = _build_row_category_metadata(row, category)
             base_item: dict[str, Any] = {
                 "index": index,
                 "sku": sku,
                 "title": title,
-                "category_used": input_category,
+                "category_used": category,
                 "status": "failed",
                 "error": "Missing item result from validation use case",
                 "cause_codes": [],
+                "row_category_detected": row_category_metadata["row_category_detected"],
+                "row_category_mismatch": row_category_metadata["row_category_mismatch"],
             }
-            merge_category_resolution_fields(base_item, {}, input_category)
+            merge_category_resolution_fields(base_item, {}, category)
             item_results.append(base_item)
-
-        grouped_products = _group_products_by_category(
-            batch_products,
-            default_category=category,
-            extract_category=_extract_row_category,
-        )
+            if row_category_metadata["row_category_detected"]:
+                row_category_signals["detected"] += 1
+            if row_category_metadata["row_category_mismatch"]:
+                row_category_signals["mismatched"] += 1
 
         batch_validated = 0
         batch_failed = 0
         batch_errors: list[str] = []
+        results = use_case.execute(batch_products, category)  # type: ignore[arg-type]
+        _merge_category_resolution_summary(
+            category_resolution_summary,
+            results.get("category_resolution"),
+        )
+        group_flow_routing = _extract_group_flow_routing(results)
 
-        for group_category, indexed_rows in grouped_products.items():
-            rows_for_category = [row for _, row in indexed_rows]
-            results = use_case.execute(rows_for_category, group_category)  # type: ignore[arg-type]
-            _merge_category_resolution_summary(
-                category_resolution_summary,
-                results.get("category_resolution"),
-            )
-            group_flow_routing = _extract_group_flow_routing(results)
+        batch_validated += int(results.get("validated", results.get("published", 0)))
+        batch_failed += int(results.get("failed", 0))
+        batch_errors.extend(str(error) for error in results.get("errors", []))
 
-            batch_validated += int(results.get("validated", results.get("published", 0)))
-            batch_failed += int(results.get("failed", 0))
-            batch_errors.extend(str(error) for error in results.get("errors", []))
+        raw_item_results = results.get("item_results", [])
+        if isinstance(raw_item_results, list):
+            for position, item in enumerate(raw_item_results):
+                if not isinstance(item, dict):
+                    continue
 
-            grouped_results: list[dict[str, Any]] = []
-            for group_index, (_, row) in enumerate(indexed_rows):
-                sku, title = _extract_row_identity(row)
-                row_input_category = _extract_row_category(row) or category
-                base_item = {
-                    "index": group_index,
-                    "sku": sku,
-                    "title": title,
-                    "category_used": group_category,
-                    "status": "failed",
-                    "error": "Missing item result from validation use case",
-                    "cause_codes": [],
+                target_index = item.get("index")
+                if not isinstance(target_index, int):
+                    target_index = position
+                if target_index < 0 or target_index >= len(batch_products):
+                    continue
+
+                row_status = str(item.get("status", "failed")).lower()
+                error_text = item.get("error")
+                cause_codes = _resolve_cause_codes(item.get("cause_codes"), error_text)
+
+                item_results[target_index] = {
+                    "index": target_index,
+                    "sku": item.get("sku") or item_results[target_index]["sku"],
+                    "title": item.get("title") or item_results[target_index]["title"],
+                    "category_used": category,
+                    "status": "valid" if row_status == "success" else "failed",
+                    "error": error_text,
+                    "cause_codes": cause_codes,
+                    "row_category_detected": item_results[target_index].get(
+                        "row_category_detected"
+                    ),
+                    "row_category_mismatch": item_results[target_index].get(
+                        "row_category_mismatch"
+                    ),
                 }
-                merge_category_resolution_fields(base_item, {}, row_input_category)
-                grouped_results.append(base_item)
-
-            raw_item_results = results.get("item_results", [])
-            if isinstance(raw_item_results, list):
-                for position, item in enumerate(raw_item_results):
-                    if not isinstance(item, dict):
-                        continue
-
-                    target_index = item.get("index")
-                    if not isinstance(target_index, int):
-                        target_index = position
-                    if target_index < 0 or target_index >= len(indexed_rows):
-                        continue
-
-                    row_status = str(item.get("status", "failed")).lower()
-                    error_text = item.get("error")
-                    cause_codes = _resolve_cause_codes(item.get("cause_codes"), error_text)
-
-                    grouped_results[target_index] = {
-                        "index": target_index,
-                        "sku": item.get("sku") or grouped_results[target_index]["sku"],
-                        "title": item.get("title") or grouped_results[target_index]["title"],
-                        "category_used": group_category,
-                        "status": "valid" if row_status == "success" else "failed",
-                        "error": error_text,
-                        "cause_codes": cause_codes,
-                    }
-                    _merge_item_observability_fields(
-                        grouped_results[target_index],
-                        item,
-                        category_input=grouped_results[target_index].get("category_input"),
-                        default_flow_routing=group_flow_routing,
-                    )
-                    grouped_results[target_index] = _ensure_observability_evidence(
-                        grouped_results[target_index],
-                        row_status=grouped_results[target_index]["status"],
-                        default_flow_routing=group_flow_routing,
-                    )
-
-            for group_index, (batch_index_pos, _) in enumerate(indexed_rows):
-                mapped = _ensure_observability_evidence(
-                    dict(grouped_results[group_index]),
-                    row_status=str(grouped_results[group_index].get("status", "failed")),
+                _merge_item_observability_fields(
+                    item_results[target_index],
+                    item,
+                    category_input=item_results[target_index].get("category_input"),
                     default_flow_routing=group_flow_routing,
                 )
-                mapped["index"] = batch_index_pos
-                item_results[batch_index_pos] = mapped
+                item_results[target_index] = _ensure_observability_evidence(
+                    item_results[target_index],
+                    row_status=item_results[target_index]["status"],
+                    default_flow_routing=group_flow_routing,
+                )
+
+        for index, mapped_item in enumerate(item_results):
+            mapped = _ensure_observability_evidence(
+                dict(mapped_item),
+                row_status=str(mapped_item.get("status", "failed")),
+                default_flow_routing=group_flow_routing,
+            )
+            mapped["index"] = index
+            item_results[index] = mapped
 
         total_validated += batch_validated
         total_failed += batch_failed
@@ -245,6 +234,7 @@ def validate(
         "top_warning_codes_by_status": _top_codes_by_status(warning_code_counts),
         "top_error_codes_by_status": _top_codes_by_status(error_code_counts),
         "category_resolution": category_resolution_summary,
+        "row_category_signals": row_category_signals,
         "rollout_flags": rollout_flags_snapshot,
         "items": all_item_results,
     }

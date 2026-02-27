@@ -20,7 +20,6 @@ from mercadolivre_upload.auth import AuthManager
 from mercadolivre_upload.cli.commands.batch_reporting import (
     _extract_group_flow_routing,
     _extract_rollout_flags_snapshot,
-    _group_products_by_category,
     _merge_item_observability_fields,
     _resolve_cause_codes,
     _update_cause_code_counters,
@@ -151,6 +150,35 @@ def _extract_row_category(row: dict[str, Any]) -> str | None:
     return None
 
 
+def _build_row_category_metadata(row: dict[str, Any], default_category: str) -> dict[str, Any]:
+    row_category = _extract_row_category(row)
+    normalized_default = default_category.strip().casefold()
+    normalized_row = row_category.strip().casefold() if isinstance(row_category, str) else ""
+    return {
+        "row_category_detected": row_category,
+        "row_category_mismatch": bool(normalized_row and normalized_row != normalized_default),
+    }
+
+
+def _prime_category_resolution_context(
+    use_case: PublishProductUseCase,
+    products: list[dict[str, Any]],
+    category: str,
+) -> None:
+    resolver = getattr(use_case, "_resolve_category_context", None)
+    if not callable(resolver):
+        return
+    try:
+        resolver(products, category, use_cache=False)
+    except TypeError:
+        try:
+            resolver(products, category)
+        except Exception as exc:
+            logger.warning("Could not pre-resolve category context for batch run: %s", exc)
+    except Exception as exc:
+        logger.warning("Could not pre-resolve category context for batch run: %s", exc)
+
+
 @app.callback(invoke_without_command=True)
 def upload(
     excel: Path = typer.Option(..., "--excel", "-e", help="Excel file path"),  # noqa: B008
@@ -191,6 +219,8 @@ def upload(
         console.print("[yellow]Dry run mode - validating only[/yellow]")
         return
 
+    _prime_category_resolution_context(use_case, products, category)
+
     total_products = len(products)
     total_batches = (total_products + batch_size - 1) // batch_size
     console.print(f"Batch size: {batch_size} ({total_batches} batches)")
@@ -207,6 +237,7 @@ def upload(
     warning_code_counts: dict[str, dict[str, int]] = {"success": {}, "failed": {}}
     error_code_counts: dict[str, dict[str, int]] = {"success": {}, "failed": {}}
     category_resolution_summary = _empty_category_resolution_summary()
+    row_category_signals = {"detected": 0, "mismatched": 0}
 
     for start in range(0, total_products, batch_size):
         batch_index = (start // batch_size) + 1
@@ -216,100 +247,86 @@ def upload(
         item_results: list[dict[str, Any]] = []
         for index, row in enumerate(batch_products):
             sku, title = _extract_row_identity(row)
-            input_category = _extract_row_category(row) or category
+            row_category_metadata = _build_row_category_metadata(row, category)
             base_item = {
                 "index": index,
                 "sku": sku,
                 "title": title,
                 "status": "failed",
                 "error": "Missing item result from use case",
+                "row_category_detected": row_category_metadata["row_category_detected"],
+                "row_category_mismatch": row_category_metadata["row_category_mismatch"],
             }
-            merge_category_resolution_fields(base_item, {}, input_category)
+            merge_category_resolution_fields(base_item, {}, category)
             item_results.append(base_item)
-        grouped_products = _group_products_by_category(
-            batch_products,
-            default_category=category,
-            extract_category=_extract_row_category,
+            if row_category_metadata["row_category_detected"]:
+                row_category_signals["detected"] += 1
+            if row_category_metadata["row_category_mismatch"]:
+                row_category_signals["mismatched"] += 1
+
+        results = use_case.execute(batch_products, category)  # type: ignore[arg-type]
+        _merge_category_resolution_summary(
+            category_resolution_summary,
+            results.get("category_resolution"),
         )
+        group_flow_routing = _extract_group_flow_routing(results)
 
-        batch_published = 0
-        batch_failed = 0
-        batch_clips_uploaded = 0
-        batch_clips_failed = 0
-        batch_errors: list[str] = []
+        batch_published = int(results.get("published", 0))
+        batch_failed = int(results.get("failed", 0))
+        batch_clips_uploaded = int(results.get("clips_uploaded", 0))
+        batch_clips_failed = int(results.get("clips_failed", 0))
+        batch_errors = [str(error) for error in results.get("errors", [])]
 
-        for group_category, indexed_rows in grouped_products.items():
-            rows_for_category = [row for _, row in indexed_rows]
-            results = use_case.execute(rows_for_category, group_category)  # type: ignore[arg-type]
-            _merge_category_resolution_summary(
-                category_resolution_summary,
-                results.get("category_resolution"),
-            )
-            group_flow_routing = _extract_group_flow_routing(results)
+        raw_item_results = results.get("item_results", [])
+        if isinstance(raw_item_results, list):
+            for position, item in enumerate(raw_item_results):
+                if not isinstance(item, dict):
+                    continue
 
-            batch_published += int(results.get("published", 0))
-            batch_failed += int(results.get("failed", 0))
-            batch_clips_uploaded += int(results.get("clips_uploaded", 0))
-            batch_clips_failed += int(results.get("clips_failed", 0))
-            batch_errors.extend(str(error) for error in results.get("errors", []))
+                target_index = item.get("index")
+                if not isinstance(target_index, int):
+                    target_index = position
+                if target_index < 0 or target_index >= len(batch_products):
+                    continue
 
-            grouped_results: list[dict[str, Any]] = []
-            for group_index, (_, row) in enumerate(indexed_rows):
-                sku, title = _extract_row_identity(row)
-                base_item = {
-                    "index": group_index,
-                    "sku": sku,
-                    "title": title,
-                    "status": "failed",
-                    "error": "Missing item result from use case",
+                row_status = str(item.get("status", "failed")).lower()
+                error_text = item.get("error")
+                mapped_item = {
+                    "index": target_index,
+                    "sku": item.get("sku") or item_results[target_index]["sku"],
+                    "title": item.get("title") or item_results[target_index]["title"],
+                    "status": "success" if row_status == "success" else "failed",
+                    "error": error_text,
+                    "row_category_detected": item_results[target_index].get(
+                        "row_category_detected"
+                    ),
+                    "row_category_mismatch": item_results[target_index].get(
+                        "row_category_mismatch", False
+                    ),
                 }
-                merge_category_resolution_fields(base_item, {}, group_category)
-                grouped_results.append(base_item)
-
-            raw_item_results = results.get("item_results", [])
-            if isinstance(raw_item_results, list):
-                for position, item in enumerate(raw_item_results):
-                    if not isinstance(item, dict):
-                        continue
-
-                    target_index = item.get("index")
-                    if not isinstance(target_index, int):
-                        target_index = position
-                    if target_index < 0 or target_index >= len(indexed_rows):
-                        continue
-
-                    row_status = str(item.get("status", "failed")).lower()
-                    error_text = item.get("error")
-                    mapped_item = {
-                        "index": target_index,
-                        "sku": item.get("sku") or grouped_results[target_index]["sku"],
-                        "title": item.get("title") or grouped_results[target_index]["title"],
-                        "status": "success" if row_status == "success" else "failed",
-                        "error": error_text,
-                    }
-                    normalized_codes = _resolve_cause_codes(item.get("cause_codes"), error_text)
-                    if normalized_codes:
-                        mapped_item["cause_codes"] = normalized_codes
-                    _merge_item_observability_fields(
-                        mapped_item,
-                        item,
-                        category_input=grouped_results[target_index].get("category_input"),
-                        default_flow_routing=group_flow_routing,
-                    )
-                    grouped_results[target_index] = _ensure_observability_evidence(
-                        mapped_item,
-                        row_status=mapped_item["status"],
-                        default_flow_routing=group_flow_routing,
-                    )
-
-            for group_index, (batch_index_pos, _) in enumerate(indexed_rows):
-                mapped = _ensure_observability_evidence(
-                    dict(grouped_results[group_index]),
-                    row_status=str(grouped_results[group_index].get("status", "failed")),
+                normalized_codes = _resolve_cause_codes(item.get("cause_codes"), error_text)
+                if normalized_codes:
+                    mapped_item["cause_codes"] = normalized_codes
+                _merge_item_observability_fields(
+                    mapped_item,
+                    item,
+                    category_input=item_results[target_index].get("category_input"),
                     default_flow_routing=group_flow_routing,
                 )
-                mapped["index"] = batch_index_pos
-                item_results[batch_index_pos] = mapped
+                item_results[target_index] = _ensure_observability_evidence(
+                    mapped_item,
+                    row_status=mapped_item["status"],
+                    default_flow_routing=group_flow_routing,
+                )
+
+        for index, mapped_item in enumerate(item_results):
+            normalized_item = _ensure_observability_evidence(
+                dict(mapped_item),
+                row_status=str(mapped_item.get("status", "failed")),
+                default_flow_routing=group_flow_routing,
+            )
+            normalized_item["index"] = index
+            item_results[index] = normalized_item
 
         total_published += batch_published
         total_failed += batch_failed
@@ -327,6 +344,8 @@ def upload(
                 "title": item_result.get("title"),
                 "status": row_status,
                 "error": item_result.get("error"),
+                "row_category_detected": item_result.get("row_category_detected"),
+                "row_category_mismatch": bool(item_result.get("row_category_mismatch", False)),
             }
             normalized_codes = _resolve_cause_codes(
                 item_result.get("cause_codes"),
@@ -355,6 +374,10 @@ def upload(
                 failed_row = dict(row)
                 failed_row["_batch"] = batch_index
                 failed_row["_error"] = item_result.get("error")
+                failed_row["_row_category_detected"] = item_result.get("row_category_detected")
+                failed_row["_row_category_mismatch"] = bool(
+                    item_result.get("row_category_mismatch", False)
+                )
                 if normalized_codes:
                     failed_row["_cause_codes"] = ", ".join(normalized_codes)
                 normalized_taxonomy = normalized.get("cause_taxonomy", [])
@@ -406,6 +429,7 @@ def upload(
         "top_warning_codes_by_status": _top_codes_by_status(warning_code_counts),
         "top_error_codes_by_status": _top_codes_by_status(error_code_counts),
         "category_resolution": category_resolution_summary,
+        "row_category_signals": row_category_signals,
         "rollout_flags": rollout_flags_snapshot,
         "batches": batch_summaries,
         "items": all_item_results,
