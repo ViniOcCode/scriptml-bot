@@ -190,8 +190,10 @@ def test_publish_sale_terms_complete_required_ids_with_default_fallback() -> Non
             self,
             product: Product,
             category_id: str,
+            *,
+            drop_invalid_domain_values: bool = True,
         ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], list[str]]:
-            del product, category_id
+            del product, category_id, drop_invalid_domain_values
             return (
                 [{"id": "BRAND", "value_name": "Marca X"}],
                 [{"id": "WARRANTY_TIME", "value_name": "90 dias"}],

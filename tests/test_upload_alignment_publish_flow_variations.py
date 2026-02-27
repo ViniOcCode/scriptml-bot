@@ -71,7 +71,10 @@ def test_publish_builds_variations_from_marked_candidates() -> None:
             self,
             product: Product,
             category_id: str,
+            *,
+            drop_invalid_domain_values: bool = True,
         ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], list[str]]:
+            del drop_invalid_domain_values
             return (
                 [
                     {"id": "BRAND", "value_name": "Marca X"},
@@ -234,8 +237,10 @@ def test_publish_legacy_variations_prefer_contract_allow_variations_ids() -> Non
             self,
             product: Product,
             category_id: str,
+            *,
+            drop_invalid_domain_values: bool = True,
         ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[str], list[str]]:
-            del product, category_id
+            del product, category_id, drop_invalid_domain_values
             return (
                 [
                     {"id": "COLOR", "value_name": "Azul"},
