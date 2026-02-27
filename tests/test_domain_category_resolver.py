@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
+from mercadolivre_upload.domain.category.errors import CategoryApiUnavailableError
 from mercadolivre_upload.domain.category.resolver import CategoryResolver
 
 
@@ -122,12 +125,13 @@ def test_predict_category_from_title_caches_empty_predictions() -> None:
     assert api.predict_calls == 1
 
 
-def test_call_domain_discovery_returns_empty_on_exception() -> None:
+def test_call_domain_discovery_raises_on_exception() -> None:
     api = _FakeApi()
     api.raise_predict = True
     resolver = CategoryResolver(api)
 
-    assert resolver._call_domain_discovery("Notebook Gamer", "MLB") == []
+    with pytest.raises(RuntimeError, match="predict error"):
+        resolver._call_domain_discovery("Notebook Gamer", "MLB")
 
 
 def test_call_domain_discovery_requests_limit_three() -> None:
@@ -141,7 +145,7 @@ def test_call_domain_discovery_requests_limit_three() -> None:
     assert api.predict_limits == [3]
 
 
-def test_get_category_cached_returns_empty_on_exception() -> None:
+def test_get_category_cached_raises_on_exception() -> None:
     api = _FakeApi()
     api.categories["ERR"] = RuntimeError("boom")
 
@@ -153,7 +157,17 @@ def test_get_category_cached_returns_empty_on_exception() -> None:
     api.get_category = _raise_on_err  # type: ignore[assignment]
     resolver = CategoryResolver(api)
 
-    assert resolver._get_category_cached("ERR") == {}
+    with pytest.raises(RuntimeError, match="boom"):
+        resolver._get_category_cached("ERR")
+
+
+def test_get_category_cached_raises_on_invalid_payload_type() -> None:
+    api = _FakeApi()
+    api.categories["BAD"] = "invalid"
+    resolver = CategoryResolver(api)
+
+    with pytest.raises(CategoryApiUnavailableError, match="invalid response type"):
+        resolver._get_category_cached("BAD")
 
 
 def test_get_conditional_attributes_handles_invalid_payloads_and_exceptions() -> None:
@@ -179,6 +193,28 @@ def test_resolve_to_leaf_returns_original_for_non_dict_category() -> None:
     resolver = CategoryResolver(api)
 
     assert resolver.resolve_to_leaf("MLB1") == "MLB1"
+
+
+def test_resolve_to_leaf_does_not_cache_empty_children_on_api_failure() -> None:
+    api = _FakeApi()
+    call_count = 0
+
+    def _get_category(category_id: str) -> dict[str, Any]:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise CategoryApiUnavailableError("boom", operation=f"get_category:{category_id}")
+        return {"children_categories": []}
+
+    api.get_category = _get_category  # type: ignore[assignment]
+    resolver = CategoryResolver(api)
+
+    with pytest.raises(CategoryApiUnavailableError):
+        resolver.resolve_to_leaf("MLB1")
+
+    assert "MLB1" not in resolver._children_cache
+    assert resolver.resolve_to_leaf("MLB1") == "MLB1"
+    assert call_count == 2
 
 
 def test_resolve_to_leaf_keeps_parent_when_children_are_ambiguous() -> None:

@@ -26,6 +26,7 @@ from .attribute_helpers import (
 from .attribute_helpers import (
     get_required_attributes as _get_required_attributes_helper,
 )
+from .errors import CategoryApiUnavailableError
 from .hierarchy_helpers import (
     get_category_children as _get_category_children_helper,
 )
@@ -410,15 +411,16 @@ class CategoryResolver:
         if category_id in self._category_cache:
             return self._category_cache[category_id]
 
-        try:
-            data = self._api.get_category(category_id)
-            if isinstance(data, dict):
-                self._category_cache[category_id] = data
-                return data
-        except Exception as e:
-            logger.warning(f"Failed to get category {category_id}: {e}")
+        data = self._api.get_category(category_id)
+        if not isinstance(data, dict):
+            invalid_type = type(data).__name__
+            raise CategoryApiUnavailableError(
+                f"Failed to get category {category_id}: invalid response type {invalid_type}",
+                operation=f"get_category:{category_id}",
+            )
 
-        return {}
+        self._category_cache[category_id] = data
+        return data
 
     def get_category_data(self, category_id: str) -> dict[str, Any]:
         """Get category details for policy and validation workflows."""

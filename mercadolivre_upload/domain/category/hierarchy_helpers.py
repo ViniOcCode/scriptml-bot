@@ -45,35 +45,32 @@ def get_category_children(
 ) -> list[dict[str, Any]]:
     """Get children of a category from cached category data."""
     if category_id not in children_cache:
-        try:
-            category_data = api_port.get_category(category_id)
-            raw_children = []
-            if isinstance(category_data, dict):
-                raw_children = category_data.get("children_categories", [])
+        category_data = api_port.get_category(category_id)
+        raw_children = []
+        if isinstance(category_data, dict):
+            raw_children = category_data.get("children_categories", [])
 
-            expected_site = category_id[:3] if len(category_id) >= 3 else None
-            children: list[dict[str, Any]] = []
-            if isinstance(raw_children, list):
-                for child in raw_children:
-                    if not isinstance(child, dict):
-                        continue
+        expected_site = category_id[:3] if len(category_id) >= 3 else None
+        children: list[dict[str, Any]] = []
+        if isinstance(raw_children, list):
+            for child in raw_children:
+                if not isinstance(child, dict):
+                    continue
 
-                    child_id = normalize_category_id(child.get("id"), expected_site)
-                    child_name = child.get("name")
-                    if not child_id or not isinstance(child_name, str):
-                        continue
+                child_id = normalize_category_id(child.get("id"), expected_site)
+                child_name = child.get("name")
+                if not child_id or not isinstance(child_name, str):
+                    continue
 
-                    children.append({**child, "id": child_id, "name": child_name.strip()})
+                children.append({**child, "id": child_id, "name": child_name.strip()})
 
-            children.sort(
-                key=lambda child: (
-                    TextNormalizer.normalize(str(child.get("name", ""))),
-                    str(child.get("id", "")),
-                )
+        children.sort(
+            key=lambda child: (
+                TextNormalizer.normalize(str(child.get("name", ""))),
+                str(child.get("id", "")),
             )
-            children_cache[category_id] = children
-        except Exception:
-            children_cache[category_id] = []
+        )
+        children_cache[category_id] = children
 
     return children_cache[category_id]
 
