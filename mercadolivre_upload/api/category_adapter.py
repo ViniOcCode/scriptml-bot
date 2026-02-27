@@ -10,6 +10,7 @@ from typing import Any, cast
 import requests
 
 from mercadolivre_upload.api.client import MLApiClient
+from mercadolivre_upload.domain.category.errors import CategoryApiUnavailableError
 from mercadolivre_upload.domain.category.resolver import CategoryApiPort
 
 logger = logging.getLogger(__name__)
@@ -20,7 +21,6 @@ class CategoryAdapter(CategoryApiPort):
     """Adapter for ML Category API.
 
     Implements the domain CategoryApiPort using ML API client.
-    Returns safe types (empty dict/list) on errors to prevent type errors.
     """
 
     def __init__(self, client: MLApiClient):
@@ -42,12 +42,14 @@ class CategoryAdapter(CategoryApiPort):
         try:
             result = operation()
         except RECOVERABLE_API_ERRORS as e:
-            getattr(logger, error_level)(f"{context}: {e}")
-            return []
+            message = f"{context}: {e}"
+            getattr(logger, error_level)(message)
+            raise CategoryApiUnavailableError(message, operation=context) from e
 
         if not isinstance(result, list):
-            getattr(logger, error_level)(f"{context}: invalid response type {type(result)}")
-            return []
+            message = f"{context}: invalid response type {type(result).__name__}"
+            getattr(logger, error_level)(message)
+            raise CategoryApiUnavailableError(message, operation=context)
         return cast(list[dict[str, Any]], result)
 
     def _call_dict(
@@ -61,12 +63,14 @@ class CategoryAdapter(CategoryApiPort):
         try:
             result = operation()
         except RECOVERABLE_API_ERRORS as e:
-            getattr(logger, error_level)(f"{context}: {e}")
-            return {}
+            message = f"{context}: {e}"
+            getattr(logger, error_level)(message)
+            raise CategoryApiUnavailableError(message, operation=context) from e
 
         if not isinstance(result, dict):
-            getattr(logger, error_level)(f"{context}: invalid response type {type(result)}")
-            return {}
+            message = f"{context}: invalid response type {type(result).__name__}"
+            getattr(logger, error_level)(message)
+            raise CategoryApiUnavailableError(message, operation=context)
         return cast(dict[str, Any], result)
 
     def get_site_categories(self, site_id: str) -> list[dict[str, Any]]:

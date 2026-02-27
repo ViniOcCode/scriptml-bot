@@ -2,25 +2,29 @@
 
 from unittest.mock import MagicMock
 
+import pytest
 import requests
 
 from mercadolivre_upload.api.category_adapter import CategoryAdapter
+from mercadolivre_upload.domain.category.errors import CategoryApiUnavailableError
 
 
-def test_get_site_categories_returns_empty_on_http_error() -> None:
+def test_get_site_categories_raises_on_http_error() -> None:
     client = MagicMock()
     client.get_site_categories.side_effect = requests.HTTPError("boom")
     adapter = CategoryAdapter(client)  # type: ignore[arg-type]
 
-    assert adapter.get_site_categories("MLB") == []
+    with pytest.raises(CategoryApiUnavailableError):
+        adapter.get_site_categories("MLB")
 
 
-def test_get_category_returns_empty_for_invalid_payload_type() -> None:
+def test_get_category_raises_for_invalid_payload_type() -> None:
     client = MagicMock()
     client.get_category.return_value = "invalid"
     adapter = CategoryAdapter(client)  # type: ignore[arg-type]
 
-    assert adapter.get_category("MLB123") == {}
+    with pytest.raises(CategoryApiUnavailableError):
+        adapter.get_category("MLB123")
 
 
 def test_get_category_conditionals_accepts_required_attributes_dict() -> None:

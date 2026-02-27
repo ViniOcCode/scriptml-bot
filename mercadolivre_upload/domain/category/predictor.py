@@ -17,14 +17,10 @@ def call_domain_discovery(
     limit: int = 3,
 ) -> list[dict[str, Any]]:
     """Call domain discovery API and return normalized prediction list."""
-    try:
-        logger.info(f"Calling domain discovery for: '{title[:60]}...'")
-        predictions = api.predict_category(title, site_id, limit=limit)
-        logger.debug(f"Domain discovery response: {predictions}")
-        return predictions if isinstance(predictions, list) else []
-    except Exception as error:
-        logger.warning(f"Domain discovery failed: {error}")
-        return []
+    logger.info(f"Calling domain discovery for: '{title[:60]}...'")
+    predictions = api.predict_category(title, site_id, limit=limit)
+    logger.debug(f"Domain discovery response: {predictions}")
+    return predictions if isinstance(predictions, list) else []
 
 
 def predict_category_from_title(
