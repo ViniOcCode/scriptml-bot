@@ -211,8 +211,9 @@ class AttributeBuilderService:
 
         # Log dropped attributes
         dropped = {a.id for a in scored_attrs} - {a.id for a in final_attrs}
-        for attr_id in dropped:
-            logger.warning(f"Dropped attribute {attr_id} due to low score or redundancy")
+        if dropped:
+            logger.info("Dropped %s attributes due to low score or redundancy", len(dropped))
+            logger.debug("Dropped attribute ids: %s", sorted(dropped))
 
         # Convert final attributes back to dict format
         final_attr_dicts = [{"id": a.id, "value_name": a.value} for a in final_attrs]

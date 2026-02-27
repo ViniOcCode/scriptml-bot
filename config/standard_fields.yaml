@@ -24,6 +24,10 @@ flow_routing:
 image_diagnostics:
   gate_mode: "report_only" # enforce | report_only | disabled
 
+# API validation repair is permanently enabled in code (always-on).
+# Any optional `api_validation_repair` block is ignored and kept only for
+# backward compatibility with old configs.
+
 # Identifier fallback controls.
 identifier_policy:
   auto_fill_empty_gtin_reason: true

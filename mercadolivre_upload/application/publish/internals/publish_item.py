@@ -8,7 +8,6 @@ from typing import Any
 from mercadolivre_upload.domain.product.model import Product
 
 from .api_validation_repair import (
-    is_api_validation_repair_active_for_operation,
     validate_item_with_api_repair,
 )
 from .decisioning import (
@@ -168,6 +167,24 @@ def _register_shipping_cause_decisions(
     )
 
 
+def _build_attribute_warning_summary(warnings: list[str]) -> dict[str, int]:
+    summary = {
+        "total": len(warnings),
+        "kept_for_api_validation": 0,
+        "dropped": 0,
+        "truncated": 0,
+    }
+    for warning in warnings:
+        normalized = str(warning).strip().lower()
+        if "keeping for api validation" in normalized:
+            summary["kept_for_api_validation"] += 1
+        if " - dropping" in normalized:
+            summary["dropped"] += 1
+        if "truncated from" in normalized:
+            summary["truncated"] += 1
+    return summary
+
+
 def publish_one(use_case: Any, product: Product, category_id: str) -> bool:
     """Publish one product preserving existing behavior and artifacts."""
     logger.info("Publishing product: %s (title: %s...)", product.sku, product.title[:50])
@@ -179,11 +196,6 @@ def publish_one(use_case: Any, product: Product, category_id: str) -> bool:
     use_case._current_publish_sku = str(product.sku).strip() if product.sku else None
     use_case._current_variation_reference_attributes = []
     selected_flow = use_case._resolve_selected_flow()
-    api_repair_active = is_api_validation_repair_active_for_operation(
-        enabled=bool(use_case.api_validation_repair_enabled),
-        scope=str(use_case.api_validation_repair_scope),
-        validation_only=bool(use_case.validation_only),
-    )
     use_case._current_flow_artifact = {
         "payload_builder": (
             "user_products_pxv" if selected_flow == "user_products" else "legacy_variations"
@@ -200,7 +212,7 @@ def publish_one(use_case: Any, product: Product, category_id: str) -> bool:
         ) = build_attributes(
             product,
             category_id,
-            drop_invalid_domain_values=not api_repair_active,
+            drop_invalid_domain_values=False,
         )
     except TypeError as error:
         if "drop_invalid_domain_values" not in str(error):
@@ -222,8 +234,19 @@ def publish_one(use_case: Any, product: Product, category_id: str) -> bool:
         return False
 
     if attr_warnings:
-        logger.warning("Attribute warnings for %s: %s", product.sku, attr_warnings)
         critical_attr_warnings = get_critical_attribute_warnings(attr_warnings)
+        warning_summary = _build_attribute_warning_summary(attr_warnings)
+        logger.info(
+            "Attribute processing summary for %s: total=%s kept_for_api_validation=%s "
+            "dropped=%s truncated=%s critical=%s",
+            product.sku,
+            warning_summary["total"],
+            warning_summary["kept_for_api_validation"],
+            warning_summary["dropped"],
+            warning_summary["truncated"],
+            len(critical_attr_warnings),
+        )
+        logger.debug("Attribute warning details for %s: %s", product.sku, attr_warnings)
         if critical_attr_warnings and use_case.strict_attribute_warnings:
             summary = critical_attr_warnings[:5]
             logger.error(
@@ -472,16 +495,13 @@ def publish_one(use_case: Any, product: Product, category_id: str) -> bool:
         )
 
     try:
-        if api_repair_active:
-            validation, validation_repair_artifact = validate_item_with_api_repair(
-                use_case=use_case,
-                item=item,
-                selected_flow=selected_flow,
-                required_attribute_ids=required_attribute_ids,
-            )
-            use_case._current_validation_repair = validation_repair_artifact
-        else:
-            validation = use_case._validate_item_for_flow(item=item, selected_flow=selected_flow)
+        validation, validation_repair_artifact = validate_item_with_api_repair(
+            use_case=use_case,
+            item=item,
+            selected_flow=selected_flow,
+            required_attribute_ids=required_attribute_ids,
+        )
+        use_case._current_validation_repair = validation_repair_artifact
         logger.debug("Validation response for %s: %s", product.sku, validation)
 
         raw_causes = validation.get("cause", [])
