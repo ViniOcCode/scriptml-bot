@@ -1,5 +1,7 @@
 """Tests for structural attribute validation rules."""
 
+import logging
+
 from mercadolivre_upload.domain.attribute_metadata import AttributeMeta
 from mercadolivre_upload.domain.validation import StructuralValidator
 
@@ -47,3 +49,27 @@ def test_fillable_required_attribute_still_blocks_when_missing() -> None:
 
     assert result.valid is False
     assert result.blocking_errors == ["Missing required attribute 'BRAND'"]
+
+
+def test_out_of_domain_keep_mode_returns_warning_without_warning_level_log(caplog) -> None:
+    validator = StructuralValidator(
+        [
+            AttributeMeta(
+                id="FRAME_COLOR",
+                name="Cor da moldura",
+                value_type="string",
+                required=False,
+                allowed_values={"Preto", "Branco"},
+            )
+        ]
+    )
+
+    with caplog.at_level(logging.WARNING):
+        result = validator.validate(
+            [{"id": "FRAME_COLOR", "value_name": "Borda Infinita"}],
+            drop_invalid_domain_values=False,
+        )
+
+    assert result.valid is True
+    assert any("keeping for API validation" in warning for warning in result.warnings)
+    assert not any("keeping for API validation" in record.getMessage() for record in caplog.records)
