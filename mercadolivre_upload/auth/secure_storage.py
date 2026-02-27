@@ -22,6 +22,10 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+class SecureStorageError(Exception):
+    """Raised when secure storage cannot encrypt/decrypt token data safely."""
+
+
 class SecureTokenStorage:
     """Secure storage for OAuth tokens using AES-256 encryption.
 
@@ -90,10 +94,14 @@ class SecureTokenStorage:
                 keyring.set_password(self.KEYRING_SERVICE, self.KEYRING_USERNAME, key.decode())
                 logger.info("Encryption key stored in system keyring")
             except Exception as e:
-                logger.warning(
-                    f"Failed to store key in keyring: {e}. "
-                    "Set ENCRYPTION_KEY environment variable for persistence."
-                )
+                raise SecureStorageError(
+                    "Failed to persist encryption key in keyring. "
+                    "Set ENCRYPTION_KEY or configure a working keyring backend."
+                ) from e
+        else:
+            raise SecureStorageError(
+                "Secure storage requires ENCRYPTION_KEY when keyring is unavailable."
+            )
 
         return key
 
@@ -153,7 +161,7 @@ class SecureTokenStorage:
 
         except Exception as e:
             logger.error(f"Failed to save tokens: {e}")
-            raise
+            raise SecureStorageError("Unable to save encrypted token file") from e
 
     def load_tokens(self) -> dict[str, Any] | None:
         """Load and decrypt tokens from file.
@@ -174,8 +182,7 @@ class SecureTokenStorage:
 
         except Exception as e:
             logger.error(f"Failed to load tokens: {e}")
-            logger.warning("You may need to re-authenticate")
-            return None
+            raise SecureStorageError("Unable to load or decrypt secure token file") from e
 
     def delete_tokens(self) -> None:
         """Delete encrypted token file."""

@@ -32,9 +32,10 @@ Entrypoint: `ml-upload` -> `mercadolivre_upload.main:main`.
 ### 1) Configure authentication
 
 - Place Mercado Livre tokens in `tokens.json` (or set `MERCADO_LIVRE_TOKEN_PATH`).
-- Optional secure token storage:
+- Optional secure token storage (opt-in):
   - `MERCADO_LIVRE_USE_SECURE_STORAGE=1`
   - `MERCADO_LIVRE_AUTO_MIGRATE_TOKENS=1` (migrates existing plaintext token file)
+  - secure mode errors (key setup/decryption/migration) fail explicitly
 
 ### 2) Prepare input files
 
