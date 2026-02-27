@@ -194,8 +194,8 @@ def inject_default_empty_gtin_reason(
         }
     )
     if warning_message:
-        logger.warning(warning_message)
-    logger.warning("Auto-filled EMPTY_GTIN_REASON with configured default value for missing GTIN.")
+        logger.info(warning_message)
+    logger.info("Auto-filled EMPTY_GTIN_REASON with configured default value for missing GTIN.")
     return artifact
 
 
