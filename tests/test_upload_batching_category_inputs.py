@@ -90,6 +90,15 @@ def test_upload_ignores_row_level_categories_for_execution_and_reports_metadata(
     assert summary_data["total_items"] == 4
     assert summary_data["published"] == 4
     assert summary_data["failed"] == 0
+    assert summary_data["fiscal"] == {
+        "submitted": 0,
+        "verified": 0,
+        "pending_verification": 0,
+        "failed": 0,
+        "skipped_invalid": 0,
+        "already_exists": 0,
+        "registered": 0,
+    }
     assert len(summary_data["items"]) == 4
     categories_by_sku = {item["sku"]: item["category_input"] for item in summary_data["items"]}
     assert categories_by_sku == {

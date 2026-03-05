@@ -111,3 +111,12 @@ def test_upload_uses_validation_decision_codes_when_taxonomy_is_missing(tmp_path
         "failed": {"item.pictures.without_main": 1},
     }
     assert summary_data["error_code_counts"] == {"success": {}, "failed": {}}
+    assert summary_data["fiscal"] == {
+        "submitted": 0,
+        "verified": 0,
+        "pending_verification": 0,
+        "failed": 0,
+        "skipped_invalid": 0,
+        "already_exists": 0,
+        "registered": 0,
+    }

@@ -289,6 +289,40 @@ def _build_item_result(
     return item_result
 
 
+def _build_execution_fiscal_summary(results: list[Any]) -> dict[str, int]:
+    summary = {
+        "submitted": len(results),
+        "verified": 0,
+        "pending_verification": 0,
+        "failed": 0,
+        "skipped_invalid": 0,
+        "already_exists": 0,
+        "registered": 0,
+    }
+
+    for result in results:
+        status_obj = getattr(result, "status", "")
+        status_key = str(getattr(status_obj, "value", status_obj)).strip().lower()
+        error_code = str(getattr(result, "error_code", "") or "").strip().upper()
+        success = bool(getattr(result, "success", False))
+
+        if status_key == "verified":
+            summary["verified"] += 1
+        elif status_key == "pending_verification":
+            summary["pending_verification"] += 1
+        elif status_key == "already_exists":
+            summary["already_exists"] += 1
+        elif status_key == "registered":
+            summary["registered"] += 1
+
+        if not success:
+            summary["failed"] += 1
+        if status_key == "skipped" or error_code == "INVALID_FISCAL_DATA":
+            summary["skipped_invalid"] += 1
+
+    return summary
+
+
 def _build_execution_summary(
     use_case: Any,
     *,
@@ -297,15 +331,27 @@ def _build_execution_summary(
 ) -> dict[str, Any]:
     clip_success = sum(result.get("clips_uploaded", 0) for result in use_case.clip_results)
     clip_failed = sum(result.get("clips_failed", 0) for result in use_case.clip_results)
+    legacy_fiscal_success = len([result for result in use_case.fiscal_results if result.success])
+    legacy_fiscal_failed = len([result for result in use_case.fiscal_results if not result.success])
+    fiscal_summary = _build_execution_fiscal_summary(use_case.fiscal_results)
+    publish_success = use_case.failed == 0
+    fiscal_ready = fiscal_summary["submitted"] == 0 or (
+        fiscal_summary["pending_verification"] == 0
+        and fiscal_summary["failed"] == 0
+        and fiscal_summary["skipped_invalid"] == 0
+    )
 
     return {
-        "success": use_case.failed == 0,
+        "success": publish_success,
+        "publish_success": publish_success,
+        "fiscal_ready": fiscal_ready,
         "published": use_case.published,
         "validated": use_case.published if use_case.validation_only else 0,
         "failed": use_case.failed,
         "errors": use_case.errors,
-        "fiscal_submitted": len([result for result in use_case.fiscal_results if result.success]),
-        "fiscal_failed": len([result for result in use_case.fiscal_results if not result.success]),
+        "fiscal_submitted": legacy_fiscal_success,
+        "fiscal_failed": legacy_fiscal_failed,
+        "fiscal": fiscal_summary,
         "clips_uploaded": clip_success,
         "clips_failed": clip_failed,
         "clips_details": use_case.clip_results,

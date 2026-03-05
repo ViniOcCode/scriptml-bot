@@ -98,6 +98,45 @@ def reset_execution_state(use_case: Any) -> None:
     use_case._category_resolution_context_cache = {}
 
 
+def _fiscal_status_key(result: Any) -> str:
+    status = getattr(result, "status", "")
+    return str(getattr(status, "value", status)).strip().lower()
+
+
+def _build_fiscal_stats(results: list[Any]) -> dict[str, int]:
+    summary = {
+        "submitted": len(results),
+        "verified": 0,
+        "pending_verification": 0,
+        "failed": 0,
+        "skipped_invalid": 0,
+        "already_exists": 0,
+        "registered": 0,
+    }
+
+    for result in results:
+        status_key = _fiscal_status_key(result)
+        error_code = str(getattr(result, "error_code", "") or "").strip().upper()
+        success = bool(getattr(result, "success", False))
+
+        if status_key == "verified":
+            summary["verified"] += 1
+        elif status_key == "pending_verification":
+            summary["pending_verification"] += 1
+        elif status_key == "already_exists":
+            summary["already_exists"] += 1
+        elif status_key == "registered":
+            summary["registered"] += 1
+
+        if not success:
+            summary["failed"] += 1
+
+        if status_key == "skipped" or error_code == "INVALID_FISCAL_DATA":
+            summary["skipped_invalid"] += 1
+
+    return summary
+
+
 def build_stats(use_case: Any) -> dict[str, Any]:
     """Build publishing statistics payload."""
     stats: dict[str, Any] = {
@@ -111,13 +150,7 @@ def build_stats(use_case: Any) -> dict[str, Any]:
         stats["feedback"] = use_case.feedback.get_feedback_summary()
 
     if use_case.fiscal_results:
-        fiscal_success = sum(1 for result in use_case.fiscal_results if result.success)
-        fiscal_failed = len(use_case.fiscal_results) - fiscal_success
-        stats["fiscal"] = {
-            "submitted": len(use_case.fiscal_results),
-            "success": fiscal_success,
-            "failed": fiscal_failed,
-        }
+        stats["fiscal"] = _build_fiscal_stats(use_case.fiscal_results)
 
     if use_case.clip_results:
         clip_success = sum(result.get("clips_uploaded", 0) for result in use_case.clip_results)
