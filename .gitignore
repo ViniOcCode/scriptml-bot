@@ -51,3 +51,5 @@ scripts/
 
 # Documentation build
 docs/*
+*:Zone.Identifier
+*.Zone.Identifier
