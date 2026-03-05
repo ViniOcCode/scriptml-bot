@@ -129,17 +129,17 @@ explicit_mappings:
     target: "listing_type_id"
     id: "gold_special"
 
-  "Armação":
-    target: "attribute"
-    id: "INCLUDES_FRAME"
+  #"Armação":
+   # target: "attribute"
+    #id: "INCLUDES_FRAME"
 
-  "Vidro":
-    target: "attribute"
-    id: "WITH_GLASS"
+#  "Vidro":
+ #   target: "attribute"
+  #  id: "WITH_GLASS"
 
-  "Frases":
-    target: "attribute"
-    id: "WITH_PHRASES"
+  #"Frases":
+   # target: "attribute"
+    #id: "WITH_PHRASES"
 
   # Dimension fields - automatically append units
   "Largura (cm)":

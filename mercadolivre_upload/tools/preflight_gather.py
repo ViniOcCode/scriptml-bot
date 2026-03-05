@@ -838,11 +838,23 @@ def resolve_category(
     category_input_clean = category_input.strip()
     if CATEGORY_ID_PATTERN.match(category_input_clean):
         category_id = category_input_clean
-    else:
-        found = resolver.find_category(category_input_clean, site_id=site_id)
+    elif category_input_clean:
+        logger.info(
+            "Using category input '%s' as predictor query from -c flag.",
+            category_input_clean,
+        )
+        found = resolver.find_category_with_predictor(
+            category_input_clean,
+            [category_input_clean],
+            site_id=site_id,
+        )
         if not found:
-            raise ValueError(f"Could not resolve category from input: '{category_input}'.")
+            raise ValueError(
+                "Could not resolve category from input with predictor: " f"'{category_input}'."
+            )
         category_id = found
+    else:
+        raise ValueError("Could not resolve category from empty input.")
 
     leaf_id = resolver.resolve_to_leaf(category_id)
     category_data = resolver.get_category_data(leaf_id)
