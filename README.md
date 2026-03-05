@@ -207,3 +207,12 @@ uv run pre-commit run --all-files
 - **No images uploaded for SKU**: confirm image names/extensions and folder structure under `--images`.
 - **Auth errors**: verify token file path, encryption key/keyring setup, and refresh token validity.
 - **Unexpected attribute validation failures**: inspect the generated JSON summary report and adjust mapping rules in `config/standard_fields.yaml` / `config/attribute_rules.yaml`.
+- **Fiscal submitted but invoice still pending**: inspect `upload-summary-*.json` -> `fiscal` section.
+  - `verified`: item is invoicing-ready (`/can_invoice` returned `status=true` in workflow window).
+  - `pending_verification`: fiscal link exists but invoice readiness did not turn true within retries.
+  - `failed`: fiscal registration/link/readiness failed with blocking error.
+  - `skipped_invalid`: payload failed local fiscal validation before API submission.
+- **Intermittent fiscal API 400**: verify fiscal fields in spreadsheet and conditional rules:
+  - FCI required for `origin_detail` in `3, 5, 8`
+  - `med_anvisa_code=ISENTO` requires `med_exemption_reason`
+  - `csosn` and `tax_rule_id` cannot be sent together

@@ -107,7 +107,7 @@ def test_execute_uses_predictor_and_resolves_to_leaf_before_publishing() -> None
     assert result["success"] is True
     assert result["published"] == 1
     assert resolver.find_calls == 0
-    assert resolver.predictor_calls == [("Nao encontrada", ["Notebook Gamer"], "MLB")]
+    assert resolver.predictor_calls == [("Nao encontrada", ["Nao encontrada"], "MLB")]
     assert resolver.title_calls == []
     assert resolver.resolve_calls == ["MLB1000"]
     assert use_case._publish_one.call_count == 1
@@ -307,7 +307,7 @@ def test_execute_returns_unresolved_when_predictor_does_not_match() -> None:
     result = use_case.execute([_build_product("Notebook Gamer")], "Nao encontrada")
 
     assert result["success"] is False
-    assert resolver.predictor_calls == [("Nao encontrada", ["Notebook Gamer"], "MLB")]
+    assert resolver.predictor_calls == [("Nao encontrada", ["Nao encontrada"], "MLB")]
     assert resolver.find_calls == 0
     assert resolver.title_calls == []
     assert use_case._publish_one.call_count == 0
@@ -352,7 +352,7 @@ def test_execute_fails_when_predictor_path_match_fails_without_fallback() -> Non
     assert result["success"] is False
     assert result["published"] == 0
     assert result["errors"] == ["Category not found: Nao encontrada"]
-    assert resolver.predictor_calls == [("Nao encontrada", ["Notebook Gamer"], "MLB")]
+    assert resolver.predictor_calls == [("Nao encontrada", ["Nao encontrada"], "MLB")]
     assert resolver.title_calls == []
     assert use_case._publish_one.call_count == 0
     item_result = result["item_results"][0]
@@ -448,12 +448,9 @@ def test_execute_fails_when_titles_are_missing_for_predictor_validation() -> Non
     item_result = result["item_results"][0]
     assert item_result["resolution_strategy"] == "unresolved"
     assert item_result["category_resolved_id"] is None
-    assert item_result["category_resolution_decision"]["predictor_attempted"] is False
+    assert item_result["category_resolution_decision"]["predictor_attempted"] is True
     assert item_result["category_resolution_decision"]["fallback_attempted"] is True
-    assert (
-        item_result["category_resolution_decision"]["fallback_reason"]
-        == "missing_titles_for_predictor"
-    )
+    assert item_result["category_resolution_decision"]["fallback_reason"] == "predictor_no_match"
     assert result["category_resolution"]["strategy_counts"]["unresolved"] == 1
     assert result["category_resolution"]["fallback_counts"] == {
         "attempted": 1,
@@ -464,14 +461,11 @@ def test_execute_fails_when_titles_are_missing_for_predictor_validation() -> Non
 
 def test_execute_recomputes_category_context_between_runs_after_unresolved() -> None:
     resolver = _CategoryFlowResolver(find_result=None)
-    predictor_by_titles = {
-        ("Notebook Gamer",): None,
-        ("Livro Infantil",): "MLB5000",
-    }
+    predictor_results = [None, "MLB5000"]
 
     def _predict(category_name: str, product_titles: list[str], site_id: str = "MLB") -> str | None:
         resolver.predictor_calls.append((category_name, product_titles, site_id))
-        return predictor_by_titles.get(tuple(product_titles))
+        return predictor_results.pop(0)
 
     resolver.find_category_with_predictor = _predict  # type: ignore[method-assign]
     use_case = PublishProductUseCase(
@@ -500,21 +494,18 @@ def test_execute_recomputes_category_context_between_runs_after_unresolved() -> 
     assert second_result["item_results"][0]["resolution_strategy"] == "predictor_path_match"
     assert second_result["item_results"][0]["category_resolved_id"] == "MLB5000"
     assert resolver.predictor_calls == [
-        ("Nao encontrada", ["Notebook Gamer"], "MLB"),
-        ("Nao encontrada", ["Livro Infantil"], "MLB"),
+        ("Nao encontrada", ["Nao encontrada"], "MLB"),
+        ("Nao encontrada", ["Nao encontrada"], "MLB"),
     ]
 
 
 def test_execute_recomputes_category_context_between_runs_after_resolved() -> None:
     resolver = _CategoryFlowResolver(find_result=None)
-    predictor_by_titles = {
-        ("Notebook Gamer",): "MLB1000",
-        ("Livro Infantil",): None,
-    }
+    predictor_results = ["MLB1000", None]
 
     def _predict(category_name: str, product_titles: list[str], site_id: str = "MLB") -> str | None:
         resolver.predictor_calls.append((category_name, product_titles, site_id))
-        return predictor_by_titles.get(tuple(product_titles))
+        return predictor_results.pop(0)
 
     resolver.find_category_with_predictor = _predict  # type: ignore[method-assign]
     use_case = PublishProductUseCase(
@@ -544,8 +535,8 @@ def test_execute_recomputes_category_context_between_runs_after_resolved() -> No
     assert second_result["item_results"][0]["category_resolved_id"] is None
     assert use_case._publish_one.call_count == 1
     assert resolver.predictor_calls == [
-        ("Nao encontrada", ["Notebook Gamer"], "MLB"),
-        ("Nao encontrada", ["Livro Infantil"], "MLB"),
+        ("Nao encontrada", ["Nao encontrada"], "MLB"),
+        ("Nao encontrada", ["Nao encontrada"], "MLB"),
     ]
 
 

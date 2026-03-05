@@ -212,12 +212,15 @@ def resolve_category_context(
     if re.fullmatch(r"[A-Z]{3}\d+", category_input):
         resolved_id = category_input
         strategy = "direct_id"
-    # Strategy 1: Predictor-first title matching against category hint
-    elif titles:
+    # Strategy 1: Predictor query must use the CLI category input (-c flag)
+    elif category_input:
         predictor_attempted = True
-        logger.info("Extracted %s titles for predictor-first resolution", len(titles))
+        logger.info(
+            "Using category input '%s' as predictor query from -c flag.",
+            category_input,
+        )
         resolved_id = use_case.category_resolver.find_category_with_predictor(
-            category_input, titles
+            category_input, [category_input]
         )
         if resolved_id:
             strategy = "predictor_path_match"
@@ -230,13 +233,10 @@ def resolve_category_context(
                 category_input,
             )
     else:
-        # Fail closed when no titles are available for predictor verification.
+        # Fail closed when no usable category input was provided.
         fallback_attempted = True
-        fallback_reason = "missing_titles_for_predictor"
-        logger.info(
-            "Category '%s' cannot be validated because no usable titles were provided.",
-            category_input,
-        )
+        fallback_reason = "missing_category_input"
+        logger.info("Category input is missing; predictor resolution cannot proceed.")
 
     category_path: list[Any] = []
     context_result: dict[str, Any]

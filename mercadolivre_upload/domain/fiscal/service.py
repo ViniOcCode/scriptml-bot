@@ -208,76 +208,37 @@ class FiscalService:
         """Execute complete fiscal data submission workflow.
 
         Workflow:
-        1. Check fiscal data existence (GET /items/fiscal_information/{SKU})
-        2. Register fiscal data when missing (POST /items/fiscal_information)
-        3. Link SKU to item (POST /items/fiscal_information/items)
-        4. Poll invoice readiness (GET /can_invoice/items/{ITEM_ID})
-
-        Args:
-            item_id: Mercado Livre item ID (e.g., MLB1234567890)
-            fiscal_data: Fiscal data to submit
-
-        Returns:
-            FiscalSubmissionResult with success status and details
+        1. Validate fiscal payload (required + conditional rules)
+        2. Check fiscal data existence (GET /items/fiscal_information/{SKU})
+        3. Register fiscal data when missing (POST /items/fiscal_information)
+        4. Link SKU to item (POST /items/fiscal_information/items)
+        5. Poll invoice readiness (GET /can_invoice/items/{ITEM_ID})
         """
         sku = fiscal_data.sku
         logger.info(f"Starting fiscal data workflow for item {item_id}, SKU: {sku}")
 
-        # Validate fiscal data before submission
-        if not fiscal_data.is_valid:
-            missing = fiscal_data.get_missing_fields()
-            error_msg = f"Invalid fiscal data for {item_id}: missing {missing}"
+        missing_fields = fiscal_data.get_missing_fields()
+        validation_errors = fiscal_data.get_validation_errors()
+        if missing_fields or validation_errors:
+            error_msg = (
+                f"Invalid fiscal data for {item_id}: "
+                f"missing={missing_fields}, validation_errors={validation_errors}"
+            )
             logger.error(error_msg)
             return FiscalSubmissionResult(
                 success=False,
                 item_id=item_id,
                 sku=sku,
-                status=FiscalSubmissionStatus.FAILED,
+                status=FiscalSubmissionStatus.SKIPPED,
                 fiscal_data=fiscal_data,
+                response={
+                    "missing_fields": missing_fields,
+                    "validation_errors": validation_errors,
+                },
                 error_message=error_msg,
                 error_code="INVALID_FISCAL_DATA",
             )
 
-        # Step 1: Wait for item to be ready for fiscal data
-        try:
-            is_ready, fiscal_info_response, wait_retries = self._wait_for_fiscal_data_ready(
-                item_id, sku
-            )
-
-            if not is_ready:
-                error_msg = (
-                    f"Item {item_id} (SKU: {sku}) not ready for fiscal data submission "
-                    f"after {wait_retries} wait cycles"
-                )
-                logger.error(error_msg)
-                return FiscalSubmissionResult(
-                    success=False,
-                    item_id=item_id,
-                    sku=sku,
-                    status=FiscalSubmissionStatus.FAILED,
-                    fiscal_data=fiscal_data,
-                    response=fiscal_info_response,
-                    error_message=error_msg,
-                    error_code="NOT_READY_FOR_FISCAL_DATA",
-                    retry_count=wait_retries,
-                )
-
-            logger.info(f"Fiscal pre-check completed for item {item_id} (SKU: {sku})")
-
-        except Exception as e:
-            error_msg = f"Failed to verify item readiness for fiscal data: {str(e)}"
-            logger.error(f"{error_msg} for SKU {sku} (item {item_id})")
-            return FiscalSubmissionResult(
-                success=False,
-                item_id=item_id,
-                sku=sku,
-                status=FiscalSubmissionStatus.FAILED,
-                fiscal_data=fiscal_data,
-                error_message=error_msg,
-                error_code="FISCAL_INFO_CHECK_ERROR",
-            )
-
-        # Step 2: Check if fiscal data exists
         check_exists_retry_count = 0
         registration_retry_count = 0
         fiscal_status = FiscalSubmissionStatus.ALREADY_EXISTS
@@ -300,10 +261,9 @@ class FiscalService:
                 fiscal_data=fiscal_data,
                 error_message=error_msg,
                 error_code="CHECK_EXISTS_ERROR",
-                retry_count=wait_retries + check_exists_retry_count,
+                retry_count=check_exists_retry_count,
             )
 
-        # Step 3: Register fiscal data when not found
         if not exists:
             fiscal_status = FiscalSubmissionStatus.REGISTERED
             try:
@@ -336,14 +296,13 @@ class FiscalService:
                     response=error_detail,
                     error_message=error_msg,
                     error_code=error_code or "REGISTER_ERROR",
-                    retry_count=wait_retries + check_exists_retry_count + registration_retry_count,
+                    retry_count=check_exists_retry_count + registration_retry_count,
                 )
         else:
             logger.info(f"Fiscal data already exists for SKU {sku} (item {item_id})")
 
-        total_retry_count = wait_retries + check_exists_retry_count + registration_retry_count
+        total_retry_count = check_exists_retry_count + registration_retry_count
 
-        # Step 4: Link fiscal SKU to published item
         link_retry_count = 0
         try:
             _, link_retry_count = self._wait_for_sku_link(item_id=item_id, sku=sku)
@@ -366,7 +325,6 @@ class FiscalService:
                 retry_count=total_retry_count,
             )
 
-        # Step 5: Verify invoice readiness
         return self._verify_invoice_readiness(
             item_id,
             sku,
