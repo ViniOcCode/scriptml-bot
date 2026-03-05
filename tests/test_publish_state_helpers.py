@@ -29,8 +29,16 @@ class _FeedbackStub:
 
 
 class _FiscalResultStub:
-    def __init__(self, success: bool) -> None:
+    def __init__(
+        self,
+        success: bool,
+        *,
+        status: str = "verified",
+        error_code: str | None = None,
+    ) -> None:
         self.success = success
+        self.status = SimpleNamespace(value=status)
+        self.error_code = error_code
 
 
 def test_build_rollout_flags_artifact_uses_normalized_runtime_values() -> None:
@@ -115,7 +123,12 @@ def test_build_stats_and_problematic_attributes_reflect_feedback() -> None:
         failed=1,
         errors=["x"],
         feedback=_FeedbackStub(),
-        fiscal_results=[_FiscalResultStub(True), _FiscalResultStub(False)],
+        fiscal_results=[
+            _FiscalResultStub(True, status="verified"),
+            _FiscalResultStub(True, status="pending_verification"),
+            _FiscalResultStub(False, status="failed"),
+            _FiscalResultStub(False, status="skipped", error_code="INVALID_FISCAL_DATA"),
+        ],
         clip_results=[
             {"clips_uploaded": 2, "clips_failed": 1},
             {"clips_uploaded": 1, "clips_failed": 0},
@@ -126,7 +139,15 @@ def test_build_stats_and_problematic_attributes_reflect_feedback() -> None:
 
     assert stats["total"] == 4
     assert stats["feedback"] == {"errors": 2}
-    assert stats["fiscal"] == {"submitted": 2, "success": 1, "failed": 1}
+    assert stats["fiscal"] == {
+        "submitted": 4,
+        "verified": 1,
+        "pending_verification": 1,
+        "failed": 2,
+        "skipped_invalid": 1,
+        "already_exists": 0,
+        "registered": 0,
+    }
     assert stats["clips"]["success"] == 3
     assert get_problematic_attributes(use_case) == {"WIDTH": 3}
 

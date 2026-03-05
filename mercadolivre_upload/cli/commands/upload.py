@@ -227,6 +227,15 @@ def upload(
     total_failed = 0
     total_clips_uploaded = 0
     total_clips_failed = 0
+    total_fiscal = {
+        "submitted": 0,
+        "verified": 0,
+        "pending_verification": 0,
+        "failed": 0,
+        "skipped_invalid": 0,
+        "already_exists": 0,
+        "registered": 0,
+    }
     cause_code_counts: dict[str, int] = {}
     warning_code_counts: dict[str, dict[str, int]] = {"success": {}, "failed": {}}
     error_code_counts: dict[str, dict[str, int]] = {"success": {}, "failed": {}}
@@ -270,6 +279,25 @@ def upload(
         batch_clips_uploaded = int(results.get("clips_uploaded", 0))
         batch_clips_failed = int(results.get("clips_failed", 0))
         batch_errors = [str(error) for error in results.get("errors", [])]
+        batch_fiscal = {
+            "submitted": 0,
+            "verified": 0,
+            "pending_verification": 0,
+            "failed": 0,
+            "skipped_invalid": 0,
+            "already_exists": 0,
+            "registered": 0,
+        }
+        batch_fiscal_raw = results.get("fiscal")
+        if isinstance(batch_fiscal_raw, dict):
+            for key in batch_fiscal:
+                batch_fiscal[key] = int(batch_fiscal_raw.get(key, 0) or 0)
+        else:
+            legacy_fiscal_success = int(results.get("fiscal_submitted", 0) or 0)
+            legacy_fiscal_failed = int(results.get("fiscal_failed", 0) or 0)
+            batch_fiscal["submitted"] = legacy_fiscal_success + legacy_fiscal_failed
+            batch_fiscal["verified"] = legacy_fiscal_success
+            batch_fiscal["failed"] = legacy_fiscal_failed
 
         raw_item_results = results.get("item_results", [])
         if isinstance(raw_item_results, list):
@@ -327,6 +355,8 @@ def upload(
         total_clips_uploaded += batch_clips_uploaded
         total_clips_failed += batch_clips_failed
         all_errors.extend(batch_errors)
+        for key in total_fiscal:
+            total_fiscal[key] += batch_fiscal[key]
 
         for index, row in enumerate(batch_products):
             item_result = item_results[index]
@@ -392,6 +422,7 @@ def upload(
                 "size": len(batch_products),
                 "published": batch_published,
                 "failed": batch_failed,
+                "fiscal": batch_fiscal,
             }
         )
         console.print(
@@ -414,6 +445,7 @@ def upload(
         "total_batches": total_batches,
         "published": total_published,
         "failed": total_failed,
+        "fiscal": total_fiscal,
         "clips_uploaded": total_clips_uploaded,
         "clips_failed": total_clips_failed,
         "cause_code_counts": cause_code_counts,
@@ -440,6 +472,15 @@ def upload(
     console.print(f"\n[green]Published: {total_published}[/green]")
     if total_failed > 0:
         console.print(f"[red]Failed: {total_failed}[/red]")
+    if total_fiscal["submitted"] > 0:
+        console.print(
+            "[cyan]Fiscal: "
+            f"submitted={total_fiscal['submitted']}, "
+            f"verified={total_fiscal['verified']}, "
+            f"pending={total_fiscal['pending_verification']}, "
+            f"failed={total_fiscal['failed']}, "
+            f"skipped_invalid={total_fiscal['skipped_invalid']}[/cyan]"
+        )
 
     if total_clips_uploaded > 0:
         console.print(f"[cyan]Clips uploaded: {total_clips_uploaded}[/cyan]")
