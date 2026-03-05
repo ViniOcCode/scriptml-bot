@@ -82,6 +82,15 @@ def _load_field_value_mappings(field_name: str) -> dict[str, str]:
     return field_config.get("value_mappings", {})  # type: ignore[no-any-return]
 
 
+def _load_field_validation(field_name: str) -> dict[str, str]:
+    """Load validation metadata for a fiscal field from config."""
+    config = _load_fiscal_config()
+    fields = config.get("fiscal_fields", {})
+    field_config = fields.get(field_name, {})
+    validation = field_config.get("validation", {})
+    return validation if isinstance(validation, dict) else {}
+
+
 @dataclass
 class FiscalData:
     """Fiscal data for products.
@@ -288,20 +297,54 @@ class FiscalData:
 
         return payload
 
+    def get_validation_errors(self) -> list[str]:
+        """Return semantic and format validation errors for fiscal payload fields."""
+        errors: list[str] = []
+
+        field_values: dict[str, Any] = {
+            "ncm": self.ncm,
+            "origin_detail": self.origin_detail,
+            "cfop": self.cfop,
+            "cest": self.cest,
+        }
+
+        for field_name, field_value in field_values.items():
+            if _is_blank_value(field_value):
+                continue
+
+            validation = _load_field_validation(field_name)
+            pattern = str(validation.get("pattern", "")).strip()
+            if pattern and not re.fullmatch(pattern, str(field_value)):
+                message = str(validation.get("message", "")).strip()
+                errors.append(message or f"Invalid value for {field_name}: {field_value}")
+
+        if self.origin_detail in {"3", "5", "8"} and not self.fci:
+            errors.append("FCI é obrigatório quando origin_detail for 3, 5 ou 8")
+
+        if self.med_anvisa_code:
+            med_anvisa_code = self.med_anvisa_code.strip().upper()
+            if med_anvisa_code == "ISENTO":
+                if not self.med_exemption_reason:
+                    errors.append(
+                        "med_exemption_reason é obrigatório quando med_anvisa_code for ISENTO"
+                    )
+            else:
+                if not re.fullmatch(r"\d{13}", med_anvisa_code):
+                    errors.append("med_anvisa_code deve ter 13 dígitos ou valor ISENTO")
+                if self.med_exemption_reason:
+                    errors.append(
+                        "med_exemption_reason só deve ser enviado com med_anvisa_code=ISENTO"
+                    )
+
+        if self.csosn and self.tax_rule_id is not None:
+            errors.append("csosn e tax_rule_id não podem ser enviados juntos")
+
+        return errors
+
     @property
     def is_valid(self) -> bool:
-        """Check if required fields are present for fiscal submission.
-
-        Required fields per ML API documentation:
-        - sku
-        - title
-        - type
-        - cost
-        - tax_information.ncm
-        - tax_information.origin_type
-        - tax_information.origin_detail
-        """
-        return bool(
+        """Check if required and conditional fiscal validations pass."""
+        required_fields_ok = bool(
             self.sku
             and self.title
             and self.type
@@ -311,6 +354,7 @@ class FiscalData:
             and self.origin_type
             and self.origin_detail
         )
+        return required_fields_ok and not self.get_validation_errors()
 
     @property
     def has_complete_tax_info(self) -> bool:

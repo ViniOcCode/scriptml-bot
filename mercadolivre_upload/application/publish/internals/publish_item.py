@@ -711,7 +711,6 @@ def publish_one(use_case: Any, product: Product, category_id: str) -> bool:
             and use_case.fiscal_service
             and published_item_id
             and product.fiscal
-            and product.fiscal.is_valid
         ):
             logger.info("Queueing fiscal data for %s (item: %s)", product.sku, published_item_id)
             use_case._pending_fiscal.append((published_item_id, product.fiscal))
