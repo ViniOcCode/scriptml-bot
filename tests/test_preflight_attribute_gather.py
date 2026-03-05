@@ -1,9 +1,13 @@
 """Tests for deterministic preflight attribute gather logic."""
 
+import pytest
+
 from mercadolivre_upload.tools.preflight_gather import (
+    CATEGORY_ID_PATTERN,
     _build_attr_indexes,
     evaluate_readiness,
     resolve_attribute_value,
+    resolve_category,
     resolve_header,
 )
 
@@ -97,3 +101,58 @@ def test_evaluate_readiness_blocks_missing_required_when_strict() -> None:
     assert status == "FAIL"
     assert len(blocking) == 2
     assert not warnings
+
+
+class _PreflightResolverStub:
+    def __init__(
+        self,
+        *,
+        predictor_result: str | None = None,
+        leaf_result: str = "MLB1000",
+        category_name: str = "Categoria Teste",
+    ) -> None:
+        self.predictor_result = predictor_result
+        self.leaf_result = leaf_result
+        self.category_name = category_name
+        self.predictor_calls: list[tuple[str, list[str], str]] = []
+
+    def find_category_with_predictor(
+        self, category_name: str, product_titles: list[str], site_id: str = "MLB"
+    ) -> str | None:
+        self.predictor_calls.append((category_name, product_titles, site_id))
+        return self.predictor_result
+
+    def resolve_to_leaf(self, category_id: str) -> str:
+        assert isinstance(category_id, str)
+        return self.leaf_result
+
+    def get_category_data(self, _category_id: str) -> dict[str, str]:
+        return {"name": self.category_name}
+
+
+def test_resolve_category_uses_predictor_with_category_input() -> None:
+    resolver = _PreflightResolverStub(predictor_result="MLB2000", leaf_result="MLB2200")
+
+    category_id, category_name = resolve_category(resolver, "livros fisicos", "MLB")
+
+    assert category_id == "MLB2200"
+    assert category_name == "Categoria Teste"
+    assert resolver.predictor_calls == [("livros fisicos", ["livros fisicos"], "MLB")]
+
+
+def test_resolve_category_skips_predictor_for_direct_category_id() -> None:
+    assert CATEGORY_ID_PATTERN.match("MLB1234")
+    resolver = _PreflightResolverStub(leaf_result="MLB1234")
+
+    category_id, category_name = resolve_category(resolver, "MLB1234", "MLB")
+
+    assert category_id == "MLB1234"
+    assert category_name == "Categoria Teste"
+    assert resolver.predictor_calls == []
+
+
+def test_resolve_category_fails_when_predictor_has_no_match() -> None:
+    resolver = _PreflightResolverStub(predictor_result=None)
+
+    with pytest.raises(ValueError, match="Could not resolve category from input with predictor"):
+        resolve_category(resolver, "quadros decorativos", "MLB")
