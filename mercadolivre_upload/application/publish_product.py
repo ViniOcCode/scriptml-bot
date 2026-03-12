@@ -155,7 +155,6 @@ class PublishProductUseCase:
         min_attribute_score: int = 50,
         enable_feedback: bool = True,
         enable_fiscal_submission: bool = True,
-        cache_dir: str | None = None,
         attribute_cache: Any | None = None,
     ):
         """Initialize use case.
@@ -173,8 +172,6 @@ class PublishProductUseCase:
             min_attribute_score: Minimum score for attributes (0-100)
             enable_feedback: Enable validation feedback tracking
             enable_fiscal_submission: Whether to submit fiscal data after publishing
-            cache_dir: Directory containing category attribute cache files
-                (deprecated, use attribute_cache)
             attribute_cache: AttributeCache instance for cached attribute mapping (optional)
         """
         self.category_resolver = category_resolver
@@ -210,7 +207,6 @@ class PublishProductUseCase:
         self.dry_run = dry_run
         self.validation_only = validation_only
         self.enable_fiscal_submission = enable_fiscal_submission
-        self.cache_dir = cache_dir  # Deprecated but kept for backward compatibility
         self.attribute_cache = attribute_cache
 
         self.published = 0
