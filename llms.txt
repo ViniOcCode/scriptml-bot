@@ -10,6 +10,7 @@ Start here: read the README first for high-level workflow, then inspect `mercado
 
 - [README.md](README.md): Primary project overview, quick start, CLI examples (validate/upload), token/security guidance, and developer commands.
 - [AGENTS.md](AGENTS.md): Agent-focused operational guidance and developer shortcuts for automated agents.
+- [skills/](skills/): Domain SKILL.md files — reusable agent knowledge per workflow area. Read the relevant SKILL.md before touching domain code (e.g. `skills/fiscal-upload/SKILL.md` before touching `domain/fiscal/`).
 - [.github/copilot/copilot-instructions.md](.github/copilot/copilot-instructions.md): Copilot instructions blueprint generated for this repository (coding conventions and examples).
 
 ## Specifications

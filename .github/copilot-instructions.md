@@ -1,5 +1,16 @@
 # Copilot Instructions
 
+## Test-Driven Generation (TDG) — required pattern
+
+Always write tests before implementation. The sequence is:
+1. Write the type signature (the contract)
+2. Write failing tests that define correct behavior
+3. Confirm tests fail for the right reason
+4. Implement to make tests pass
+5. Run the full quality gate (`ruff`, `black --check`, `mypy`, `pytest`)
+
+Never paste implementation before the tests exist. If a `SKILL.md` exists under `skills/<domain>/` for the area being changed, read it first — it contains the domain model, invariants, state machines, and what NOT to do.
+
 ## Build, test, and lint commands
 
 - Install dependencies (dev): `uv pip install -e ".[dev]"`
