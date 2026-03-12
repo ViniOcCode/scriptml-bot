@@ -12,7 +12,7 @@ from mercadolivre_upload.api.domains import categories as category_endpoints
 from mercadolivre_upload.api.domains import fiscal as fiscal_endpoints
 from mercadolivre_upload.api.domains import items as item_endpoints
 from mercadolivre_upload.api.domains import media as media_endpoints
-from mercadolivre_upload.auth import AuthManager
+from mercadolivre_upload.auth import TokenManager
 from mercadolivre_upload.infrastructure.http import (
     NON_IDEMPOTENT,
     ResilientHTTPClient,
@@ -83,7 +83,7 @@ class MLApiClient:
 
     def __init__(  # noqa: D107
         self,
-        auth_manager: AuthManager | None = None,
+        auth_manager: TokenManager | None = None,
         http_client: ResilientHTTPClient | None = None,
     ):
         self.auth = auth_manager

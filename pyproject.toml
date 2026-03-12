@@ -138,10 +138,7 @@ strict = false
 disallow_untyped_defs = false
 
 [[tool.mypy.overrides]]
-module = [
-    "mercadolivre_upload.infrastructure.metrics",
-    "mercadolivre_upload.domain.validation.base",
-]
+module = ["mercadolivre_upload.domain.validation.base"]
 disable_error_code = ["import-not-found"]
 
 # =============================================================================

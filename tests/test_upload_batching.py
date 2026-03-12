@@ -13,7 +13,7 @@ def test_upload_batches_and_writes_reports(tmp_path, monkeypatch):
     rows = _build_rows(10)
 
     monkeypatch.setattr(upload_cmd, "load_config", lambda: {})
-    monkeypatch.setattr(upload_cmd, "AuthManager", MagicMock(return_value=MagicMock()))
+    monkeypatch.setattr(upload_cmd, "TokenManager", MagicMock(return_value=MagicMock()))
     monkeypatch.setattr(upload_cmd, "MLApiClient", MagicMock(return_value=MagicMock()))
     monkeypatch.setattr(upload_cmd, "AttributeCache", MagicMock(return_value=MagicMock()))
     monkeypatch.setattr(upload_cmd, "CategoryAdapter", MagicMock(return_value=MagicMock()))

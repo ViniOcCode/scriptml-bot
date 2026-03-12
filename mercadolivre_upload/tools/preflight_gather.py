@@ -20,7 +20,7 @@ import yaml
 from mercadolivre_upload.adapters.spreadsheet.parser import SpreadsheetParser
 from mercadolivre_upload.api.category_adapter import CategoryAdapter
 from mercadolivre_upload.api.client import MLApiClient
-from mercadolivre_upload.auth import AuthManager
+from mercadolivre_upload.auth import TokenManager
 from mercadolivre_upload.domain.cache_attribute_mapper_helpers import (
     extract_variation_hint_from_normalized,
     is_blocked_header,
@@ -877,7 +877,7 @@ def run_preflight(
     """Run deterministic preflight gatherer and persist artifacts."""
     config = load_merged_yaml_config(*RUNTIME_SPLIT_CONFIG_PATHS)
 
-    auth_manager = AuthManager()
+    auth_manager = TokenManager()
     api_client = MLApiClient(auth_manager)
     attribute_cache = AttributeCache(cache_dir=str(cache_dir))
     prediction_cache = PredictionCache(cache_dir=str(cache_dir / "predictions"))

@@ -167,7 +167,7 @@ class TestValidateCommand:
 class TestAuthCommand:
     """Tests for auth command."""
 
-    @patch("mercadolivre_upload.cli.AuthManager")
+    @patch("mercadolivre_upload.auth.TokenManager")
     def test_auth_set_token(self, mock_auth_class):
         """Test auth with token option."""
         mock_auth = MagicMock()
@@ -179,7 +179,7 @@ class TestAuthCommand:
         assert "Token configurado" in result.output
         mock_auth.set_token.assert_called_once_with("my_token_123")
 
-    @patch("mercadolivre_upload.cli.AuthManager")
+    @patch("mercadolivre_upload.auth.TokenManager")
     def test_auth_refresh_success(self, mock_auth_class):
         """Test auth refresh success."""
         mock_auth = MagicMock()
@@ -191,7 +191,7 @@ class TestAuthCommand:
         assert "Token atualizado" in result.output
         mock_auth.refresh_token.assert_called_once()
 
-    @patch("mercadolivre_upload.cli.AuthManager")
+    @patch("mercadolivre_upload.auth.TokenManager")
     def test_auth_refresh_error(self, mock_auth_class):
         """Test auth refresh with error."""
         mock_auth = MagicMock()
@@ -203,7 +203,7 @@ class TestAuthCommand:
         assert result.exit_code == 1
         assert "Erro ao atualizar token" in result.output
 
-    @patch("mercadolivre_upload.cli.AuthManager")
+    @patch("mercadolivre_upload.auth.TokenManager")
     def test_auth_status_authenticated(self, mock_auth_class):
         """Test auth status when authenticated."""
         mock_auth = MagicMock()
@@ -217,7 +217,7 @@ class TestAuthCommand:
         assert "Autenticado" in result.output
         assert "user123" in result.output
 
-    @patch("mercadolivre_upload.cli.AuthManager")
+    @patch("mercadolivre_upload.auth.TokenManager")
     def test_auth_status_authenticated_without_user_id(self, mock_auth_class):
         """Test auth status output when user_id is not available."""
         mock_auth = MagicMock()
@@ -231,7 +231,7 @@ class TestAuthCommand:
         assert "Autenticado" in result.output
         assert "None" not in result.output
 
-    @patch("mercadolivre_upload.cli.AuthManager")
+    @patch("mercadolivre_upload.auth.TokenManager")
     def test_auth_status_not_authenticated(self, mock_auth_class):
         """Test auth status when not authenticated."""
         mock_auth = MagicMock()

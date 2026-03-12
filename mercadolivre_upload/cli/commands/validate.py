@@ -33,11 +33,6 @@ from mercadolivre_upload.cli.commands.upload import (
 from mercadolivre_upload.cli.commands.upload_reporting import (
     _empty_category_resolution_summary,
     _ensure_observability_evidence,
-    _extract_cause_codes,  # noqa: F401
-    _extract_decision_classified_codes,  # noqa: F401
-    _increment_code_counter,  # noqa: F401
-    _is_error_classification,  # noqa: F401
-    _is_warning_classification,  # noqa: F401
     _merge_category_resolution_summary,
     _top_code_entries,
     _top_codes_by_status,

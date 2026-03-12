@@ -75,31 +75,13 @@ def isolate_token_path_for_tests():
         del os.environ["MERCADO_LIVRE_TOKEN_PATH"]
 
 
-@pytest.fixture
-def mock_auth_manager():
-    """
-    Retorna um AuthManager mockado com credenciais e token válidos.
-    """
-    with patch("mercadolivre_upload.application.publish_product.AuthManager") as mock_auth_class:
-        mock_auth = MagicMock()
-        mock_auth.is_authenticated.return_value = True
-        mock_auth.get_valid_token.return_value = "mock_access_token_12345"
-        mock_auth.get_auth_status.return_value = {
-            "status": "authenticated",
-            "authenticated": True,
-            "user_id": "123456789",
-        }
-        mock_auth_class.return_value = mock_auth
-        yield mock_auth
-
-
 @pytest.fixture(autouse=True)
 def mock_auth_manager_global():
     """
-    Fixture autouse que garante que AuthManager seja mockado em todos os testes.
-    Isso evita que o AuthManager tente carregar credenciais reais.
+    Fixture autouse que garante que TokenManager seja mockado em todos os testes.
+    Isso evita que o TokenManager tente carregar credenciais reais.
     """
-    with patch("mercadolivre_upload.auth.AuthManager") as mock_auth_class:
+    with patch("mercadolivre_upload.auth.TokenManager") as mock_auth_class:
         mock_auth = MagicMock()
         mock_auth.is_authenticated.return_value = True
         mock_auth.get_valid_token.return_value = "mock_access_token_12345"
