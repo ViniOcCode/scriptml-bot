@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from auth.authenticator import (
+from mercadolivre_upload.compat.authenticator import (
     AuthCredentials,
     AuthError,
     AuthManager,
@@ -23,7 +23,7 @@ from auth.authenticator import (
 
 @pytest.fixture(autouse=True)
 def _compat_auth_plaintext_mode(monkeypatch):
-    """Keep compatibility-shim tests on explicit plaintext mode."""
+    """Keep auth tests on explicit plaintext mode (no secure storage)."""
     monkeypatch.setenv("MERCADO_LIVRE_USE_SECURE_STORAGE", "0")
     monkeypatch.setenv("MERCADO_LIVRE_AUTO_MIGRATE_TOKENS", "0")
 
