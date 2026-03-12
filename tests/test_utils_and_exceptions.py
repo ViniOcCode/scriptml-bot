@@ -8,22 +8,21 @@ from mercadolivre_upload.adapters.spreadsheet.exceptions import (
     ValidationError,
 )
 from mercadolivre_upload.domain import types as type_defs
-from mercadolivre_upload.utils.text import (
-    normalize_column_name,
-    normalize_for_fuzzy_matching,
-    normalize_text,
-)
+from mercadolivre_upload.shared.utils.text_utils import TextNormalizer
 
 
 def test_text_normalization_helpers() -> None:
-    assert normalize_column_name("Título do Anúncio!!") == "titulo_do_anuncio"
-    assert normalize_column_name("") == ""
+    # column-name style: lowercase + remove accents + spaces → underscores
+    assert TextNormalizer.normalize("Título do Anúncio!!").replace(" ", "_") == "titulo_do_anuncio"
+    assert TextNormalizer.normalize("") == ""
 
-    assert normalize_text("  Ção  ") == "cao"
-    assert normalize_text("  Ção  ", keep_accents=True) == "ção"
+    # plain text normalization: lowercase + strip + remove accents
+    assert TextNormalizer.normalize("  Ção  ") == "cao"
+    assert TextNormalizer.normalize_keep_accents("  Ção  ") == "ção"
 
-    assert normalize_for_fuzzy_matching("Café,  Premium!! 500ml") == "cafe premium 500ml"
-    assert normalize_for_fuzzy_matching("") == ""
+    # fuzzy matching: remove accents, punctuation, collapse whitespace
+    assert TextNormalizer.normalize("Café,  Premium!! 500ml") == "cafe premium 500ml"
+    assert TextNormalizer.normalize("") == ""
 
 
 def test_parser_exceptions_payloads() -> None:
