@@ -40,7 +40,7 @@ state = {"verbose": False, "output_format": "text"}
 
 
 def _get_auth_manager_cls() -> Any:
-    return import_module("mercadolivre_upload.auth").AuthManager
+    return import_module("mercadolivre_upload.auth").TokenManager
 
 
 def setup_logging(verbose: bool = False) -> None:

@@ -7,7 +7,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from mercadolivre_upload.auth import AuthManager
+from mercadolivre_upload.auth import TokenManager
 from mercadolivre_upload.auth.exceptions import AuthError
 
 logger = logging.getLogger(__name__)
@@ -27,7 +27,7 @@ def check() -> None:
 
     # Check auth
     try:
-        auth = AuthManager()
+        auth = TokenManager()
         token = auth.get_access_token(auto_refresh=False)
         auth_ok = token is not None
         table.add_row(

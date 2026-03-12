@@ -16,7 +16,7 @@ from mercadolivre_upload.adapters.spreadsheet.parser import SpreadsheetParser
 from mercadolivre_upload.api.category_adapter import CategoryAdapter
 from mercadolivre_upload.api.client import MLApiClient
 from mercadolivre_upload.application.publish_product import PublishProductUseCase
-from mercadolivre_upload.auth import AuthManager
+from mercadolivre_upload.auth import TokenManager
 from mercadolivre_upload.cli.commands.batch_reporting import (
     _extract_group_flow_routing,
     _extract_rollout_flags_snapshot,
@@ -67,7 +67,7 @@ def build_publish_use_case(
     validation_only: bool = False,
 ) -> PublishProductUseCase:
     """Build upload/validate use case with shared dependency wiring."""
-    auth_manager = AuthManager()
+    auth_manager = TokenManager()
     api_client = MLApiClient(auth_manager)
     cache = AttributeCache(cache_dir=str(cache_dir))
 

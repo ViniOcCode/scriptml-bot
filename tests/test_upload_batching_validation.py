@@ -29,7 +29,7 @@ def test_upload_uses_validation_decision_codes_when_taxonomy_is_missing(tmp_path
     rows = _build_rows(1)
 
     monkeypatch.setattr(upload_cmd, "load_config", lambda: {})
-    monkeypatch.setattr(upload_cmd, "AuthManager", MagicMock(return_value=MagicMock()))
+    monkeypatch.setattr(upload_cmd, "TokenManager", MagicMock(return_value=MagicMock()))
     monkeypatch.setattr(upload_cmd, "MLApiClient", MagicMock(return_value=MagicMock()))
     monkeypatch.setattr(upload_cmd, "AttributeCache", MagicMock(return_value=MagicMock()))
     monkeypatch.setattr(upload_cmd, "CategoryAdapter", MagicMock(return_value=MagicMock()))

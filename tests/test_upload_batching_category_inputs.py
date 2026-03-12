@@ -16,7 +16,7 @@ def test_upload_ignores_row_level_categories_for_execution_and_reports_metadata(
     rows[2]["categoria-id"] = "MLB2000"
 
     monkeypatch.setattr(upload_cmd, "load_config", lambda: {})
-    monkeypatch.setattr(upload_cmd, "AuthManager", MagicMock(return_value=MagicMock()))
+    monkeypatch.setattr(upload_cmd, "TokenManager", MagicMock(return_value=MagicMock()))
     monkeypatch.setattr(upload_cmd, "MLApiClient", MagicMock(return_value=MagicMock()))
     monkeypatch.setattr(upload_cmd, "AttributeCache", MagicMock(return_value=MagicMock()))
     monkeypatch.setattr(upload_cmd, "CategoryAdapter", MagicMock(return_value=MagicMock()))
