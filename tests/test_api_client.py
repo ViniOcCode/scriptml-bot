@@ -343,3 +343,36 @@ def test_diagnose_picture_requires_single_identifier():
 
     with pytest.raises(ValueError):
         client.diagnose_picture(picture_url="https://example.com/image.jpg", picture_id="PIC-1")
+
+
+def test_put_returns_json_response():
+    response = MagicMock(spec=requests.Response)
+    response.status_code = 200
+    response.json.return_value = {"id": "MLB1234", "status": "paused"}
+
+    http_client = MagicMock()
+    http_client.put.return_value = response
+
+    client = MLApiClient(http_client=http_client)
+    result = client.put("/items/MLB1234", json={"status": "paused"})
+
+    assert result == {"id": "MLB1234", "status": "paused"}
+    http_client.put.assert_called_once()
+    response.raise_for_status.assert_called_once()
+
+
+def test_update_item_calls_put_with_item_endpoint_and_data():
+    response = MagicMock(spec=requests.Response)
+    response.status_code = 200
+    response.json.return_value = {"id": "MLB1234", "status": "paused"}
+
+    http_client = MagicMock()
+    http_client.put.return_value = response
+
+    client = MLApiClient(http_client=http_client)
+    result = client.update_item("MLB1234", {"status": "paused"})
+
+    assert result == {"id": "MLB1234", "status": "paused"}
+    _args, kwargs = http_client.put.call_args
+    assert "items/MLB1234" in _args[0]
+    assert kwargs["json"] == {"status": "paused"}

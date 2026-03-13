@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import requests
+
 from mercadolivre_upload.domain.product.model import Product
 
 from .api_validation_repair import (
@@ -690,6 +692,20 @@ def publish_one(use_case: Any, product: Product, category_id: str) -> bool:
         logger.info("Published %s: %s", product.sku, published_item_id)
         if cbt_item_id and cbt_item_id != published_item_id:
             logger.debug("CBT parent item ID for %s: %s", product.sku, cbt_item_id)
+
+        if use_case.publish_inactive and published_item_id:
+            try:
+                use_case.publisher.update_item(published_item_id, {"status": "paused"})
+                logger.info(
+                    "Paused item %s after publish (publish_inactive=True)", published_item_id
+                )
+            except (requests.RequestException, RuntimeError, ValueError, TypeError) as exc:
+                logger.warning(
+                    "Failed to pause item %s after publish: %s — "
+                    "item was published but status was NOT set to paused.",
+                    published_item_id,
+                    exc,
+                )
 
         description_text = product.description.strip()
         if published_item_id and description_text:

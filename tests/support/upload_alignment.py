@@ -135,6 +135,7 @@ class _FakePublisher:
         self.validated_items: list[dict[str, Any]] = []
         self.created_items: list[dict[str, Any]] = []
         self.description_calls: list[tuple[str, str]] = []
+        self.updated_items: list[tuple[str, dict[str, Any]]] = []
 
     def get_available_listing_types(self, category_id: str) -> list[dict[str, str]]:
         return self.listing_types
@@ -156,6 +157,10 @@ class _FakePublisher:
     def create_item_description(self, item_id: str, plain_text: str) -> dict[str, str]:
         self.description_calls.append((item_id, plain_text))
         return {"id": f"{item_id}-description"}
+
+    def update_item(self, item_id: str, data: dict[str, Any]) -> dict[str, Any]:
+        self.updated_items.append((item_id, data))
+        return {"id": item_id}
 
 
 class _StaticAttributeCache:

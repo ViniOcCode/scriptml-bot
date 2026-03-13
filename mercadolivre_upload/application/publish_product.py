@@ -156,6 +156,7 @@ class PublishProductUseCase:
         enable_feedback: bool = True,
         enable_fiscal_submission: bool = True,
         attribute_cache: Any | None = None,
+        publish_inactive: bool = False,
     ):
         """Initialize use case.
 
@@ -173,6 +174,7 @@ class PublishProductUseCase:
             enable_feedback: Enable validation feedback tracking
             enable_fiscal_submission: Whether to submit fiscal data after publishing
             attribute_cache: AttributeCache instance for cached attribute mapping (optional)
+            publish_inactive: If True, pause the item immediately after publishing
         """
         self.category_resolver = category_resolver
         self.publisher = publisher
@@ -206,6 +208,7 @@ class PublishProductUseCase:
         self._rollout_flags_artifact = self._build_rollout_flags_artifact()
         self.dry_run = dry_run
         self.validation_only = validation_only
+        self.publish_inactive = publish_inactive
         self.enable_fiscal_submission = enable_fiscal_submission
         self.attribute_cache = attribute_cache
 

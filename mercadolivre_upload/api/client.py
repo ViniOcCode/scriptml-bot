@@ -152,6 +152,36 @@ class MLApiClient:
             )
             return {}
 
+    def put(
+        self,
+        endpoint: str,
+        json: dict[str, Any] | None = None,
+        *,
+        policy: RetryPolicy | None = None,
+    ) -> dict[str, Any]:
+        """PUT request. Idempotent — uses SAFE_RETRY by default."""
+        url = f"{self.base_url}/{endpoint.lstrip('/')}"
+        logger.debug("PUT %s", url)
+        resp = self.http.put(
+            url,
+            headers=self._get_headers(),
+            json=json,
+            policy=policy,
+        )
+        resp.raise_for_status()
+        if resp.status_code == 204:
+            return {}
+        try:
+            return cast(dict[str, Any], resp.json())
+        except ValueError:
+            logger.warning(
+                "PUT %s returned a non-JSON success response (status %s); "
+                "returning empty payload.",
+                endpoint,
+                resp.status_code,
+            )
+            return {}
+
     def get_sites(self) -> list[dict[str, Any]]:
         """Get available sites."""
         return category_endpoints.get_sites(self)
@@ -319,6 +349,10 @@ class MLApiClient:
             plain_text,
             validate_item_id_fn=validate_item_id,
         )
+
+    def update_item(self, item_id: str, data: dict[str, Any]) -> dict[str, Any]:
+        """Update an existing item (e.g. change status to paused/active)."""
+        return item_endpoints.update_item(self, item_id, data)
 
     def get_users_me(self) -> dict[str, Any]:
         """Get current authenticated user info.

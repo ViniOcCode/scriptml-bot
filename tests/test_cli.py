@@ -88,6 +88,55 @@ class TestUploadCommand:
         assert kwargs["batch_size"] == 3
         assert kwargs["report_dir"] == Path("batch-reports")
 
+    @patch("mercadolivre_upload.cli.app.import_module")
+    def test_upload_forwards_publish_inactive_flag(self, mock_import_module):
+        """Test --publish-inactive is forwarded to the upload command."""
+        mock_upload_module = MagicMock()
+        mock_import_module.return_value = mock_upload_module
+
+        with runner.isolated_filesystem():
+            Path("test.xlsx").write_text("dummy")
+            result = runner.invoke(
+                app,
+                [
+                    "upload",
+                    "test.xlsx",
+                    "--images",
+                    "imgs",
+                    "--category",
+                    "test-category",
+                    "--publish-inactive",
+                ],
+            )
+
+        assert result.exit_code == 0
+        kwargs = mock_upload_module.upload.call_args.kwargs
+        assert kwargs["publish_inactive"] is True
+
+    @patch("mercadolivre_upload.cli.app.import_module")
+    def test_upload_publish_inactive_defaults_to_false(self, mock_import_module):
+        """Test publish_inactive defaults to False when flag is not provided."""
+        mock_upload_module = MagicMock()
+        mock_import_module.return_value = mock_upload_module
+
+        with runner.isolated_filesystem():
+            Path("test.xlsx").write_text("dummy")
+            result = runner.invoke(
+                app,
+                [
+                    "upload",
+                    "test.xlsx",
+                    "--images",
+                    "imgs",
+                    "--category",
+                    "test-category",
+                ],
+            )
+
+        assert result.exit_code == 0
+        kwargs = mock_upload_module.upload.call_args.kwargs
+        assert kwargs["publish_inactive"] is False
+
     def test_upload_requires_new_flow_params(self):
         """Test upload requires --images and --category."""
         with runner.isolated_filesystem():

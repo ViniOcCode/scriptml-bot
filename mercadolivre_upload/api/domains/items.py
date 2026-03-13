@@ -70,3 +70,8 @@ def create_item_description(
     """Create or update item description."""
     validate_item_id_fn(item_id)
     return client.post(f"/items/{item_id}/description", json={"plain_text": plain_text})
+
+
+def update_item(client: "MLApiClient", item_id: str, data: dict[str, Any]) -> dict[str, Any]:
+    """Update an existing item via PUT (e.g. change status to paused/active)."""
+    return client.put(f"/items/{item_id}", json=data)

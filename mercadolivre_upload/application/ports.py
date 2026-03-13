@@ -54,6 +54,10 @@ class ItemPublisherPort(Protocol):
         """Create/update item description using description endpoint."""
         ...
 
+    def update_item(self, item_id: str, data: dict[str, Any]) -> dict[str, Any]:
+        """Update an existing item (e.g. change status to paused/active)."""
+        ...
+
 
 class ShippingResolverPort(Protocol):
     """Port for shipping mode resolution."""

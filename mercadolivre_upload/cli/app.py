@@ -61,6 +61,11 @@ def upload(
     detailed: bool = typer.Option(False, "--detailed", "-d"),  # noqa: B008
     batch_size: int = typer.Option(5, "--batch-size", min=1),  # noqa: B008
     report_dir: Path = typer.Option(Path("cache/reports"), "--report-dir"),  # noqa: B008
+    publish_inactive: bool = typer.Option(  # noqa: B008
+        False,
+        "--publish-inactive/--no-publish-inactive",
+        help="Publish items in paused (inactive) state. Items can be activated later.",
+    ),
 ) -> Any:
     """Upload products using the new CLI implementation only."""
     setup_logging(verbose)
@@ -81,6 +86,7 @@ def upload(
         detailed=detailed,
         batch_size=batch_size,
         report_dir=report_dir,
+        publish_inactive=publish_inactive,
     )
 
 

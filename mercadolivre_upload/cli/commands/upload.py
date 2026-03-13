@@ -60,6 +60,7 @@ def build_publish_use_case(
     config: dict[str, Any],
     dry_run: bool = False,
     validation_only: bool = False,
+    publish_inactive: bool = False,
 ) -> PublishProductUseCase:
     """Build upload/validate use case with shared dependency wiring."""
     auth_manager = TokenManager()
@@ -91,6 +92,7 @@ def build_publish_use_case(
         config=config,
         dry_run=dry_run,
         validation_only=validation_only,
+        publish_inactive=publish_inactive,
         attribute_cache=cache,
     )
 
@@ -183,6 +185,11 @@ def upload(
     detailed: bool = typer.Option(False, "--detailed", "-d"),  # noqa: B008
     batch_size: int = typer.Option(5, "--batch-size", min=1, help="Items per batch"),  # noqa: B008
     report_dir: Path = typer.Option(Path("cache/reports"), "--report-dir"),  # noqa: B008
+    publish_inactive: bool = typer.Option(  # noqa: B008
+        False,
+        "--publish-inactive/--no-publish-inactive",
+        help="Publish items in paused (inactive) state. Items can be activated later.",
+    ),
 ) -> Any:
     """Upload products from Excel to Mercado Livre."""
     console.print(Panel.fit("Mercado Livre Bulk Upload", style="cyan"))
@@ -201,6 +208,7 @@ def upload(
         images=images,
         cache_dir=cache_dir,
         config=config,
+        publish_inactive=publish_inactive,
     )
 
     # Parse products
