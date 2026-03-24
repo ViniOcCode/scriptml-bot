@@ -15,6 +15,7 @@ from mercadolivre_upload.adapters.json_payload_reader import (
     InvalidPayloadError,
     JsonPayloadReader,
 )
+from mercadolivre_upload.api.exceptions import MLApiError
 from mercadolivre_upload.application.ports import ItemPublisherPort
 from mercadolivre_upload.application.validators.seller_policy import SellerPolicyValidator
 
@@ -111,6 +112,19 @@ class PublishJsonUseCase:
         # 5. Publish item
         try:
             item = self._publisher.create_item(payload)
+        except MLApiError as exc:
+            blocking = [c for c in exc.causes if c.get("type") == "error"]
+            causes_str = "; ".join(
+                f"[{c.get('code', '?')}] {c.get('message', '')}" for c in blocking
+            ) or str(exc)
+            logger.error("ML API rejected %s: %s", path, causes_str)
+            return PublishJsonResult(
+                sku=read_result.sku,
+                path=str(path),
+                status="failed",
+                error=causes_str,
+                warnings=warnings,
+            )
         except Exception as exc:  # noqa: BLE001
             logger.error("Failed to publish %s: %s", path, exc)
             return PublishJsonResult(
