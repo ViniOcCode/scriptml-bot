@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
 
+import requests
+
 from mercadolivre_upload.adapters.json_payload_reader import (
     InvalidPayloadError,
     JsonPayloadReader,
@@ -236,3 +238,48 @@ class TestSellerPolicyVariations:
         result = _make_read_result_with_variations(variation_prices=[])
         violations = policy.validate(result.payload)
         assert violations.has_errors
+
+
+class TestPublishJsonApiErrors:
+    """PublishJsonUseCase must surface ML API cause codes in PublishJsonResult.error."""
+
+    def test_400_with_ml_causes_formats_error_field(self, tmp_path: Path) -> None:
+        """MLApiError causes must be formatted into result.error as [code] message."""
+        from mercadolivre_upload.api.exceptions import MLApiError
+
+        ml_cause = {
+            "cause_id": 147,
+            "type": "error",
+            "code": "item.attributes.missing_required",
+            "references": ["item.attributes"],
+            "message": "The attributes [BRAND] are required for category MLB437616",
+        }
+        api_error = MLApiError(
+            "400 Client Error",
+            response_body={"error": "validation_error", "status": 400, "cause": [ml_cause]},
+        )
+
+        use_case, reader, publisher = _make_use_case()
+        reader.read.return_value = _make_read_result()
+        publisher.create_item.side_effect = api_error
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "failed"
+        assert "item.attributes.missing_required" in (result.error or "")
+        assert "BRAND" in (result.error or "")
+
+    def test_400_without_ml_body_falls_back_to_http_error_str(self, tmp_path: Path) -> None:
+        """Plain HTTPError (no ML body) must still produce a failed result with error string."""
+        plain_error = requests.HTTPError(
+            "400 Client Error: Bad Request for url: https://api.mercadolibre.com/items"
+        )
+
+        use_case, reader, publisher = _make_use_case()
+        reader.read.return_value = _make_read_result()
+        publisher.create_item.side_effect = plain_error
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "failed"
+        assert "400" in (result.error or "")
