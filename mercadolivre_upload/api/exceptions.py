@@ -12,7 +12,7 @@ from typing import Any
 import requests
 
 
-class MLApiError(requests.HTTPError):
+class MLApiError(requests.HTTPError):  # type: ignore[misc]
     """HTTPError enriched with the ML API JSON error body.
 
     Attributes:
@@ -31,6 +31,4 @@ class MLApiError(requests.HTTPError):
         super().__init__(*args, **kwargs)
         self.response_body: dict[str, Any] | None = response_body
         causes_raw = (response_body or {}).get("cause")
-        self.causes: list[dict[str, Any]] = (
-            list(causes_raw) if isinstance(causes_raw, list) else []
-        )
+        self.causes: list[dict[str, Any]] = list(causes_raw) if isinstance(causes_raw, list) else []
