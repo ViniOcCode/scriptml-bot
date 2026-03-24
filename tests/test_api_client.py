@@ -376,3 +376,71 @@ def test_update_item_calls_put_with_item_endpoint_and_data():
     _args, kwargs = http_client.put.call_args
     assert "items/MLB1234" in _args[0]
     assert kwargs["json"] == {"status": "paused"}
+
+
+def test_create_item_400_raises_ml_api_error_with_body():
+    """POST /items 400 with ML JSON body must raise MLApiError with parsed causes."""
+    from mercadolivre_upload.api.exceptions import MLApiError  # fails until Step 2
+
+    ml_error_body = {
+        "message": "Validation error",
+        "error": "validation_error",
+        "status": 400,
+        "cause": [
+            {
+                "cause_id": 147,
+                "type": "error",
+                "code": "item.attributes.missing_required",
+                "references": ["item.attributes"],
+                "message": "The attributes [BRAND] are required for category MLB437616",
+            }
+        ],
+    }
+    response = MagicMock(spec=requests.Response)
+    response.status_code = 400
+    response.json.return_value = ml_error_body
+
+    http_client = MagicMock()
+    http_client.post.return_value = response
+
+    client = MLApiClient(http_client=http_client)
+
+    with pytest.raises(MLApiError) as exc_info:
+        client.create_item({"title": "Produto Teste"})
+
+    assert exc_info.value.causes == ml_error_body["cause"]
+    response.raise_for_status.assert_not_called()
+
+
+def test_create_item_400_non_json_falls_back_to_http_error():
+    """POST /items 400 with non-JSON body must fall back to plain HTTPError."""
+    response = MagicMock(spec=requests.Response)
+    response.status_code = 400
+    response.json.side_effect = ValueError("invalid json")
+    response.raise_for_status.side_effect = requests.HTTPError("bad request")
+
+    http_client = MagicMock()
+    http_client.post.return_value = response
+
+    client = MLApiClient(http_client=http_client)
+
+    with pytest.raises(requests.HTTPError):
+        client.create_item({"title": "Produto Teste"})
+
+    response.raise_for_status.assert_called_once()
+
+
+def test_validate_item_400_still_returns_body_not_raises():
+    """Regression guard: /items/validate 400 behavior must remain unchanged (return body)."""
+    response = MagicMock(spec=requests.Response)
+    response.status_code = 400
+    response.json.return_value = {"cause": [{"code": "item.invalid"}]}
+
+    http_client = MagicMock()
+    http_client.post.return_value = response
+
+    client = MLApiClient(http_client=http_client)
+    result = client.validate_item({"title": "Produto Teste"})
+
+    assert result == {"cause": [{"code": "item.invalid"}]}
+    response.raise_for_status.assert_not_called()
