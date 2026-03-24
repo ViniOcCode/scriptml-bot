@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 from mercadolivre_upload.adapters.json_payload_reader import (
@@ -68,6 +69,34 @@ def _make_read_result(
         sku=sku,
         category_id=category_id,
         ai_suggested=ai_suggested,
+    )
+
+
+def _make_read_result_with_variations(
+    *,
+    variation_prices: list[float],
+    listing_type_id: str = "gold_special",
+) -> ReadPayloadResult:
+    """Build a ReadPayloadResult whose price lives in variations, not at root."""
+    payload: dict[str, Any] = {
+        "title": "Produto com Variações",
+        "category_id": "MLB271599",
+        "currency_id": "BRL",
+        "buying_mode": "buy_it_now",
+        "listing_type_id": listing_type_id,
+        "condition": "new",
+        "pictures": [{"source": "https://cdn.ml.com/img.jpg"}],
+        "variations": [
+            {"price": p, "available_quantity": 5, "attribute_combinations": []}
+            for p in variation_prices
+        ],
+    }
+    return ReadPayloadResult(
+        payload=payload,
+        description=None,
+        sku="VAR-001",
+        category_id="MLB271599",
+        ai_suggested=False,
     )
 
 
@@ -180,3 +209,30 @@ class TestPublishJsonUseCase:
 
         assert result.status == "failed"
         assert "API offline" in (result.error or "")
+
+
+class TestSellerPolicyVariations:
+    """Policy price-range checks must work for variation payloads (no root price)."""
+
+    def test_variacao_preco_valido_nao_bloqueia(self) -> None:
+        config = _make_seller_config(min_price=5.0, max_price=9999.0)
+        policy = SellerPolicyValidator(config)
+        result = _make_read_result_with_variations(variation_prices=[59.90, 79.90])
+        violations = policy.validate(result.payload)
+        assert not violations.has_errors
+
+    def test_variacao_preco_minimo_abaixo_bloqueia(self) -> None:
+        config = _make_seller_config(min_price=5.0, max_price=9999.0)
+        policy = SellerPolicyValidator(config)
+        result = _make_read_result_with_variations(variation_prices=[2.00, 59.90])
+        violations = policy.validate(result.payload)
+        assert violations.has_errors
+        assert any(v.field == "price" for v in violations.violations)
+
+    def test_variacao_sem_preco_em_nenhum_lugar_bloqueia(self) -> None:
+        """Empty variations list → effective price 0.0 → always below min."""
+        config = _make_seller_config(min_price=5.0, max_price=9999.0)
+        policy = SellerPolicyValidator(config)
+        result = _make_read_result_with_variations(variation_prices=[])
+        violations = policy.validate(result.payload)
+        assert violations.has_errors
