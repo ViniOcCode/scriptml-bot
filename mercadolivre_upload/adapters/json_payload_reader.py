@@ -27,6 +27,12 @@ REQUIRED_FIELDS = {
     "pictures",
 }
 
+# Fields that live inside each variation — not required at root when variations present
+_VARIATION_LEVEL_FIELDS: frozenset[str] = frozenset({"price", "available_quantity"})
+
+# currency_id is always required by ML API at root; default to BRL when builder omits it
+_DEFAULT_CURRENCY_ID = "BRL"
+
 
 class InvalidPayloadError(Exception):
     """Raised when a payload.json is missing required fields or is structurally invalid."""
@@ -72,8 +78,15 @@ class JsonPayloadReader:
         sku: str | None = meta.get("sku")
         ai_suggested: bool = bool(meta.get("category_ai_suggested", False))
 
-        # Validate required fields
-        missing = REQUIRED_FIELDS - raw.keys()
+        # Inject currency_id default when missing (ml-builder omits it for variation items)
+        has_variations = bool(raw.get("variations"))
+        if "currency_id" not in raw:
+            logger.warning("currency_id missing in %s; defaulting to BRL", path.name)
+            raw["currency_id"] = _DEFAULT_CURRENCY_ID
+
+        # price and available_quantity are only required at root when no variations present
+        effective_required = REQUIRED_FIELDS - (_VARIATION_LEVEL_FIELDS if has_variations else set())
+        missing = effective_required - raw.keys()
         if missing:
             raise InvalidPayloadError(
                 f"Campos obrigatórios ausentes em {path.name}: {sorted(missing)}"
