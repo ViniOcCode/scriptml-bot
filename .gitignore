@@ -48,6 +48,7 @@ AGENTS/
 .benchmarks/*
 .ruff_cache/
 scripts/
+config/seller.yaml
 
 # Documentation build
 docs/*

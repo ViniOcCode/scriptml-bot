@@ -210,18 +210,13 @@ def publish_batch(
 
     if dry_run:
         console.print(
-            f"\n{len(results)} validados — "
-            f"{skipped_count} ok, "
-            f"{failed_count} com erro"
+            f"\n{len(results)} validados — " f"{skipped_count} ok, " f"{failed_count} com erro"
         )
         console.print(
             "Para publicar os válidos: [cyan]ml-upload publish-batch[/cyan] (sem --dry-run)"
         )
     else:
-        console.print(
-            f"\nResultado: {published_count} publicados, "
-            f"{failed_count} falha(s)"
-        )
+        console.print(f"\nResultado: {published_count} publicados, " f"{failed_count} falha(s)")
 
     if results:
         report_path = _write_report(results, report_dir, category_id_str)

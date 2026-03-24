@@ -89,9 +89,7 @@ class PublishJsonUseCase:
         warnings = [v.message for v in policy_result.violations if v.severity == "warning"]
 
         if policy_result.has_errors:
-            errors = "; ".join(
-                v.message for v in policy_result.violations if v.severity == "error"
-            )
+            errors = "; ".join(v.message for v in policy_result.violations if v.severity == "error")
             logger.warning("Policy errors for %s: %s", path, errors)
             return PublishJsonResult(
                 sku=read_result.sku,

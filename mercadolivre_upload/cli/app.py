@@ -152,6 +152,36 @@ def auth(
         console.print("Não autenticado")
 
 
+@app.command()
+def publish_json(
+    path: Path = typer.Argument(..., help="Path to payload.json"),  # noqa: B008
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Validate without publishing."
+    ),  # noqa: B008
+    report_dir: Path = typer.Option(Path("cache/reports"), "--report-dir"),  # noqa: B008
+) -> None:
+    """Publish a single payload.json to Mercado Livre."""
+    setup_logging()
+    cmd = import_module("mercadolivre_upload.cli.commands.publish_json")
+    cmd.publish_json(path=path, dry_run=dry_run, report_dir=report_dir)
+
+
+@app.command()
+def publish_batch(
+    batch_dir: Path = typer.Argument(
+        ..., help="Batch directory containing payload.json files"
+    ),  # noqa: B008
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Validate without publishing."
+    ),  # noqa: B008
+    report_dir: Path = typer.Option(Path("cache/reports"), "--report-dir"),  # noqa: B008
+) -> None:
+    """Publish all payload.json files in a batch directory."""
+    setup_logging()
+    cmd = import_module("mercadolivre_upload.cli.commands.publish_json")
+    cmd.publish_batch(batch_dir=batch_dir, dry_run=dry_run, report_dir=report_dir)
+
+
 def main() -> None:
     """Compatibility entry point for tests."""
     import_module("mercadolivre_upload.cli").app()

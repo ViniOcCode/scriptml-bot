@@ -113,7 +113,7 @@ class TestJsonPayloadReader:
 
         results = JsonPayloadReader().read_batch(tmp_path)
         assert len(results) == 3
-        _, payloads = zip(*results)
+        _, payloads = zip(*results, strict=False)
         assert all(isinstance(r, ReadPayloadResult) for r in payloads)
 
     def test_read_batch_falha_individual(self, tmp_path: Path) -> None:

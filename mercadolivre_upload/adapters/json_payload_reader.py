@@ -90,9 +90,7 @@ class JsonPayloadReader:
             ai_suggested=ai_suggested,
         )
 
-    def read_batch(
-        self, batch_dir: Path
-    ) -> list[tuple[Path, ReadPayloadResult | Exception]]:
+    def read_batch(self, batch_dir: Path) -> list[tuple[Path, ReadPayloadResult | Exception]]:
         """Walk batch_dir for payload.json files and read each one.
 
         Expected structure: {batch_dir}/{category_id}/{sku}/payload.json

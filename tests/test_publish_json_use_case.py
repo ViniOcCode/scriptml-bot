@@ -5,15 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
-
 from mercadolivre_upload.adapters.json_payload_reader import (
     InvalidPayloadError,
     JsonPayloadReader,
     ReadPayloadResult,
 )
 from mercadolivre_upload.application.publish_json_use_case import (
-    PublishJsonResult,
     PublishJsonUseCase,
 )
 from mercadolivre_upload.application.validators.seller_policy import (
@@ -164,9 +161,7 @@ class TestPublishJsonUseCase:
 
         use_case.execute(tmp_path / "payload.json")
 
-        publisher.create_item_description.assert_called_once_with(
-            "MLB987654321", "Texto especial"
-        )
+        publisher.create_item_description.assert_called_once_with("MLB987654321", "Texto especial")
 
     def test_publish_sem_description(self, tmp_path: Path) -> None:
         use_case, reader, publisher = _make_use_case()
