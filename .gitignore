@@ -50,7 +50,9 @@ AGENTS/
 scripts/
 config/seller.yaml
 
-# Documentation build
+# Documentation build (ADRs are versioned; generated docs are not)
 docs/*
+!docs/adr/
+!docs/adr/*.md
 *:Zone.Identifier
 *.Zone.Identifier
