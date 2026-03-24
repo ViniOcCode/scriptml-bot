@@ -116,6 +116,41 @@ class TestJsonPayloadReader:
         _, payloads = zip(*results, strict=False)
         assert all(isinstance(r, ReadPayloadResult) for r in payloads)
 
+    # --- variation payload tests ---
+
+    def test_variation_payload_sem_price_root_aceito(self, tmp_path: Path) -> None:
+        """price/available_quantity at root are optional when variations present."""
+        payload = _make_valid_payload()
+        del payload["price"]
+        del payload["available_quantity"]
+        payload["variations"] = [
+            {"price": 59.90, "available_quantity": 5, "attribute_combinations": []}
+        ]
+        path = _write_payload(tmp_path, payload)
+        result = JsonPayloadReader().read(path)
+        assert isinstance(result, ReadPayloadResult)
+
+    def test_variation_payload_currency_id_injetado_como_brl(self, tmp_path: Path) -> None:
+        """currency_id is injected as 'BRL' when absent (ml-builder omits it)."""
+        payload = _make_valid_payload()
+        del payload["price"]
+        del payload["available_quantity"]
+        del payload["currency_id"]
+        payload["variations"] = [
+            {"price": 59.90, "available_quantity": 5, "attribute_combinations": []}
+        ]
+        path = _write_payload(tmp_path, payload)
+        result = JsonPayloadReader().read(path)
+        assert result.payload["currency_id"] == "BRL"
+
+    def test_payload_sem_variation_ainda_exige_price_root(self, tmp_path: Path) -> None:
+        """Non-variation payloads must still have price at root."""
+        payload = _make_valid_payload()
+        del payload["price"]
+        path = _write_payload(tmp_path, payload)
+        with pytest.raises(InvalidPayloadError, match="price"):
+            JsonPayloadReader().read(path)
+
     def test_read_batch_falha_individual(self, tmp_path: Path) -> None:
         cat_dir = tmp_path / "MLB271599"
         for sku in ("OK-001", "OK-002"):
