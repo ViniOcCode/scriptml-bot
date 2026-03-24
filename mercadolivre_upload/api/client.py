@@ -12,6 +12,7 @@ from mercadolivre_upload.api.domains import categories as category_endpoints
 from mercadolivre_upload.api.domains import fiscal as fiscal_endpoints
 from mercadolivre_upload.api.domains import items as item_endpoints
 from mercadolivre_upload.api.domains import media as media_endpoints
+from mercadolivre_upload.api.exceptions import MLApiError
 from mercadolivre_upload.auth import TokenManager
 from mercadolivre_upload.infrastructure.http import (
     NON_IDEMPOTENT,
@@ -131,12 +132,25 @@ class MLApiClient:
             policy=policy or NON_IDEMPOTENT,
         )
 
-        # Validation endpoint returns 400 with useful error body
+        # Validation endpoint returns 400 with useful error body — return as dict
         if endpoint.strip("/") == "items/validate" and resp.status_code == 400:
             try:
                 return cast(dict[str, Any], resp.json())
             except ValueError as exc:
                 logger.warning("Validation endpoint returned non-JSON response: %s", exc)
+
+        # For other 4xx errors, capture the ML API JSON body before raising
+        if 400 <= resp.status_code < 500:
+            try:
+                body = cast(dict[str, Any], resp.json())
+            except (ValueError, AttributeError):
+                pass  # non-JSON body — fall through to raise_for_status()
+            else:
+                raise MLApiError(
+                    f"{resp.status_code} Client Error",
+                    response=resp,
+                    response_body=body,
+                )
 
         resp.raise_for_status()
         if resp.status_code == 204:
