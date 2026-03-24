@@ -168,9 +168,9 @@ def publish_json(
 
 @app.command()
 def publish_batch(
-    batch_dir: Path = typer.Argument(
+    batch_dir: Path = typer.Argument(  # noqa: B008
         ..., help="Batch directory containing payload.json files"
-    ),  # noqa: B008
+    ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Validate without publishing."
     ),  # noqa: B008

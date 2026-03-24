@@ -85,7 +85,8 @@ class JsonPayloadReader:
             raw["currency_id"] = _DEFAULT_CURRENCY_ID
 
         # price and available_quantity are only required at root when no variations present
-        effective_required = REQUIRED_FIELDS - (_VARIATION_LEVEL_FIELDS if has_variations else set())
+        excluded = _VARIATION_LEVEL_FIELDS if has_variations else set()
+        effective_required = REQUIRED_FIELDS - excluded
         missing = effective_required - raw.keys()
         if missing:
             raise InvalidPayloadError(
