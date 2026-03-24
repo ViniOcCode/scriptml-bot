@@ -134,6 +134,26 @@ def default_seller_config() -> SellerConfig:
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _effective_price(payload: dict[str, Any]) -> float:
+    """Return effective price for policy checks.
+
+    For variation items, uses the minimum variation price (most conservative
+    check — ensures every variation meets the floor).
+    Returns 0.0 when no price can be determined anywhere.
+    """
+    root_price = payload.get("price")
+    if root_price is not None:
+        return float(root_price)
+    variations: list[dict[str, Any]] = payload.get("variations") or []
+    prices = [float(v["price"]) for v in variations if v.get("price") is not None]
+    return min(prices) if prices else 0.0
+
+
+# ---------------------------------------------------------------------------
 # Validator
 # ---------------------------------------------------------------------------
 
@@ -179,8 +199,8 @@ class SellerPolicyValidator:
                 )
             )
 
-        # Price range checks
-        price = float(payload.get("price", 0))
+        # Price range checks — for variation items, use minimum variation price
+        price = _effective_price(payload)
         if price < self._config.pricing.min_price:
             violations.append(
                 PolicyViolation(
