@@ -48,6 +48,7 @@ class BatchConfig(BaseModel):
 
     human_review_required: bool = True
     publish_inactive: bool = False
+    min_ai_confidence: float = 0.0  # 0.0 = disabled; e.g. 0.70 blocks AI categories < 70%
 
 
 class SellerConfig(BaseModel):
@@ -173,12 +174,14 @@ class SellerPolicyValidator:
         payload: dict[str, Any],
         *,
         ai_suggested: bool = False,
+        category_confidence: float | None = None,
     ) -> PolicyResult:
         """Validate payload against seller rules.
 
         Args:
             payload: Item payload dict (without _meta).
             ai_suggested: Whether the category was suggested by AI.
+            category_confidence: AI confidence score (0.0–1.0); None = not available.
 
         Returns:
             PolicyResult with list of violations (may be empty).
@@ -244,6 +247,25 @@ class SellerPolicyValidator:
                         "Categoria sugerida por IA não foi revisada por humano. "
                         "Defina human_reviewed: true em batch_manifest.json ou "
                         "human_review_required: false em seller.yaml"
+                    ),
+                    severity="error",
+                )
+            )
+
+        # AI confidence threshold check
+        min_conf = self._config.batch.min_ai_confidence
+        if (
+            ai_suggested
+            and min_conf > 0.0
+            and category_confidence is not None
+            and category_confidence < min_conf
+        ):
+            violations.append(
+                PolicyViolation(
+                    field="category_id",
+                    message=(
+                        f"Confiança da categoria IA {category_confidence:.1%} abaixo do mínimo "
+                        f"configurado {min_conf:.1%}. Revise a categoria manualmente."
                     ),
                     severity="error",
                 )

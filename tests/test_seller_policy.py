@@ -24,6 +24,7 @@ def _make_config(
     blocked: list[str] | None = None,
     overrides: dict[str, str] | None = None,
     human_review_required: bool = True,
+    min_ai_confidence: float = 0.0,
 ) -> SellerConfig:
     return SellerConfig(
         listing=ListingConfig(
@@ -32,7 +33,10 @@ def _make_config(
         ),
         pricing=PricingConfig(min_price=min_price, max_price=max_price),
         categories=CategoriesConfig(blocked=blocked or [], overrides=overrides or {}),
-        batch=BatchConfig(human_review_required=human_review_required),
+        batch=BatchConfig(
+            human_review_required=human_review_required,
+            min_ai_confidence=min_ai_confidence,
+        ),
     )
 
 
@@ -142,3 +146,39 @@ seller:
         config = load_seller_config(config_file)
         assert config.listing.allowed_types == ["gold_special"]
         assert config.pricing.min_price == 10.0
+
+
+class TestSellerPolicyConfidenceThreshold:
+    def test_ai_confidence_below_threshold_blocks(self) -> None:
+        config = _make_config(human_review_required=False, min_ai_confidence=0.70)
+        validator = SellerPolicyValidator(config)
+        result = validator.validate(_make_payload(), ai_suggested=True, category_confidence=0.55)
+        assert result.has_errors
+        assert any("Confiança" in v.message for v in result.violations)
+
+    def test_ai_confidence_above_threshold_passes(self) -> None:
+        config = _make_config(human_review_required=False, min_ai_confidence=0.70)
+        validator = SellerPolicyValidator(config)
+        result = validator.validate(_make_payload(), ai_suggested=True, category_confidence=0.85)
+        assert not result.has_errors
+
+    def test_ai_confidence_disabled_zero_passes(self) -> None:
+        """Default min_ai_confidence=0.0 disables the confidence gate."""
+        config = _make_config(human_review_required=False, min_ai_confidence=0.0)
+        validator = SellerPolicyValidator(config)
+        result = validator.validate(_make_payload(), ai_suggested=True, category_confidence=0.10)
+        assert not result.has_errors
+
+    def test_ai_confidence_not_suggested_ignored(self) -> None:
+        """Confidence check only fires when ai_suggested=True."""
+        config = _make_config(human_review_required=True, min_ai_confidence=0.70)
+        validator = SellerPolicyValidator(config)
+        result = validator.validate(_make_payload(), ai_suggested=False, category_confidence=0.20)
+        assert not any("Confiança" in v.message for v in result.violations)
+
+    def test_ai_confidence_none_value_skipped(self) -> None:
+        """category_confidence=None with threshold configured → skip check (no data)."""
+        config = _make_config(human_review_required=False, min_ai_confidence=0.70)
+        validator = SellerPolicyValidator(config)
+        result = validator.validate(_make_payload(), ai_suggested=True, category_confidence=None)
+        assert not result.has_errors
