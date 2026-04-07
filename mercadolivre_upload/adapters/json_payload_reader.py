@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
@@ -49,6 +49,11 @@ class ReadPayloadResult:
     category_id: str  # extracted from payload
     ai_suggested: bool  # _meta.category_ai_suggested
     upload_mode: Literal["legacy_items", "user_products"] = "legacy_items"
+    # Spec validation fields extracted from _meta (all optional for backward compat)
+    publication_ready: bool | None = None  # _meta.publication_ready; None = absent
+    blocking_reasons: list[str] = field(default_factory=list)  # _meta.blocking_reasons
+    category_confidence: float | None = None  # _meta.category_confidence
+    reviewed_fiscal: bool | None = None  # _meta.reviewed_fiscal
 
 
 def _resolve_upload_mode(meta: dict[str, Any], payload: dict[str, Any], path_name: str) -> str:
@@ -79,6 +84,26 @@ def _resolve_upload_mode(meta: dict[str, Any], payload: dict[str, Any], path_nam
     return "legacy_items"
 
 
+def _validate_picture_sources(pictures: list[Any], path_name: str) -> None:
+    """Raise InvalidPayloadError if any picture source is a local filesystem path.
+
+    Accepts: https:// URLs (CDN) and entries without a source key (already-uploaded IDs).
+    Rejects: /absolute/paths, relative/paths, C:\\Windows\\paths — ML API would reject these.
+    """
+    for pic in pictures:
+        if not isinstance(pic, dict):
+            continue
+        source = pic.get("source")
+        if not isinstance(source, str) or not source:
+            continue  # no source key → already-uploaded picture ID → OK
+        if source.startswith(("http://", "https://")):
+            continue  # valid CDN URL
+        raise InvalidPayloadError(
+            f"'pictures[].source' parece um caminho local em {path_name}: {source!r}. "
+            "Apenas URLs HTTP(S) são aceitos no campo 'source'"
+        )
+
+
 def _validate_legacy_payload(payload: dict[str, Any], path_name: str) -> None:
     """Validate a direct /items payload."""
     # Inject currency_id default when missing (ml-builder omits it for variation items)
@@ -96,6 +121,7 @@ def _validate_legacy_payload(payload: dict[str, Any], path_name: str) -> None:
 
     if not payload.get("pictures"):
         raise InvalidPayloadError(f"'pictures' não pode ser vazio em {path_name}")
+    _validate_picture_sources(payload["pictures"], path_name)
 
 
 def _validate_user_products_payload(payload: dict[str, Any], path_name: str) -> None:
@@ -111,6 +137,9 @@ def _validate_user_products_payload(payload: dict[str, Any], path_name: str) -> 
     for index, item in enumerate(items, start=1):
         if not isinstance(item, dict) or not item:
             raise InvalidPayloadError(f"Item inválido em payload.items[{index}] de {path_name}")
+        item_pictures = item.get("pictures", [])
+        if isinstance(item_pictures, list) and item_pictures:
+            _validate_picture_sources(item_pictures, f"{path_name}[item {index}]")
 
 
 def _extract_category_id(payload: dict[str, Any], upload_mode: str) -> str:
@@ -167,6 +196,21 @@ class JsonPayloadReader:
         description: str | None = meta.get("description_plain_text")
         sku: str | None = meta.get("sku")
         ai_suggested: bool = bool(meta.get("category_ai_suggested", False))
+        publication_ready_raw = meta.get("publication_ready")
+        publication_ready: bool | None = (
+            bool(publication_ready_raw) if publication_ready_raw is not None else None
+        )
+        blocking_reasons: list[str] = list(meta.get("blocking_reasons") or [])
+        category_confidence_raw = meta.get("category_confidence")
+        category_confidence: float | None = (
+            float(category_confidence_raw)
+            if isinstance(category_confidence_raw, (int, float))
+            else None
+        )
+        reviewed_fiscal_raw = meta.get("reviewed_fiscal")
+        reviewed_fiscal: bool | None = (
+            bool(reviewed_fiscal_raw) if reviewed_fiscal_raw is not None else None
+        )
 
         payload_obj = raw.get("payload")
         if isinstance(payload_obj, dict):
@@ -192,6 +236,10 @@ class JsonPayloadReader:
             category_id=_extract_category_id(payload, upload_mode),
             ai_suggested=ai_suggested,
             upload_mode=upload_mode,  # type: ignore[arg-type]
+            publication_ready=publication_ready,
+            blocking_reasons=blocking_reasons,
+            category_confidence=category_confidence,
+            reviewed_fiscal=reviewed_fiscal,
         )
 
     def read_batch(self, batch_dir: Path) -> list[tuple[Path, ReadPayloadResult | Exception]]:

@@ -259,3 +259,75 @@ class TestJsonPayloadReader:
         path = _write_payload(tmp_path, {"_meta": {"sku": "ABC-001"}})
         with pytest.raises(InvalidPayloadError, match="payload"):
             self.reader.read(path)
+
+    # --- new _meta fields ---
+
+    def test_read_publication_ready_true(self, tmp_path: Path) -> None:
+        payload = _make_valid_payload()
+        payload["_meta"]["publication_ready"] = True  # type: ignore[index]
+        path = _write_payload(tmp_path, payload)
+        result = self.reader.read(path)
+        assert result.publication_ready is True
+
+    def test_read_publication_ready_false_with_blocking_reasons(self, tmp_path: Path) -> None:
+        payload = _make_valid_payload()
+        payload["_meta"]["publication_ready"] = False  # type: ignore[index]
+        payload["_meta"]["blocking_reasons"] = ["fiscal not resolved"]  # type: ignore[index]
+        path = _write_payload(tmp_path, payload)
+        result = self.reader.read(path)
+        assert result.publication_ready is False
+        assert "fiscal not resolved" in result.blocking_reasons
+
+    def test_read_publication_ready_absent_is_none(self, tmp_path: Path) -> None:
+        """Absent publication_ready in _meta yields None (backward compat)."""
+        path = _write_payload(tmp_path, _make_valid_payload())
+        result = self.reader.read(path)
+        assert result.publication_ready is None
+
+    def test_read_category_confidence_extracted(self, tmp_path: Path) -> None:
+        payload = _make_valid_payload()
+        payload["_meta"]["category_confidence"] = 0.85  # type: ignore[index]
+        path = _write_payload(tmp_path, payload)
+        result = self.reader.read(path)
+        assert result.category_confidence == pytest.approx(0.85)
+
+    def test_read_category_confidence_absent_is_none(self, tmp_path: Path) -> None:
+        path = _write_payload(tmp_path, _make_valid_payload())
+        result = self.reader.read(path)
+        assert result.category_confidence is None
+
+    def test_read_reviewed_fiscal_extracted(self, tmp_path: Path) -> None:
+        payload = _make_valid_payload()
+        payload["_meta"]["reviewed_fiscal"] = True  # type: ignore[index]
+        path = _write_payload(tmp_path, payload)
+        result = self.reader.read(path)
+        assert result.reviewed_fiscal is True
+
+    # --- picture URL validation ---
+
+    def test_picture_source_http_valid(self, tmp_path: Path) -> None:
+        """HTTPS picture sources pass validation without error."""
+        path = _write_payload(tmp_path, _make_valid_payload())
+        result = self.reader.read(path)
+        assert result is not None
+
+    def test_picture_source_local_path_raises(self, tmp_path: Path) -> None:
+        payload = _make_valid_payload()
+        payload["pictures"] = [{"source": "/tmp/foto.jpg"}]
+        path = _write_payload(tmp_path, payload)
+        with pytest.raises(InvalidPayloadError, match="local"):
+            self.reader.read(path)
+
+    def test_picture_source_relative_path_raises(self, tmp_path: Path) -> None:
+        payload = _make_valid_payload()
+        payload["pictures"] = [{"source": "images/foto.jpg"}]
+        path = _write_payload(tmp_path, payload)
+        with pytest.raises(InvalidPayloadError, match="local"):
+            self.reader.read(path)
+
+    def test_picture_source_windows_path_raises(self, tmp_path: Path) -> None:
+        payload = _make_valid_payload()
+        payload["pictures"] = [{"source": "C:\\Users\\foto.jpg"}]
+        path = _write_payload(tmp_path, payload)
+        with pytest.raises(InvalidPayloadError, match="local"):
+            self.reader.read(path)
