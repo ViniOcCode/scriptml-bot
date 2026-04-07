@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -33,6 +34,7 @@ def _make_seller_config(
     blocked: list[str] | None = None,
     overrides: dict[str, str] | None = None,
     human_review_required: bool = True,
+    min_ai_confidence: float = 0.0,
 ) -> SellerConfig:
     return SellerConfig(
         listing=ListingConfig(
@@ -41,7 +43,10 @@ def _make_seller_config(
         ),
         pricing=PricingConfig(min_price=min_price, max_price=max_price),
         categories=CategoriesConfig(blocked=blocked or [], overrides=overrides or {}),
-        batch=BatchConfig(human_review_required=human_review_required),
+        batch=BatchConfig(
+            human_review_required=human_review_required,
+            min_ai_confidence=min_ai_confidence,
+        ),
     )
 
 
@@ -451,3 +456,98 @@ class TestPublishInactiveFlag:
         assert result.status == "published"
         assert result.item_id == "MLB987654321"
         publisher.update_item.assert_called_once_with("MLB987654321", {"status": "paused"})
+
+
+class TestPublicationReadyGate:
+    def test_publication_ready_false_blocks_publish(self, tmp_path: Path) -> None:
+        """publication_ready=False must block publish and surface blocking_reasons."""
+        use_case, reader, publisher = _make_use_case()
+        read_result = replace(
+            _make_read_result(),
+            publication_ready=False,
+            blocking_reasons=["fiscal not resolved"],
+        )
+        reader.read.return_value = read_result
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "failed"
+        assert "fiscal not resolved" in (result.error or "")
+        publisher.create_item.assert_not_called()
+
+    def test_publication_ready_true_proceeds(self, tmp_path: Path) -> None:
+        """publication_ready=True proceeds through the full publish flow."""
+        use_case, reader, publisher = _make_use_case()
+        read_result = replace(_make_read_result(), publication_ready=True)
+        reader.read.return_value = read_result
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "published"
+        publisher.create_item.assert_called_once()
+
+    def test_publication_ready_none_proceeds_compat(self, tmp_path: Path) -> None:
+        """publication_ready=None (absent) must NOT block — backward compat."""
+        use_case, reader, publisher = _make_use_case()
+        reader.read.return_value = _make_read_result()  # publication_ready defaults to None
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "published"
+        publisher.create_item.assert_called_once()
+
+
+class TestLowConfidenceGate:
+    def test_low_confidence_ai_category_blocked(self, tmp_path: Path) -> None:
+        """category_confidence below min_ai_confidence must block publish."""
+        config = _make_seller_config(human_review_required=False, min_ai_confidence=0.70)
+        use_case, reader, publisher = _make_use_case(config)
+        read_result = replace(_make_read_result(ai_suggested=True), category_confidence=0.45)
+        reader.read.return_value = read_result
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "failed"
+        assert result.error is not None
+        assert (
+            "0.45" in (result.error or "")
+            or "45.0%" in (result.error or "")
+            or "Confiança" in (result.error or "")
+        )
+        publisher.create_item.assert_not_called()
+
+
+class TestFiscalWarningGate:
+    def test_reviewed_fiscal_false_with_publication_ready_adds_warning(
+        self, tmp_path: Path
+    ) -> None:
+        """publication_ready=True with reviewed_fiscal=False emits a warning but still publishes."""
+        use_case, reader, publisher = _make_use_case()
+        read_result = replace(_make_read_result(), publication_ready=True, reviewed_fiscal=False)
+        reader.read.return_value = read_result
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "published"
+        assert any("fiscal" in w.lower() for w in result.warnings)
+
+    def test_reviewed_fiscal_true_no_extra_warning(self, tmp_path: Path) -> None:
+        """publication_ready=True with reviewed_fiscal=True produces no fiscal warning."""
+        use_case, reader, publisher = _make_use_case()
+        read_result = replace(_make_read_result(), publication_ready=True, reviewed_fiscal=True)
+        reader.read.return_value = read_result
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "published"
+        assert not any("fiscal" in w.lower() for w in result.warnings)
+
+    def test_reviewed_fiscal_none_no_extra_warning(self, tmp_path: Path) -> None:
+        """reviewed_fiscal=None (absent) must not produce fiscal warning — backward compat."""
+        use_case, reader, publisher = _make_use_case()
+        reader.read.return_value = _make_read_result()  # reviewed_fiscal defaults to None
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "published"
+        assert not any("fiscal" in w.lower() for w in result.warnings)

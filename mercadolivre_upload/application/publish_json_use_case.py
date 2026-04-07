@@ -121,6 +121,25 @@ class PublishJsonUseCase:
                 error=str(exc),
             )
 
+        # 1b. Publication readiness gate — block publish when explicitly marked not ready
+        if read_result.publication_ready is False:
+            reasons = (
+                "; ".join(read_result.blocking_reasons)
+                if read_result.blocking_reasons
+                else "sem detalhes"
+            )
+            logger.warning("Publish blocked by publication_ready=False for %s: %s", path, reasons)
+            return PublishJsonResult(
+                sku=read_result.sku,
+                path=str(path),
+                status="failed",
+                error=f"Publicação bloqueada: {reasons}",
+            )
+        elif read_result.publication_ready is None:
+            logger.debug(
+                "publication_ready absent in _meta for %s — proceeding (backward compat)", path
+            )
+
         # 2. Expand one file into one or more publish payloads.
         raw_publish_payloads = _expand_publish_payloads(
             read_result.payload, read_result.upload_mode
@@ -129,11 +148,25 @@ class PublishJsonUseCase:
 
         # 3. Apply seller overrides + validate seller policy.
         publish_payloads: list[dict[str, Any]] = []
+        # 1c. Fiscal reviewed gate (warning-only — full FiscalService integration is separate)
         warnings: list[str] = []
+        if read_result.publication_ready is True and read_result.reviewed_fiscal is False:
+            warnings.append(
+                "Fiscal não revisado (_meta.reviewed_fiscal=false): publicando com aviso"
+            )
+            logger.warning(
+                "Fiscal not reviewed for %s but publication_ready=True — "
+                "publishing with warning",
+                path,
+            )
         errors: list[str] = []
         for index, candidate in enumerate(raw_publish_payloads, start=1):
             payload = self._policy.apply_overrides(candidate)
-            policy_result = self._policy.validate(payload, ai_suggested=read_result.ai_suggested)
+            policy_result = self._policy.validate(
+                payload,
+                ai_suggested=read_result.ai_suggested,
+                category_confidence=read_result.category_confidence,
+            )
             warnings.extend(
                 _prefix_message(violation.message, index, total_payloads)
                 for violation in policy_result.violations
