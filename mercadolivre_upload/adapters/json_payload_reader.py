@@ -85,7 +85,7 @@ def _resolve_upload_mode(meta: dict[str, Any], payload: dict[str, Any], path_nam
 
 
 def _validate_picture_sources(pictures: list[Any], path_name: str) -> None:
-    """Raise InvalidPayloadError if any picture source is a local filesystem path.
+    r"""Raise InvalidPayloadError if any picture source is a local filesystem path.
 
     Accepts: https:// URLs (CDN) and entries without a source key (already-uploaded IDs).
     Rejects: /absolute/paths, relative/paths, C:\\Windows\\paths — ML API would reject these.
