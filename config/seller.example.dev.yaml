@@ -25,7 +25,7 @@ seller:
   # -----------------------------------------------------------------------
   pricing:
     min_price: 5.00      # R$ — items below this are always blocked
-    max_price: 9999.00   # R$ — items above this generate a warning only
+    max_price: 999.00   # R$ — items above this generate a warning only
 
   # -----------------------------------------------------------------------
   # categories: per-category rules.
@@ -45,5 +45,5 @@ seller:
   # publish_inactive — reserved for future use (publish as paused).
   # -----------------------------------------------------------------------
   batch:
-    human_review_required: true
-    publish_inactive: false
+    human_review_required: false
+    publish_inactive: true
