@@ -74,8 +74,10 @@ def test_validate_user_product_item_sanitizes_payload_before_validation():
     client = MLApiClient(http_client=MagicMock())
     payload = {
         "title": "Linha Alpha Model X",
+        "model": "user_products",
         "family_name": "Linha Alpha",
         "variations": [{"id": 1}],
+        "items": [{"price": 10.0}],
         "user_product": {"selected_model": "Model X", "variations": []},
     }
     client.validate_item = MagicMock(return_value={"cause": []})
@@ -99,8 +101,10 @@ def test_create_user_product_item_sanitizes_payload_before_create():
     client = MLApiClient(http_client=MagicMock())
     payload = {
         "title": "Linha Alpha Model X",
+        "model": "user_products",
         "family_name": "Linha Alpha",
         "variations": [{"id": 1}],
+        "items": [{"price": 10.0}],
         "user_product": {"selected_model": "Model X", "variations": []},
     }
     client.create_item = MagicMock(return_value={"id": "MLB1234567890"})
@@ -126,6 +130,7 @@ def test_create_user_product_item_routes_sales_condition_when_user_product_id_pr
 
     payload = {
         "title": "Linha Alpha Model X",
+        "model": "user_products",
         "family_name": "Linha Alpha",
         "user_product_id": "MLBU123",
         "price": 100.0,

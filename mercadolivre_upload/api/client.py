@@ -298,6 +298,10 @@ class MLApiClient:
         payload.pop("title", None)
         payload.pop("variations", None)
         payload.pop("user_product", None)
+        payload.pop("model", None)
+        payload.pop("items", None)
+        payload.pop("_meta", None)
+        payload.pop("payload", None)
         return payload
 
     @staticmethod
