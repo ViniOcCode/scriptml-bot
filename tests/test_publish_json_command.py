@@ -17,6 +17,7 @@ from mercadolivre_upload.application.publish_json_use_case import (
     PublishJsonResult,
     PublishJsonUseCase,
 )
+from mercadolivre_upload.application.validators.seller_policy import default_seller_config
 
 
 def _make_read_result(
@@ -196,6 +197,16 @@ class TestPublishBatchCmd:
         monkeypatch.setattr(
             publish_json_cmd, "JsonPayloadReader", MagicMock(return_value=mock_reader)
         )
+        monkeypatch.setattr(
+            publish_json_cmd,
+            "default_seller_config",
+            lambda: default_seller_config(),
+        )
+        monkeypatch.setattr(
+            publish_json_cmd,
+            "load_seller_config",
+            lambda _path: default_seller_config(),
+        )
 
         with pytest.raises(typer.Exit) as exc_info:
             publish_json_cmd.publish_batch(batch_dir, report_dir=tmp_path / "reports")
@@ -226,3 +237,36 @@ class TestPublishBatchCmd:
         report_data = json.loads(report_files[0].read_text())
         assert report_data["summary"]["published"] == 1
         assert report_data["results"][0]["sku"] == "SKU001"
+        assert report_data["results"][0]["item_ids"] == []
+        assert report_data["results"][0]["user_product_id"] is None
+
+    def test_report_gerado_com_campos_up(self, tmp_path: Path, monkeypatch) -> None:
+        batch_dir = self._setup_batch_dir(tmp_path, ["SKU001"])
+        mock_reader = MagicMock()
+        mock_reader.read_batch.return_value = [
+            (batch_dir / "MLB271599/SKU001/payload.json", _make_read_result(sku="SKU001"))
+        ]
+        mock_use_case = MagicMock(spec=PublishJsonUseCase)
+        mock_use_case.execute.return_value = PublishJsonResult(
+            sku="SKU001",
+            path="p",
+            status="published",
+            item_id="MLB999",
+            item_ids=["MLB999", "MLB1000"],
+            user_product_id="MLBU123",
+        )
+
+        monkeypatch.setattr(publish_json_cmd, "_build_use_case", lambda: mock_use_case)
+        monkeypatch.setattr(
+            publish_json_cmd, "JsonPayloadReader", MagicMock(return_value=mock_reader)
+        )
+
+        report_dir = tmp_path / "reports"
+        publish_json_cmd.publish_batch(batch_dir, report_dir=report_dir)
+
+        report_files = list(report_dir.glob("publish-summary-*.json"))
+        assert len(report_files) == 1
+        report_data = json.loads(report_files[0].read_text())
+        assert report_data["results"][0]["item_id"] == "MLB999"
+        assert report_data["results"][0]["item_ids"] == ["MLB999", "MLB1000"]
+        assert report_data["results"][0]["user_product_id"] == "MLBU123"

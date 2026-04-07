@@ -2,7 +2,7 @@
 
 Reads and validates payload.json files produced by ml-builder.
 Extracts _meta fields (description, sku, ai_suggested) BEFORE stripping
-so the cleaned payload is ready for POST /items.
+so the cleaned payload is ready for publish routing.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,7 @@ _VARIATION_LEVEL_FIELDS: frozenset[str] = frozenset({"price", "available_quantit
 
 # currency_id is always required by ML API at root; default to BRL when builder omits it
 _DEFAULT_CURRENCY_ID = "BRL"
+_SUPPORTED_UPLOAD_MODES: frozenset[str] = frozenset({"legacy_items", "user_products"})
 
 
 class InvalidPayloadError(Exception):
@@ -42,11 +43,96 @@ class InvalidPayloadError(Exception):
 class ReadPayloadResult:
     """Result of reading a single payload.json file."""
 
-    payload: dict[str, Any]  # cleaned payload without _meta — ready for POST /items
+    payload: dict[str, Any]  # cleaned payload without _meta — ready for publish routing
     description: str | None  # _meta.description_plain_text
     sku: str | None  # _meta.sku
     category_id: str  # extracted from payload
     ai_suggested: bool  # _meta.category_ai_suggested
+    upload_mode: Literal["legacy_items", "user_products"] = "legacy_items"
+
+
+def _resolve_upload_mode(meta: dict[str, Any], payload: dict[str, Any], path_name: str) -> str:
+    publication = meta.get("publication", {})
+    publication_model = publication.get("model") if isinstance(publication, dict) else None
+    if publication_model is not None:
+        if (
+            not isinstance(publication_model, str)
+            or publication_model.strip() not in _SUPPORTED_UPLOAD_MODES
+        ):
+            raise InvalidPayloadError(
+                f"Modelo de publicação inválido em {path_name}: {publication_model!r}"
+            )
+        publication_model = publication_model.strip()
+
+    payload_model = payload.get("model")
+    if payload_model is not None:
+        if not isinstance(payload_model, str) or payload_model.strip() != "user_products":
+            raise InvalidPayloadError(f"Campo 'payload.model' inválido em {path_name}")
+        payload_model = payload_model.strip()
+
+    if publication_model == "user_products" or payload_model == "user_products":
+        if publication_model == "legacy_items" and payload_model == "user_products":
+            raise InvalidPayloadError(
+                f"_meta.publication.model e payload.model divergem em {path_name}"
+            )
+        return "user_products"
+    return "legacy_items"
+
+
+def _validate_legacy_payload(payload: dict[str, Any], path_name: str) -> None:
+    """Validate a direct /items payload."""
+    # Inject currency_id default when missing (ml-builder omits it for variation items)
+    has_variations = bool(payload.get("variations"))
+    if "currency_id" not in payload:
+        logger.warning("currency_id missing in %s; defaulting to BRL", path_name)
+        payload["currency_id"] = _DEFAULT_CURRENCY_ID
+
+    # price and available_quantity are only required at root when no variations present
+    excluded = _VARIATION_LEVEL_FIELDS if has_variations else set()
+    effective_required = REQUIRED_FIELDS - excluded
+    missing = effective_required - payload.keys()
+    if missing:
+        raise InvalidPayloadError(f"Campos obrigatórios ausentes em {path_name}: {sorted(missing)}")
+
+    if not payload.get("pictures"):
+        raise InvalidPayloadError(f"'pictures' não pode ser vazio em {path_name}")
+
+
+def _validate_user_products_payload(payload: dict[str, Any], path_name: str) -> None:
+    """Validate a local user-products upload envelope payload."""
+    family_name = payload.get("family_name")
+    if not isinstance(family_name, str) or not family_name.strip():
+        raise InvalidPayloadError(f"Campo obrigatório 'family_name' ausente em {path_name}")
+
+    items = payload.get("items")
+    if not isinstance(items, list) or not items:
+        raise InvalidPayloadError(f"Campo obrigatório 'items' ausente ou vazio em {path_name}")
+
+    for index, item in enumerate(items, start=1):
+        if not isinstance(item, dict) or not item:
+            raise InvalidPayloadError(f"Item inválido em payload.items[{index}] de {path_name}")
+
+
+def _extract_category_id(payload: dict[str, Any], upload_mode: str) -> str:
+    """Extract a best-effort category ID for reporting."""
+    category_id = payload.get("category_id")
+    if isinstance(category_id, str) and category_id.strip():
+        return category_id.strip()
+
+    if upload_mode != "user_products":
+        return ""
+
+    items = payload.get("items")
+    if not isinstance(items, list):
+        return ""
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        item_category_id = item.get("category_id")
+        if isinstance(item_category_id, str) and item_category_id.strip():
+            return item_category_id.strip()
+    return ""
 
 
 class JsonPayloadReader:
@@ -71,37 +157,41 @@ class JsonPayloadReader:
             InvalidPayloadError: If required fields are missing or pictures is empty.
         """
         raw: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            raise InvalidPayloadError(f"Payload inválido em {path.name}: raiz JSON deve ser objeto")
 
         # Extract _meta BEFORE removing it — description_plain_text is needed later
-        meta: dict[str, Any] = raw.pop("_meta", {})
+        meta: dict[str, Any] = raw.get("_meta", {})
+        if not isinstance(meta, dict):
+            meta = {}
         description: str | None = meta.get("description_plain_text")
         sku: str | None = meta.get("sku")
         ai_suggested: bool = bool(meta.get("category_ai_suggested", False))
 
-        # Inject currency_id default when missing (ml-builder omits it for variation items)
-        has_variations = bool(raw.get("variations"))
-        if "currency_id" not in raw:
-            logger.warning("currency_id missing in %s; defaulting to BRL", path.name)
-            raw["currency_id"] = _DEFAULT_CURRENCY_ID
+        payload_obj = raw.get("payload")
+        if isinstance(payload_obj, dict):
+            payload = dict(payload_obj)
+        else:
+            # Backward-compatible fallback for older root-style payloads.
+            payload = {key: value for key, value in raw.items() if key != "_meta"}
+        if not payload:
+            raise InvalidPayloadError(f"Campo obrigatório 'payload' ausente em {path.name}")
+        payload.pop("_meta", None)
 
-        # price and available_quantity are only required at root when no variations present
-        excluded = _VARIATION_LEVEL_FIELDS if has_variations else set()
-        effective_required = REQUIRED_FIELDS - excluded
-        missing = effective_required - raw.keys()
-        if missing:
-            raise InvalidPayloadError(
-                f"Campos obrigatórios ausentes em {path.name}: {sorted(missing)}"
-            )
-
-        if not raw.get("pictures"):
-            raise InvalidPayloadError(f"'pictures' não pode ser vazio em {path.name}")
+        upload_mode = _resolve_upload_mode(meta, payload, path.name)
+        payload.pop("model", None)
+        if upload_mode == "user_products":
+            _validate_user_products_payload(payload, path.name)
+        else:
+            _validate_legacy_payload(payload, path.name)
 
         return ReadPayloadResult(
-            payload=raw,
+            payload=payload,
             description=description,
             sku=sku,
-            category_id=raw["category_id"],
+            category_id=_extract_category_id(payload, upload_mode),
             ai_suggested=ai_suggested,
+            upload_mode=upload_mode,  # type: ignore[arg-type]
         )
 
     def read_batch(self, batch_dir: Path) -> list[tuple[Path, ReadPayloadResult | Exception]]:

@@ -41,6 +41,17 @@ def _write_payload(tmp_path: Path, payload: dict, name: str = "payload.json") ->
     return p
 
 
+def _make_envelope(payload: dict, meta: dict | None = None) -> dict:
+    base_meta = {
+        "description_plain_text": "Descrição do produto",
+        "sku": "ABC-001",
+        "category_ai_suggested": False,
+    }
+    if meta:
+        base_meta.update(meta)
+    return {"payload": payload, "_meta": base_meta}
+
+
 class TestJsonPayloadReader:
     reader = JsonPayloadReader()
 
@@ -171,3 +182,80 @@ class TestJsonPayloadReader:
         assert len(successes) == 2
         assert len(failures) == 1
         assert isinstance(failures[0], InvalidPayloadError)
+
+    def test_read_nested_payload_envelope_legacy(self, tmp_path: Path) -> None:
+        path = _write_payload(
+            tmp_path,
+            _make_envelope(
+                _make_valid_payload(),
+                {"publication": {"model": "legacy_items"}},
+            ),
+        )
+        result = self.reader.read(path)
+        assert result.upload_mode == "legacy_items"
+        assert result.payload["title"] == "Produto Teste"
+        assert "_meta" not in result.payload
+
+    def test_read_nested_payload_envelope_user_products(self, tmp_path: Path) -> None:
+        path = _write_payload(
+            tmp_path,
+            _make_envelope(
+                {
+                    "model": "user_products",
+                    "family_name": "Linha Alpha",
+                    "items": [
+                        {
+                            "category_id": "MLB271599",
+                            "price": 99.90,
+                            "currency_id": "BRL",
+                            "available_quantity": 10,
+                            "buying_mode": "buy_it_now",
+                            "listing_type_id": "gold_special",
+                            "condition": "new",
+                            "pictures": [{"source": "https://cdn.ml.com/abc.jpg"}],
+                        }
+                    ],
+                },
+                {"publication": {"model": "user_products"}},
+            ),
+        )
+        result = self.reader.read(path)
+        assert result.upload_mode == "user_products"
+        assert result.payload["family_name"] == "Linha Alpha"
+        assert "model" not in result.payload
+        assert len(result.payload["items"]) == 1
+
+    def test_read_user_products_requires_items(self, tmp_path: Path) -> None:
+        path = _write_payload(
+            tmp_path,
+            _make_envelope(
+                {
+                    "model": "user_products",
+                    "family_name": "Linha Alpha",
+                    "items": [],
+                },
+                {"publication": {"model": "user_products"}},
+            ),
+        )
+        with pytest.raises(InvalidPayloadError, match="items"):
+            self.reader.read(path)
+
+    def test_read_payload_model_mismatch_raises(self, tmp_path: Path) -> None:
+        path = _write_payload(
+            tmp_path,
+            _make_envelope(
+                {
+                    "model": "user_products",
+                    "family_name": "Linha Alpha",
+                    "items": [{"category_id": "MLB271599"}],
+                },
+                {"publication": {"model": "legacy_items"}},
+            ),
+        )
+        with pytest.raises(InvalidPayloadError, match="divergem"):
+            self.reader.read(path)
+
+    def test_read_missing_payload_field_raises(self, tmp_path: Path) -> None:
+        path = _write_payload(tmp_path, {"_meta": {"sku": "ABC-001"}})
+        with pytest.raises(InvalidPayloadError, match="payload"):
+            self.reader.read(path)

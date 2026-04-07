@@ -30,8 +30,43 @@ class PublishJsonResult:
     path: str
     status: Literal["published", "skipped", "failed"]
     item_id: str | None = None
+    item_ids: list[str] = field(default_factory=list)
+    user_product_id: str | None = None
     error: str | None = None
     warnings: list[str] = field(default_factory=list)
+
+
+def _prefix_message(message: str, index: int, total: int) -> str:
+    """Prefix per-item messages only when one file expands to many publishes."""
+    if total <= 1:
+        return message
+    return f"item[{index}]: {message}"
+
+
+def _expand_publish_payloads(payload: dict[str, Any], upload_mode: str) -> list[dict[str, Any]]:
+    """Expand a normalized envelope into concrete publish payloads."""
+    if upload_mode != "user_products":
+        return [dict(payload)]
+
+    base_payload = {key: value for key, value in payload.items() if key != "items"}
+    raw_items = payload.get("items", [])
+    if not isinstance(raw_items, list):
+        return [base_payload]
+
+    expanded: list[dict[str, Any]] = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        merged = dict(base_payload)
+        merged.update(item)
+        expanded.append(merged)
+    return expanded
+
+
+def _format_ml_api_error(exc: MLApiError) -> str:
+    """Format ML cause codes into a readable string."""
+    blocking = [c for c in exc.causes if c.get("type") == "error"]
+    return "; ".join(f"[{c.get('code', '?')}] {c.get('message', '')}" for c in blocking) or str(exc)
 
 
 class PublishJsonUseCase:
@@ -46,22 +81,26 @@ class PublishJsonUseCase:
         reader: JsonPayloadReader,
         policy: SellerPolicyValidator,
         publisher: ItemPublisherPort,
+        *,
+        publish_inactive: bool = False,
     ) -> None:
         """Initialize with reader, policy validator, and publisher port."""
         self._reader = reader
         self._policy = policy
         self._publisher = publisher
+        self._publish_inactive = publish_inactive
 
     def execute(self, path: Path, *, dry_run: bool = False) -> PublishJsonResult:
         """Publish a single payload.json.
 
         Pipeline:
         1. Read and validate JSON schema
-        2. Apply seller overrides (e.g. listing_type_id per category)
-        3. Validate seller policy rules
-        4. If dry_run → return skipped result
-        5. POST /items
-        6. POST /items/{id}/description (only when description_plain_text present)
+        2. Expand local envelope into concrete publish payloads
+        3. Apply seller overrides (e.g. listing_type_id per category)
+        4. Validate seller policy rules
+        5. If dry_run → return skipped result
+        6. Publish one or more items
+        7. POST /items/{id}/description (only when description_plain_text present)
 
         Args:
             path: Path to the payload.json file.
@@ -82,21 +121,39 @@ class PublishJsonUseCase:
                 error=str(exc),
             )
 
-        # 2. Apply seller overrides
-        payload: dict[str, Any] = self._policy.apply_overrides(read_result.payload)
+        # 2. Expand one file into one or more publish payloads.
+        raw_publish_payloads = _expand_publish_payloads(
+            read_result.payload, read_result.upload_mode
+        )
+        total_payloads = len(raw_publish_payloads)
 
-        # 3. Validate seller policy
-        policy_result = self._policy.validate(payload, ai_suggested=read_result.ai_suggested)
-        warnings = [v.message for v in policy_result.violations if v.severity == "warning"]
+        # 3. Apply seller overrides + validate seller policy.
+        publish_payloads: list[dict[str, Any]] = []
+        warnings: list[str] = []
+        errors: list[str] = []
+        for index, candidate in enumerate(raw_publish_payloads, start=1):
+            payload = self._policy.apply_overrides(candidate)
+            policy_result = self._policy.validate(payload, ai_suggested=read_result.ai_suggested)
+            warnings.extend(
+                _prefix_message(violation.message, index, total_payloads)
+                for violation in policy_result.violations
+                if violation.severity == "warning"
+            )
+            errors.extend(
+                _prefix_message(violation.message, index, total_payloads)
+                for violation in policy_result.violations
+                if violation.severity == "error"
+            )
+            publish_payloads.append(payload)
 
-        if policy_result.has_errors:
-            errors = "; ".join(v.message for v in policy_result.violations if v.severity == "error")
-            logger.warning("Policy errors for %s: %s", path, errors)
+        if errors:
+            error_message = "; ".join(errors)
+            logger.warning("Policy errors for %s: %s", path, error_message)
             return PublishJsonResult(
                 sku=read_result.sku,
                 path=str(path),
                 status="failed",
-                error=errors,
+                error=error_message,
                 warnings=warnings,
             )
 
@@ -109,45 +166,106 @@ class PublishJsonUseCase:
                 warnings=warnings,
             )
 
-        # 5. Publish item
-        try:
-            item = self._publisher.create_item(payload)
-        except MLApiError as exc:
-            blocking = [c for c in exc.causes if c.get("type") == "error"]
-            causes_str = "; ".join(
-                f"[{c.get('code', '?')}] {c.get('message', '')}" for c in blocking
-            ) or str(exc)
-            logger.error("ML API rejected %s: %s", path, causes_str)
-            return PublishJsonResult(
-                sku=read_result.sku,
-                path=str(path),
-                status="failed",
-                error=causes_str,
-                warnings=warnings,
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.error("Failed to publish %s: %s", path, exc)
-            return PublishJsonResult(
-                sku=read_result.sku,
-                path=str(path),
-                status="failed",
-                error=str(exc),
-                warnings=warnings,
-            )
+        # 5. Publish one or more items.
+        created_item_ids: list[str] = []
+        first_item_id: str | None = None
+        user_product_id: str | None = None
+        description_posted = False
+        for index, publish_payload in enumerate(publish_payloads, start=1):
+            payload = dict(publish_payload)
+            if read_result.upload_mode == "user_products":
+                if user_product_id:
+                    payload["user_product_id"] = user_product_id
+                create_item = self._publisher.create_user_product_item
+            else:
+                create_item = self._publisher.create_item
 
-        item_id = str(item["id"])
-
-        # 6. Post description separately (if available)
-        if read_result.description:
             try:
-                self._publisher.create_item_description(item_id, read_result.description)
+                item = create_item(payload)
+            except MLApiError as exc:
+                causes_str = _prefix_message(_format_ml_api_error(exc), index, total_payloads)
+                logger.error("ML API rejected %s: %s", path, causes_str)
+                return PublishJsonResult(
+                    sku=read_result.sku,
+                    path=str(path),
+                    status="failed",
+                    item_id=first_item_id,
+                    item_ids=created_item_ids,
+                    user_product_id=user_product_id,
+                    error=causes_str,
+                    warnings=warnings,
+                )
             except Exception as exc:  # noqa: BLE001
-                logger.warning("Failed to post description for %s: %s", item_id, exc)
+                error_message = _prefix_message(str(exc), index, total_payloads)
+                logger.error("Failed to publish %s: %s", path, error_message)
+                return PublishJsonResult(
+                    sku=read_result.sku,
+                    path=str(path),
+                    status="failed",
+                    item_id=first_item_id,
+                    item_ids=created_item_ids,
+                    user_product_id=user_product_id,
+                    error=error_message,
+                    warnings=warnings,
+                )
+
+            item_id = str(item["id"])
+            created_item_ids.append(item_id)
+            if first_item_id is None:
+                first_item_id = item_id
+
+            if self._publish_inactive:
+                try:
+                    self._publisher.update_item(item_id, {"status": "paused"})
+                    logger.info("Paused item %s after publish (publish_inactive=True)", item_id)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "Failed to pause item %s after publish: %s — "
+                        "item was published but status was NOT set to paused.",
+                        item_id,
+                        exc,
+                    )
+
+            if user_product_id is None:
+                raw_user_product_id = item.get("user_product_id")
+                if isinstance(raw_user_product_id, str) and raw_user_product_id.strip():
+                    user_product_id = raw_user_product_id.strip()
+
+            if (
+                read_result.upload_mode == "user_products"
+                and total_payloads > 1
+                and index == 1
+                and user_product_id is None
+            ):
+                error_message = (
+                    "item[1]: first user-products publish did not return user_product_id"
+                )
+                logger.error("Failed to continue UP publish for %s: %s", path, error_message)
+                return PublishJsonResult(
+                    sku=read_result.sku,
+                    path=str(path),
+                    status="failed",
+                    item_id=first_item_id,
+                    item_ids=created_item_ids,
+                    user_product_id=user_product_id,
+                    error=error_message,
+                    warnings=warnings,
+                )
+
+            # 6. Post description separately after the first successful item creation.
+            if read_result.description and not description_posted:
+                try:
+                    self._publisher.create_item_description(item_id, read_result.description)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Failed to post description for %s: %s", item_id, exc)
+                description_posted = True
 
         return PublishJsonResult(
             sku=read_result.sku,
             path=str(path),
             status="published",
-            item_id=item_id,
+            item_id=first_item_id,
+            item_ids=created_item_ids,
+            user_product_id=user_product_id,
             warnings=warnings,
         )

@@ -74,6 +74,40 @@ def _make_read_result(
     )
 
 
+def _make_user_products_read_result(
+    *,
+    description: str | None = "Descrição do produto",
+    sku: str | None = "ABC-001",
+    family_name: str = "Linha Alpha",
+    items: list[dict[str, Any]] | None = None,
+    ai_suggested: bool = False,
+) -> ReadPayloadResult:
+    payload_items = items or [
+        {
+            "category_id": "MLB271599",
+            "price": 50.0,
+            "currency_id": "BRL",
+            "available_quantity": 10,
+            "buying_mode": "buy_it_now",
+            "listing_type_id": "gold_special",
+            "condition": "new",
+            "pictures": [{"source": "https://cdn.ml.com/img.jpg"}],
+            "attributes": [{"id": "BRAND", "value_name": "Marca"}],
+        }
+    ]
+    return ReadPayloadResult(
+        payload={
+            "family_name": family_name,
+            "items": payload_items,
+        },
+        description=description,
+        sku=sku,
+        category_id="MLB271599",
+        ai_suggested=ai_suggested,
+        upload_mode="user_products",
+    )
+
+
 def _make_read_result_with_variations(
     *,
     variation_prices: list[float],
@@ -104,13 +138,23 @@ def _make_read_result_with_variations(
 
 def _make_use_case(
     config: SellerConfig | None = None,
+    publish_inactive: bool = False,
 ) -> tuple[PublishJsonUseCase, MagicMock, MagicMock]:
     reader = MagicMock(spec=JsonPayloadReader)
     cfg = config or _make_seller_config()
     policy = SellerPolicyValidator(cfg)
     publisher = MagicMock()
     publisher.create_item.return_value = {"id": "MLB987654321"}
-    use_case = PublishJsonUseCase(reader=reader, policy=policy, publisher=publisher)
+    publisher.create_user_product_item.return_value = {
+        "id": "MLB987654321",
+        "user_product_id": "MLBU123456",
+    }
+    use_case = PublishJsonUseCase(
+        reader=reader,
+        policy=policy,
+        publisher=publisher,
+        publish_inactive=publish_inactive,
+    )
     return use_case, reader, publisher
 
 
@@ -212,6 +256,94 @@ class TestPublishJsonUseCase:
         assert result.status == "failed"
         assert "API offline" in (result.error or "")
 
+    def test_publish_user_products_multiple_items(self, tmp_path: Path) -> None:
+        use_case, reader, publisher = _make_use_case()
+        reader.read.return_value = _make_user_products_read_result(
+            items=[
+                {
+                    "category_id": "MLB271599",
+                    "price": 50.0,
+                    "currency_id": "BRL",
+                    "available_quantity": 10,
+                    "buying_mode": "buy_it_now",
+                    "listing_type_id": "gold_special",
+                    "condition": "new",
+                    "pictures": [{"source": "https://cdn.ml.com/img-1.jpg"}],
+                    "attributes": [{"id": "BRAND", "value_name": "Marca"}],
+                },
+                {
+                    "category_id": "MLB271599",
+                    "price": 60.0,
+                    "currency_id": "BRL",
+                    "available_quantity": 5,
+                    "buying_mode": "buy_it_now",
+                    "listing_type_id": "gold_special",
+                    "condition": "new",
+                    "pictures": [{"source": "https://cdn.ml.com/img-2.jpg"}],
+                    "attributes": [{"id": "BRAND", "value_name": "Marca"}],
+                },
+            ]
+        )
+        publisher.create_user_product_item.side_effect = [
+            {"id": "MLB1", "user_product_id": "MLBU123"},
+            {"id": "MLB2", "user_product_id": "MLBU123"},
+        ]
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "published"
+        assert result.item_id == "MLB1"
+        assert result.item_ids == ["MLB1", "MLB2"]
+        assert result.user_product_id == "MLBU123"
+        publisher.create_item.assert_not_called()
+        assert publisher.create_user_product_item.call_count == 2
+        first_payload = publisher.create_user_product_item.call_args_list[0].args[0]
+        second_payload = publisher.create_user_product_item.call_args_list[1].args[0]
+        assert first_payload["family_name"] == "Linha Alpha"
+        assert "user_product_id" not in first_payload
+        assert second_payload["family_name"] == "Linha Alpha"
+        assert second_payload["user_product_id"] == "MLBU123"
+        publisher.create_item_description.assert_called_once_with("MLB1", "Descrição do produto")
+
+    def test_publish_user_products_missing_user_product_id_fails_after_first_item(
+        self, tmp_path: Path
+    ) -> None:
+        use_case, reader, publisher = _make_use_case()
+        reader.read.return_value = _make_user_products_read_result(
+            items=[
+                {
+                    "category_id": "MLB271599",
+                    "price": 50.0,
+                    "currency_id": "BRL",
+                    "available_quantity": 10,
+                    "buying_mode": "buy_it_now",
+                    "listing_type_id": "gold_special",
+                    "condition": "new",
+                    "pictures": [{"source": "https://cdn.ml.com/img-1.jpg"}],
+                    "attributes": [{"id": "BRAND", "value_name": "Marca"}],
+                },
+                {
+                    "category_id": "MLB271599",
+                    "price": 60.0,
+                    "currency_id": "BRL",
+                    "available_quantity": 5,
+                    "buying_mode": "buy_it_now",
+                    "listing_type_id": "gold_special",
+                    "condition": "new",
+                    "pictures": [{"source": "https://cdn.ml.com/img-2.jpg"}],
+                    "attributes": [{"id": "BRAND", "value_name": "Marca"}],
+                },
+            ]
+        )
+        publisher.create_user_product_item.return_value = {"id": "MLB1"}
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "failed"
+        assert result.item_id == "MLB1"
+        assert result.item_ids == ["MLB1"]
+        assert "user_product_id" in (result.error or "")
+
 
 class TestSellerPolicyVariations:
     """Policy price-range checks must work for variation payloads (no root price)."""
@@ -283,3 +415,39 @@ class TestPublishJsonApiErrors:
 
         assert result.status == "failed"
         assert "400" in (result.error or "")
+
+
+class TestPublishInactiveFlag:
+    """PublishJsonUseCase must pause items after creation when publish_inactive=True."""
+
+    def test_publish_inactive_true_calls_update_item(self, tmp_path: Path) -> None:
+        """publish_inactive=True triggers update_item({status: paused}) after creation."""
+        use_case, reader, publisher = _make_use_case(publish_inactive=True)
+        reader.read.return_value = _make_read_result()
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "published"
+        publisher.update_item.assert_called_once_with("MLB987654321", {"status": "paused"})
+
+    def test_publish_inactive_false_does_not_call_update_item(self, tmp_path: Path) -> None:
+        """Default (False) never calls update_item."""
+        use_case, reader, publisher = _make_use_case(publish_inactive=False)
+        reader.read.return_value = _make_read_result()
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "published"
+        publisher.update_item.assert_not_called()
+
+    def test_publish_inactive_update_failure_is_warn_only(self, tmp_path: Path) -> None:
+        """If update_item raises, result is still 'published' — warn-only, not a failure."""
+        use_case, reader, publisher = _make_use_case(publish_inactive=True)
+        reader.read.return_value = _make_read_result()
+        publisher.update_item.side_effect = RuntimeError("pause failed")
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "published"
+        assert result.item_id == "MLB987654321"
+        publisher.update_item.assert_called_once_with("MLB987654321", {"status": "paused"})

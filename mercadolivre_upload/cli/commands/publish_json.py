@@ -57,14 +57,26 @@ def _build_use_case(seller_config_path: Path | None = None) -> PublishJsonUseCas
     policy = SellerPolicyValidator(seller_config)
     auth_manager = TokenManager()
     api_client = MLApiClient(auth_manager)
-    return PublishJsonUseCase(reader=reader, policy=policy, publisher=api_client)
+    return PublishJsonUseCase(
+        reader=reader,
+        policy=policy,
+        publisher=api_client,
+        publish_inactive=seller_config.batch.publish_inactive,
+    )
 
 
 def _print_result(result: PublishJsonResult) -> None:
     """Print a single PublishJsonResult to the Rich console."""
     label = result.sku or Path(result.path).name
     if result.status == "published":
-        console.print(f"[green]✓[/green] {label} → {result.item_id}")
+        published_item_ids = result.item_ids or ([result.item_id] if result.item_id else [])
+        if len(published_item_ids) > 1:
+            target = f"{published_item_ids[0]} (+{len(published_item_ids) - 1})"
+            if result.user_product_id:
+                target = f"{target} | UP {result.user_product_id}"
+        else:
+            target = result.item_id or "sem item_id"
+        console.print(f"[green]✓[/green] {label} → {target}")
     elif result.status == "skipped":
         console.print(f"[yellow]–[/yellow] {label}  (dry-run, não publicado)")
     else:
@@ -104,6 +116,8 @@ def _write_report(
                 "path": r.path,
                 "status": r.status,
                 "item_id": r.item_id,
+                "item_ids": r.item_ids,
+                "user_product_id": r.user_product_id,
                 "error": r.error,
                 "warnings": r.warnings,
             }
