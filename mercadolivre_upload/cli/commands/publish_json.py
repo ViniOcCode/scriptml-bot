@@ -164,6 +164,7 @@ def publish_batch(
 
     manifest = _read_batch_manifest(batch_dir)
     failed_skus: set[str] = set(manifest.get("failed_skus", []))
+    published_skus: set[str] = set(manifest.get("published_skus", []))
     ai_suggested_category: bool = bool(manifest.get("ai_suggested_category", False))
     human_reviewed: bool = bool(manifest.get("human_reviewed", False))
 
@@ -214,9 +215,16 @@ def publish_batch(
             console.print(f"[dim]– {read_result.sku}  (pulado: falhou no builder)[/dim]")
             continue
 
+        # Idempotency: skip SKUs already published in a prior run
+        if read_result.sku and read_result.sku in published_skus:
+            console.print(f"[dim]– {read_result.sku}  (pulado: já publicado)[/dim]")
+            continue
+
         result = use_case.execute(payload_path, dry_run=dry_run)
         results.append(result)
         _print_result(result)
+        if result.status == "published" and result.sku:
+            published_skus.add(result.sku)
 
     published_count = sum(1 for r in results if r.status == "published")
     failed_count = sum(1 for r in results if r.status == "failed")

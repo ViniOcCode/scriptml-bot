@@ -270,3 +270,93 @@ class TestPublishBatchCmd:
         assert report_data["results"][0]["item_id"] == "MLB999"
         assert report_data["results"][0]["item_ids"] == ["MLB999", "MLB1000"]
         assert report_data["results"][0]["user_product_id"] == "MLBU123"
+
+
+class TestPublishedSkusIdempotency:
+    def _setup_batch_dir(self, tmp_path: Path, skus: list[str]) -> Path:
+        batch_dir = tmp_path / "batch"
+        for sku in skus:
+            d = batch_dir / "MLB271599" / sku
+            d.mkdir(parents=True)
+            (d / "payload.json").write_text("{}")
+        return batch_dir
+
+    def test_skips_already_published_sku(self, tmp_path: Path, monkeypatch) -> None:
+        """SKUs present in batch_manifest.json must be skipped."""
+        batch_dir = self._setup_batch_dir(tmp_path, ["SKU001", "SKU002"])
+        manifest = {"published_skus": ["SKU001"]}
+        (batch_dir / "batch_manifest.json").write_text(json.dumps(manifest))
+
+        mock_reader = MagicMock()
+        mock_reader.read_batch.return_value = [
+            (batch_dir / "MLB271599/SKU001/payload.json", _make_read_result(sku="SKU001")),
+            (batch_dir / "MLB271599/SKU002/payload.json", _make_read_result(sku="SKU002")),
+        ]
+        mock_use_case = MagicMock(spec=PublishJsonUseCase)
+        mock_use_case.execute.return_value = PublishJsonResult(
+            sku="SKU002", path="p", status="published", item_id="MLB999"
+        )
+
+        monkeypatch.setattr(publish_json_cmd, "_build_use_case", lambda: mock_use_case)
+        monkeypatch.setattr(
+            publish_json_cmd, "JsonPayloadReader", MagicMock(return_value=mock_reader)
+        )
+
+        publish_json_cmd.publish_batch(batch_dir, report_dir=tmp_path / "reports")
+
+        # execute() should be called only once (for SKU002)
+        assert mock_use_case.execute.call_count == 1
+        called_path = str(mock_use_case.execute.call_args[0][0])
+        assert "SKU002" in called_path
+
+    def test_in_run_duplicate_skipped(self, tmp_path: Path, monkeypatch) -> None:
+        """SKU already published in the same run must not be re-published."""
+        batch_dir = self._setup_batch_dir(tmp_path, ["SKU001", "SKU001b"])
+        mock_reader = MagicMock()
+        # Return same SKU twice to simulate a dup in read_batch
+        mock_reader.read_batch.return_value = [
+            (batch_dir / "MLB271599/SKU001/payload.json", _make_read_result(sku="SKU001")),
+            (batch_dir / "MLB271599/SKU001b/payload.json", _make_read_result(sku="SKU001")),
+        ]
+        call_count = {"n": 0}
+
+        def side_effect(path, dry_run: bool = False):
+            call_count["n"] += 1
+            return PublishJsonResult(
+                sku="SKU001", path=str(path), status="published", item_id=f"MLB{call_count['n']}"
+            )
+
+        mock_use_case = MagicMock(spec=PublishJsonUseCase)
+        mock_use_case.execute.side_effect = side_effect
+
+        monkeypatch.setattr(publish_json_cmd, "_build_use_case", lambda: mock_use_case)
+        monkeypatch.setattr(
+            publish_json_cmd, "JsonPayloadReader", MagicMock(return_value=mock_reader)
+        )
+
+        publish_json_cmd.publish_batch(batch_dir, report_dir=tmp_path / "reports")
+
+        assert mock_use_case.execute.call_count == 1
+
+    def test_no_manifest_all_skus_published(self, tmp_path: Path, monkeypatch) -> None:
+        """If batch_manifest.json is absent, all SKUs must be published normally."""
+        batch_dir = self._setup_batch_dir(tmp_path, ["SKU001", "SKU002"])
+
+        mock_reader = MagicMock()
+        mock_reader.read_batch.return_value = [
+            (batch_dir / "MLB271599/SKU001/payload.json", _make_read_result(sku="SKU001")),
+            (batch_dir / "MLB271599/SKU002/payload.json", _make_read_result(sku="SKU002")),
+        ]
+        mock_use_case = MagicMock(spec=PublishJsonUseCase)
+        mock_use_case.execute.side_effect = lambda path, dry_run=False: PublishJsonResult(
+            sku=path.parent.name, path=str(path), status="published", item_id="MLB100"
+        )
+
+        monkeypatch.setattr(publish_json_cmd, "_build_use_case", lambda: mock_use_case)
+        monkeypatch.setattr(
+            publish_json_cmd, "JsonPayloadReader", MagicMock(return_value=mock_reader)
+        )
+
+        publish_json_cmd.publish_batch(batch_dir, report_dir=tmp_path / "reports")
+
+        assert mock_use_case.execute.call_count == 2
