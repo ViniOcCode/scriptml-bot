@@ -30,6 +30,7 @@ from mercadolivre_upload.application.validators.seller_policy import (
     load_seller_config,
 )
 from mercadolivre_upload.auth import TokenManager
+from mercadolivre_upload.domain.fiscal.service import FiscalService
 
 logger = logging.getLogger(__name__)
 console = Console()
@@ -57,10 +58,12 @@ def _build_use_case(seller_config_path: Path | None = None) -> PublishJsonUseCas
     policy = SellerPolicyValidator(seller_config)
     auth_manager = TokenManager()
     api_client = MLApiClient(auth_manager)
+    fiscal_service = FiscalService(api_client)
     return PublishJsonUseCase(
         reader=reader,
         policy=policy,
         publisher=api_client,
+        fiscal_service=fiscal_service,
         publish_inactive=seller_config.batch.publish_inactive,
     )
 

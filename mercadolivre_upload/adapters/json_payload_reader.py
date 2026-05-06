@@ -30,6 +30,24 @@ REQUIRED_FIELDS = {
 # Fields that live inside each variation — not required at root when variations present
 _VARIATION_LEVEL_FIELDS: frozenset[str] = frozenset({"price", "available_quantity"})
 
+# Fields required in each item of a user_products payload (per ML API docs)
+UP_ITEM_REQUIRED_FIELDS: frozenset[str] = frozenset(
+    {
+        "category_id",
+        "price",
+        "currency_id",
+        "available_quantity",
+        "buying_mode",
+        "listing_type_id",
+        "condition",
+        "pictures",
+    }
+)
+
+# When True, also validates the envelope-level family_name field (legacy check).
+# Set to False to skip the envelope check (e.g. when family_name is injected externally).
+VALIDATE_UP_ENVELOPE: bool = True
+
 # currency_id is always required by ML API at root; default to BRL when builder omits it
 _DEFAULT_CURRENCY_ID = "BRL"
 _SUPPORTED_UPLOAD_MODES: frozenset[str] = frozenset({"legacy_items", "user_products"})
@@ -44,44 +62,151 @@ class ReadPayloadResult:
     """Result of reading a single payload.json file."""
 
     payload: dict[str, Any]  # cleaned payload without _meta — ready for publish routing
-    description: str | None  # _meta.description_plain_text
+    description: str | None  # _meta.description_plain_text (fallback root description)
     sku: str | None  # _meta.sku
     category_id: str  # extracted from payload
     ai_suggested: bool  # _meta.category_ai_suggested
     upload_mode: Literal["legacy_items", "user_products"] = "legacy_items"
     # Spec validation fields extracted from _meta (all optional for backward compat)
-    publication_ready: bool | None = None  # _meta.publication_ready; None = absent
+    publication_ready: bool | None = None  # _meta.publication.publication_ready; None = absent
     blocking_reasons: list[str] = field(default_factory=list)  # _meta.blocking_reasons
-    category_confidence: float | None = None  # _meta.category_confidence
-    reviewed_fiscal: bool | None = None  # _meta.reviewed_fiscal
+    category_confidence: float | None = (
+        None  # _meta.category_confidence / _meta.category.confidence
+    )
+    reviewed_fiscal: bool | None = None  # _meta.reviewed_fiscal / _meta.publication.reviewed_fiscal
+    fiscal_items: list[dict[str, Any]] = field(default_factory=list)  # root fiscal.items
+    publish_item_skus: list[str] = field(
+        default_factory=list
+    )  # _meta.traceability.publish_item_skus
+
+
+def _normalize_upload_mode(raw_mode: Any) -> str | None:
+    """Normalize external mode hints to internal upload modes."""
+    if not isinstance(raw_mode, str):
+        return None
+
+    token = raw_mode.strip().lower().replace("-", "_")
+    if not token:
+        return None
+
+    alias_to_mode = {
+        "legacy_items": "legacy_items",
+        "items": "legacy_items",
+        "item": "legacy_items",
+        "user_products": "user_products",
+        "user_product": "user_products",
+        "userproducts": "user_products",
+        "up": "user_products",
+    }
+    return alias_to_mode.get(token)
+
+
+def _extract_traceability_publish_item_skus(meta: dict[str, Any]) -> list[str]:
+    """Extract traceability SKU hints used by some payload generators."""
+    traceability = meta.get("traceability")
+    if not isinstance(traceability, dict):
+        return []
+
+    raw_publish_item_skus = traceability.get("publish_item_skus")
+    if not isinstance(raw_publish_item_skus, list):
+        return []
+
+    publish_item_skus: list[str] = []
+    for raw_sku in raw_publish_item_skus:
+        if not isinstance(raw_sku, str):
+            continue
+        normalized = raw_sku.strip()
+        if normalized:
+            publish_item_skus.append(normalized)
+    return publish_item_skus
+
+
+def _extract_root_description(raw: dict[str, Any]) -> str | None:
+    """Extract top-level description from payload envelopes when present."""
+    raw_description = raw.get("description")
+    if isinstance(raw_description, str):
+        normalized = raw_description.strip()
+        return normalized or None
+    if isinstance(raw_description, dict):
+        plain_text = raw_description.get("plain_text")
+        if isinstance(plain_text, str):
+            normalized = plain_text.strip()
+            return normalized or None
+    return None
+
+
+def _extract_root_fiscal_items(raw: dict[str, Any]) -> list[dict[str, Any]]:
+    """Extract top-level fiscal.items rows from payload envelopes when present."""
+    fiscal = raw.get("fiscal")
+    if not isinstance(fiscal, dict):
+        return []
+
+    items = fiscal.get("items")
+    if not isinstance(items, list):
+        return []
+
+    return [dict(item) for item in items if isinstance(item, dict)]
 
 
 def _resolve_upload_mode(meta: dict[str, Any], payload: dict[str, Any], path_name: str) -> str:
-    publication = meta.get("publication", {})
-    publication_model = publication.get("model") if isinstance(publication, dict) else None
-    if publication_model is not None:
-        if (
-            not isinstance(publication_model, str)
-            or publication_model.strip() not in _SUPPORTED_UPLOAD_MODES
-        ):
-            raise InvalidPayloadError(
-                f"Modelo de publicação inválido em {path_name}: {publication_model!r}"
-            )
-        publication_model = publication_model.strip()
+    publication = meta.get("publication")
+    if not isinstance(publication, dict):
+        publication = {}
 
-    payload_model = payload.get("model")
-    if payload_model is not None:
-        if not isinstance(payload_model, str) or payload_model.strip() != "user_products":
-            raise InvalidPayloadError(f"Campo 'payload.model' inválido em {path_name}")
-        payload_model = payload_model.strip()
+    mode_hints: list[tuple[str, str]] = []
 
-    if publication_model == "user_products" or payload_model == "user_products":
-        if publication_model == "legacy_items" and payload_model == "user_products":
-            raise InvalidPayloadError(
-                f"_meta.publication.model e payload.model divergem em {path_name}"
-            )
+    def _add_mode_hint(source: str, value: Any) -> None:
+        if value is None:
+            return
+        normalized_mode = _normalize_upload_mode(value)
+        if normalized_mode is None:
+            raise InvalidPayloadError(f"Modelo de publicação inválido em {path_name}: {value!r}")
+        mode_hints.append((source, normalized_mode))
+
+    _add_mode_hint("_meta.publication.model", publication.get("model"))
+    _add_mode_hint("_meta.publication.seller_model", publication.get("seller_model"))
+    _add_mode_hint("payload.model", payload.get("model"))
+
+    if mode_hints:
+        first_source, resolved_mode = mode_hints[0]
+        for source, mode in mode_hints[1:]:
+            if mode != resolved_mode:
+                raise InvalidPayloadError(f"{first_source} e {source} divergem em {path_name}")
+        return resolved_mode
+
+    # Last-resort inference when explicit model hints are absent.
+    items = payload.get("items")
+    if isinstance(items, list):
         return "user_products"
     return "legacy_items"
+
+
+def _normalize_payload_shape(payload: dict[str, Any]) -> dict[str, Any]:
+    """Normalize known envelope variants into publish-ready payload shape."""
+    nested_item = payload.get("item")
+    if not isinstance(nested_item, dict):
+        return payload
+
+    has_root_item_fields = any(
+        field in payload
+        for field in (
+            "title",
+            "category_id",
+            "price",
+            "available_quantity",
+            "pictures",
+            "items",
+            "family_name",
+        )
+    )
+    if has_root_item_fields:
+        return payload
+
+    normalized = dict(nested_item)
+    root_model = payload.get("model")
+    if isinstance(root_model, str) and "model" not in normalized:
+        normalized["model"] = root_model
+    return normalized
 
 
 def _validate_picture_sources(pictures: list[Any], path_name: str) -> None:
@@ -126,20 +251,28 @@ def _validate_legacy_payload(payload: dict[str, Any], path_name: str) -> None:
 
 def _validate_user_products_payload(payload: dict[str, Any], path_name: str) -> None:
     """Validate a local user-products upload envelope payload."""
-    family_name = payload.get("family_name")
-    if not isinstance(family_name, str) or not family_name.strip():
-        raise InvalidPayloadError(f"Campo obrigatório 'family_name' ausente em {path_name}")
-
     items = payload.get("items")
     if not isinstance(items, list) or not items:
         raise InvalidPayloadError(f"Campo obrigatório 'items' ausente ou vazio em {path_name}")
 
+    # Per-item required fields (ML API docs) — validated first, always.
     for index, item in enumerate(items, start=1):
         if not isinstance(item, dict) or not item:
             raise InvalidPayloadError(f"Item inválido em payload.items[{index}] de {path_name}")
+        missing = UP_ITEM_REQUIRED_FIELDS - item.keys()
+        if missing:
+            raise InvalidPayloadError(
+                f"Campos obrigatórios ausentes em item[{index}] de {path_name}: {sorted(missing)}"
+            )
         item_pictures = item.get("pictures", [])
         if isinstance(item_pictures, list) and item_pictures:
             _validate_picture_sources(item_pictures, f"{path_name}[item {index}]")
+
+    # Envelope-level check — behind VALIDATE_UP_ENVELOPE feature flag.
+    if VALIDATE_UP_ENVELOPE:
+        family_name = payload.get("family_name")
+        if not isinstance(family_name, str) or not family_name.strip():
+            raise InvalidPayloadError(f"Campo obrigatório 'family_name' ausente em {path_name}")
 
 
 def _extract_category_id(payload: dict[str, Any], upload_mode: str) -> str:
@@ -193,24 +326,40 @@ class JsonPayloadReader:
         meta: dict[str, Any] = raw.get("_meta", {})
         if not isinstance(meta, dict):
             meta = {}
-        description: str | None = meta.get("description_plain_text")
+        description_raw = meta.get("description_plain_text")
+        description: str | None = (
+            description_raw.strip()
+            if isinstance(description_raw, str) and description_raw.strip()
+            else None
+        )
+        if description is None:
+            description = _extract_root_description(raw)
         sku: str | None = meta.get("sku")
         ai_suggested: bool = bool(meta.get("category_ai_suggested", False))
-        publication_ready_raw = meta.get("publication_ready")
+        publication = meta.get("publication")
+        if not isinstance(publication, dict):
+            publication = {}
+
+        publication_ready_raw = meta.get("publication_ready", publication.get("publication_ready"))
         publication_ready: bool | None = (
             bool(publication_ready_raw) if publication_ready_raw is not None else None
         )
         blocking_reasons: list[str] = list(meta.get("blocking_reasons") or [])
-        category_confidence_raw = meta.get("category_confidence")
+        category_meta = meta.get("category")
+        if not isinstance(category_meta, dict):
+            category_meta = {}
+        category_confidence_raw = meta.get("category_confidence", category_meta.get("confidence"))
         category_confidence: float | None = (
             float(category_confidence_raw)
             if isinstance(category_confidence_raw, (int, float))
             else None
         )
-        reviewed_fiscal_raw = meta.get("reviewed_fiscal")
+        reviewed_fiscal_raw = meta.get("reviewed_fiscal", publication.get("reviewed_fiscal"))
         reviewed_fiscal: bool | None = (
             bool(reviewed_fiscal_raw) if reviewed_fiscal_raw is not None else None
         )
+        fiscal_items = _extract_root_fiscal_items(raw)
+        publish_item_skus = _extract_traceability_publish_item_skus(meta)
 
         payload_obj = raw.get("payload")
         if isinstance(payload_obj, dict):
@@ -221,6 +370,7 @@ class JsonPayloadReader:
         if not payload:
             raise InvalidPayloadError(f"Campo obrigatório 'payload' ausente em {path.name}")
         payload.pop("_meta", None)
+        payload = _normalize_payload_shape(payload)
 
         upload_mode = _resolve_upload_mode(meta, payload, path.name)
         payload.pop("model", None)
@@ -240,6 +390,8 @@ class JsonPayloadReader:
             blocking_reasons=blocking_reasons,
             category_confidence=category_confidence,
             reviewed_fiscal=reviewed_fiscal,
+            fiscal_items=fiscal_items,
+            publish_item_skus=publish_item_skus,
         )
 
     def read_batch(self, batch_dir: Path) -> list[tuple[Path, ReadPayloadResult | Exception]]:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -58,6 +59,8 @@ def _make_read_result(
     ai_suggested: bool = False,
     listing_type_id: str = "gold_special",
     price: float = 50.0,
+    fiscal_items: list[dict[str, Any]] | None = None,
+    publish_item_skus: list[str] | None = None,
 ) -> ReadPayloadResult:
     payload = {
         "title": "Produto Teste",
@@ -76,6 +79,8 @@ def _make_read_result(
         sku=sku,
         category_id=category_id,
         ai_suggested=ai_suggested,
+        fiscal_items=fiscal_items or [],
+        publish_item_skus=publish_item_skus or [],
     )
 
 
@@ -86,6 +91,8 @@ def _make_user_products_read_result(
     family_name: str = "Linha Alpha",
     items: list[dict[str, Any]] | None = None,
     ai_suggested: bool = False,
+    fiscal_items: list[dict[str, Any]] | None = None,
+    publish_item_skus: list[str] | None = None,
 ) -> ReadPayloadResult:
     payload_items = items or [
         {
@@ -110,6 +117,8 @@ def _make_user_products_read_result(
         category_id="MLB271599",
         ai_suggested=ai_suggested,
         upload_mode="user_products",
+        fiscal_items=fiscal_items or [],
+        publish_item_skus=publish_item_skus or [],
     )
 
 
@@ -143,6 +152,7 @@ def _make_read_result_with_variations(
 
 def _make_use_case(
     config: SellerConfig | None = None,
+    fiscal_service: Any | None = None,
     publish_inactive: bool = False,
 ) -> tuple[PublishJsonUseCase, MagicMock, MagicMock]:
     reader = MagicMock(spec=JsonPayloadReader)
@@ -158,6 +168,7 @@ def _make_use_case(
         reader=reader,
         policy=policy,
         publisher=publisher,
+        fiscal_service=fiscal_service,
         publish_inactive=publish_inactive,
     )
     return use_case, reader, publisher
@@ -250,6 +261,407 @@ class TestPublishJsonUseCase:
         use_case.execute(tmp_path / "payload.json")
 
         publisher.create_item_description.assert_not_called()
+
+    def test_publish_submete_fiscal_quando_presente(self, tmp_path: Path) -> None:
+        fiscal_service = MagicMock()
+        fiscal_service.submit_fiscal_data_workflow.return_value = SimpleNamespace(
+            success=True,
+            error_message=None,
+        )
+        use_case, reader, _publisher = _make_use_case(fiscal_service=fiscal_service)
+        reader.read.return_value = _make_read_result(
+            fiscal_items=[
+                {
+                    "sku": "ABC-001",
+                    "type": "single",
+                    "measurement_unit": "UN",
+                    "cost": 50.0,
+                    "tax_information": {
+                        "ncm": "9018.39.29",
+                        "origin_type": "reseller",
+                        "origin_detail": "0",
+                        "csosn": "102",
+                    },
+                }
+            ]
+        )
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "published"
+        fiscal_service.submit_fiscal_data_workflow.assert_called_once()
+        call_args = fiscal_service.submit_fiscal_data_workflow.call_args[0]
+        assert call_args[0] == "MLB987654321"
+        fiscal_data = call_args[1]
+        assert fiscal_data.sku == "ABC-001"
+        assert fiscal_data.ncm == "90183929"
+
+    def test_publish_fiscal_com_falha_bloqueia_resultado(self, tmp_path: Path) -> None:
+        fiscal_service = MagicMock()
+        fiscal_service.submit_fiscal_data_workflow.return_value = SimpleNamespace(
+            success=False,
+            error_message="sku não encontrado",
+        )
+        use_case, reader, _publisher = _make_use_case(fiscal_service=fiscal_service)
+        reader.read.return_value = _make_read_result(
+            fiscal_items=[
+                {
+                    "sku": "ABC-001",
+                    "type": "single",
+                    "measurement_unit": "UN",
+                    "cost": 50.0,
+                    "tax_information": {
+                        "ncm": "9018.39.29",
+                        "origin_type": "reseller",
+                        "origin_detail": "0",
+                    },
+                }
+            ]
+        )
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "failed"
+        assert "fiscal[1]" in (result.error or "")
+        assert "sku não encontrado" in (result.error or "")
+
+    def test_publish_fiscal_up_mapeia_por_sku_independente_da_ordem(self, tmp_path: Path) -> None:
+        fiscal_service = MagicMock()
+        fiscal_service.submit_fiscal_data_workflow.return_value = SimpleNamespace(
+            success=True,
+            error_message=None,
+        )
+        use_case, reader, publisher = _make_use_case(fiscal_service=fiscal_service)
+        reader.read.return_value = _make_user_products_read_result(
+            items=[
+                {
+                    "category_id": "MLB271599",
+                    "price": 50.0,
+                    "currency_id": "BRL",
+                    "available_quantity": 10,
+                    "buying_mode": "buy_it_now",
+                    "listing_type_id": "gold_special",
+                    "condition": "new",
+                    "pictures": [{"source": "https://cdn.ml.com/img-1.jpg"}],
+                    "attributes": [{"id": "SELLER_SKU", "value_name": "SKU-A"}],
+                },
+                {
+                    "category_id": "MLB271599",
+                    "price": 60.0,
+                    "currency_id": "BRL",
+                    "available_quantity": 5,
+                    "buying_mode": "buy_it_now",
+                    "listing_type_id": "gold_special",
+                    "condition": "new",
+                    "pictures": [{"source": "https://cdn.ml.com/img-2.jpg"}],
+                    "attributes": [{"id": "SELLER_SKU", "value_name": "SKU-B"}],
+                },
+            ],
+            fiscal_items=[
+                {
+                    "sku": "SKU-B",
+                    "type": "single",
+                    "measurement_unit": "UN",
+                    "cost": 60.0,
+                    "tax_information": {
+                        "ncm": "9018.39.29",
+                        "origin_type": "reseller",
+                        "origin_detail": "0",
+                    },
+                },
+                {
+                    "sku": "SKU-A",
+                    "type": "single",
+                    "measurement_unit": "UN",
+                    "cost": 50.0,
+                    "tax_information": {
+                        "ncm": "9018.39.29",
+                        "origin_type": "reseller",
+                        "origin_detail": "0",
+                    },
+                },
+            ],
+        )
+        publisher.create_user_product_item.side_effect = [
+            {"id": "MLB1", "user_product_id": "MLBU123"},
+            {"id": "MLB2", "user_product_id": "MLBU123"},
+        ]
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "published"
+        assert fiscal_service.submit_fiscal_data_workflow.call_count == 2
+        first_call = fiscal_service.submit_fiscal_data_workflow.call_args_list[0].args
+        second_call = fiscal_service.submit_fiscal_data_workflow.call_args_list[1].args
+        assert first_call[0] == "MLB2"
+        assert first_call[1].sku == "SKU-B"
+        assert second_call[0] == "MLB1"
+        assert second_call[1].sku == "SKU-A"
+
+    def test_publish_fiscal_up_mapeia_por_traceability_publish_item_skus(
+        self, tmp_path: Path
+    ) -> None:
+        fiscal_service = MagicMock()
+        fiscal_service.submit_fiscal_data_workflow.return_value = SimpleNamespace(
+            success=True,
+            error_message=None,
+        )
+        use_case, reader, publisher = _make_use_case(fiscal_service=fiscal_service)
+        reader.read.return_value = _make_user_products_read_result(
+            items=[
+                {
+                    "category_id": "MLB271599",
+                    "price": 50.0,
+                    "currency_id": "BRL",
+                    "available_quantity": 10,
+                    "buying_mode": "buy_it_now",
+                    "listing_type_id": "gold_special",
+                    "condition": "new",
+                    "pictures": [{"source": "https://cdn.ml.com/img-1.jpg"}],
+                    "attributes": [{"id": "BRAND", "value_name": "Marca"}],
+                },
+                {
+                    "category_id": "MLB271599",
+                    "price": 60.0,
+                    "currency_id": "BRL",
+                    "available_quantity": 5,
+                    "buying_mode": "buy_it_now",
+                    "listing_type_id": "gold_special",
+                    "condition": "new",
+                    "pictures": [{"source": "https://cdn.ml.com/img-2.jpg"}],
+                    "attributes": [{"id": "BRAND", "value_name": "Marca"}],
+                },
+            ],
+            fiscal_items=[
+                {
+                    "sku": "SKU-B",
+                    "type": "single",
+                    "measurement_unit": "UN",
+                    "cost": 60.0,
+                    "tax_information": {
+                        "ncm": "9018.39.29",
+                        "origin_type": "reseller",
+                        "origin_detail": "0",
+                    },
+                },
+                {
+                    "sku": "SKU-A",
+                    "type": "single",
+                    "measurement_unit": "UN",
+                    "cost": 50.0,
+                    "tax_information": {
+                        "ncm": "9018.39.29",
+                        "origin_type": "reseller",
+                        "origin_detail": "0",
+                    },
+                },
+            ],
+            publish_item_skus=["SKU-A", "SKU-B"],
+        )
+        publisher.create_user_product_item.side_effect = [
+            {"id": "MLB1", "user_product_id": "MLBU123"},
+            {"id": "MLB2", "user_product_id": "MLBU123"},
+        ]
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "published"
+        assert fiscal_service.submit_fiscal_data_workflow.call_count == 2
+        first_call = fiscal_service.submit_fiscal_data_workflow.call_args_list[0].args
+        second_call = fiscal_service.submit_fiscal_data_workflow.call_args_list[1].args
+        assert first_call[0] == "MLB2"
+        assert first_call[1].sku == "SKU-B"
+        assert second_call[0] == "MLB1"
+        assert second_call[1].sku == "SKU-A"
+
+    def test_publish_fiscal_legacy_variations_envia_todos_os_skus(self, tmp_path: Path) -> None:
+        fiscal_service = MagicMock()
+        fiscal_service.submit_fiscal_data_workflow.return_value = SimpleNamespace(
+            success=True,
+            error_message=None,
+        )
+        use_case, reader, _publisher = _make_use_case(fiscal_service=fiscal_service)
+        read_result = _make_read_result(
+            sku="SKU-FAMILIA",
+            fiscal_items=[
+                {
+                    "sku": "SKU-VAR-A",
+                    "type": "single",
+                    "measurement_unit": "UN",
+                    "cost": 50.0,
+                    "tax_information": {
+                        "ncm": "9018.39.29",
+                        "origin_type": "reseller",
+                        "origin_detail": "0",
+                    },
+                },
+                {
+                    "sku": "SKU-VAR-B",
+                    "type": "single",
+                    "measurement_unit": "UN",
+                    "cost": 60.0,
+                    "tax_information": {
+                        "ncm": "9018.39.29",
+                        "origin_type": "reseller",
+                        "origin_detail": "0",
+                    },
+                },
+            ],
+        )
+        read_result.payload["variations"] = [
+            {"price": 50.0, "available_quantity": 5, "attribute_combinations": []},
+            {"price": 60.0, "available_quantity": 5, "attribute_combinations": []},
+        ]
+        reader.read.return_value = read_result
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "published"
+        assert fiscal_service.submit_fiscal_data_workflow.call_count == 2
+        calls = fiscal_service.submit_fiscal_data_workflow.call_args_list
+        assert calls[0].args[0] == "MLB987654321"
+        assert calls[1].args[0] == "MLB987654321"
+        submitted_skus = {calls[0].args[1].sku, calls[1].args[1].sku}
+        assert submitted_skus == {"SKU-VAR-A", "SKU-VAR-B"}
+
+    def test_publish_fiscal_legacy_variation_repasse_variation_id_quando_disponivel(
+        self, tmp_path: Path
+    ) -> None:
+        fiscal_service = MagicMock()
+        fiscal_service.submit_fiscal_data_workflow.return_value = SimpleNamespace(
+            success=True,
+            error_message=None,
+        )
+        use_case, reader, publisher = _make_use_case(fiscal_service=fiscal_service)
+        read_result = _make_read_result(
+            sku="SKU-BASE",
+            fiscal_items=[
+                {
+                    "sku": "SKU-VAR-A",
+                    "type": "single",
+                    "measurement_unit": "UN",
+                    "cost": 50.0,
+                    "tax_information": {
+                        "ncm": "9018.39.29",
+                        "origin_type": "reseller",
+                        "origin_detail": "0",
+                    },
+                }
+            ],
+        )
+        read_result.payload["variations"] = [
+            {"price": 50.0, "available_quantity": 5, "attribute_combinations": []}
+        ]
+        reader.read.return_value = read_result
+        publisher.create_item.return_value = {
+            "id": "MLB987654321",
+            "variations": [
+                {
+                    "id": 111,
+                    "attributes": [{"id": "SELLER_SKU", "value_name": "SKU-VAR-A"}],
+                }
+            ],
+        }
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "published"
+        fiscal_service.submit_fiscal_data_workflow.assert_called_once()
+        call = fiscal_service.submit_fiscal_data_workflow.call_args
+        assert call.args[0] == "MLB987654321"
+        assert call.args[1].sku == "SKU-VAR-A"
+        assert call.kwargs["variation_id"] == "111"
+
+    def test_publish_fiscal_sem_service_falha_quando_payload_exige(self, tmp_path: Path) -> None:
+        use_case, reader, _publisher = _make_use_case(fiscal_service=None)
+        reader.read.return_value = _make_read_result(
+            fiscal_items=[
+                {
+                    "sku": "ABC-001",
+                    "type": "single",
+                    "measurement_unit": "UN",
+                    "cost": 50.0,
+                    "tax_information": {
+                        "ncm": "9018.39.29",
+                        "origin_type": "reseller",
+                        "origin_detail": "0",
+                    },
+                }
+            ]
+        )
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "failed"
+        assert "fiscal:" in (result.error or "").lower()
+        assert "fiscalservice" in (result.error or "").lower()
+
+    def test_publish_fiscal_up_sku_nao_mapeado_falha(self, tmp_path: Path) -> None:
+        fiscal_service = MagicMock()
+        fiscal_service.submit_fiscal_data_workflow.return_value = SimpleNamespace(
+            success=True,
+            error_message=None,
+        )
+        use_case, reader, publisher = _make_use_case(fiscal_service=fiscal_service)
+        reader.read.return_value = _make_user_products_read_result(
+            items=[
+                {
+                    "category_id": "MLB271599",
+                    "price": 50.0,
+                    "currency_id": "BRL",
+                    "available_quantity": 10,
+                    "buying_mode": "buy_it_now",
+                    "listing_type_id": "gold_special",
+                    "condition": "new",
+                    "pictures": [{"source": "https://cdn.ml.com/img-1.jpg"}],
+                    "attributes": [{"id": "SELLER_SKU", "value_name": "SKU-A"}],
+                },
+                {
+                    "category_id": "MLB271599",
+                    "price": 60.0,
+                    "currency_id": "BRL",
+                    "available_quantity": 5,
+                    "buying_mode": "buy_it_now",
+                    "listing_type_id": "gold_special",
+                    "condition": "new",
+                    "pictures": [{"source": "https://cdn.ml.com/img-2.jpg"}],
+                    "attributes": [{"id": "SELLER_SKU", "value_name": "SKU-B"}],
+                },
+            ],
+            fiscal_items=[
+                {
+                    "sku": "SKU-A",
+                    "type": "single",
+                    "measurement_unit": "UN",
+                    "cost": 50.0,
+                    "tax_information": {
+                        "ncm": "9018.39.29",
+                        "origin_type": "reseller",
+                        "origin_detail": "0",
+                    },
+                },
+                {
+                    "sku": "SKU-C",
+                    "type": "single",
+                    "measurement_unit": "UN",
+                    "cost": 70.0,
+                    "tax_information": {
+                        "ncm": "9018.39.29",
+                        "origin_type": "reseller",
+                        "origin_detail": "0",
+                    },
+                },
+            ],
+        )
+        publisher.create_user_product_item.side_effect = [
+            {"id": "MLB1", "user_product_id": "MLBU123"},
+            {"id": "MLB2", "user_product_id": "MLBU123"},
+        ]
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "failed"
+        assert "sku 'SKU-C'" in (result.error or "")
 
     def test_publish_api_error_retorna_failed(self, tmp_path: Path) -> None:
         use_case, reader, publisher = _make_use_case()
@@ -405,6 +817,8 @@ class TestPublishJsonApiErrors:
         assert result.status == "failed"
         assert "item.attributes.missing_required" in (result.error or "")
         assert "BRAND" in (result.error or "")
+        assert "\"error\": \"validation_error\"" in (result.error or "")
+        assert "\"references\": [\"item.attributes\"]" in (result.error or "")
 
     def test_400_without_ml_body_falls_back_to_http_error_str(self, tmp_path: Path) -> None:
         """Plain HTTPError (no ML body) must still produce a failed result with error string."""

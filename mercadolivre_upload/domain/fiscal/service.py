@@ -164,13 +164,19 @@ class FiscalService:
             logger_instance=logger,
         )
 
-    def _wait_for_sku_link(self, item_id: str, sku: str) -> tuple[dict[str, Any] | None, int]:
+    def _wait_for_sku_link(
+        self,
+        item_id: str,
+        sku: str,
+        variation_id: str | None = None,
+    ) -> tuple[dict[str, Any] | None, int]:
         """Wait until SKU can be linked to the published item."""
         retryable_statuses = self.retry_config.retryable_status_codes | {404}
         return wait_for_sku_link(
             api_client=self.api_client,
             item_id=item_id,
             sku=sku,
+            variation_id=variation_id,
             max_retries=self.can_invoice_max_retries,
             wait_delay=self.can_invoice_wait_delay,
             retryable_statuses=retryable_statuses,
@@ -203,7 +209,10 @@ class FiscalService:
         )
 
     def submit_fiscal_data_workflow(
-        self, item_id: str, fiscal_data: FiscalData
+        self,
+        item_id: str,
+        fiscal_data: FiscalData,
+        variation_id: str | None = None,
     ) -> FiscalSubmissionResult:
         """Execute complete fiscal data submission workflow.
 
@@ -305,7 +314,11 @@ class FiscalService:
 
         link_retry_count = 0
         try:
-            _, link_retry_count = self._wait_for_sku_link(item_id=item_id, sku=sku)
+            _, link_retry_count = self._wait_for_sku_link(
+                item_id=item_id,
+                sku=sku,
+                variation_id=variation_id,
+            )
             total_retry_count += link_retry_count
         except Exception as e:
             error_msg = f"Failed to link SKU to item: {str(e)}"

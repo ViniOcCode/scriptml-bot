@@ -91,6 +91,48 @@ class TestJsonPayloadReader:
         result = self.reader.read(path)
         assert result.description == "Descrição especial"
 
+    def test_read_description_top_level_quando_meta_ausente(self, tmp_path: Path) -> None:
+        payload = _make_valid_payload()
+        payload.pop("_meta", None)
+        path = _write_payload(
+            tmp_path,
+            {
+                "payload": payload,
+                "description": "Descrição vindo da raiz",
+                "_meta": {"sku": "ABC-001"},
+            },
+        )
+        result = self.reader.read(path)
+        assert result.description == "Descrição vindo da raiz"
+
+    def test_read_fiscal_items_extraidos_da_raiz(self, tmp_path: Path) -> None:
+        payload = _make_valid_payload()
+        payload.pop("_meta", None)
+        path = _write_payload(
+            tmp_path,
+            {
+                "payload": payload,
+                "_meta": {"sku": "ABC-001"},
+                "fiscal": {
+                    "items": [
+                        {
+                            "sku": "ABC-001",
+                            "type": "single",
+                            "measurement_unit": "UN",
+                            "tax_information": {
+                                "ncm": "9018.39.29",
+                                "origin_type": "reseller",
+                                "origin_detail": "0",
+                            },
+                        }
+                    ]
+                },
+            },
+        )
+        result = self.reader.read(path)
+        assert len(result.fiscal_items) == 1
+        assert result.fiscal_items[0]["sku"] == "ABC-001"
+
     def test_read_sku_extraido(self, tmp_path: Path) -> None:
         payload = _make_valid_payload()
         payload["_meta"]["sku"] = "XYZ-999"  # type: ignore[index]
@@ -196,6 +238,33 @@ class TestJsonPayloadReader:
         assert result.payload["title"] == "Produto Teste"
         assert "_meta" not in result.payload
 
+    def test_read_nested_payload_envelope_legacy_via_seller_model_items(
+        self, tmp_path: Path
+    ) -> None:
+        path = _write_payload(
+            tmp_path,
+            _make_envelope(
+                _make_valid_payload(),
+                {"publication": {"seller_model": "items"}},
+            ),
+        )
+        result = self.reader.read(path)
+        assert result.upload_mode == "legacy_items"
+
+    def test_read_nested_payload_envelope_legacy_item_wrapper(self, tmp_path: Path) -> None:
+        legacy_payload = _make_valid_payload()
+        legacy_payload.pop("_meta", None)
+        path = _write_payload(
+            tmp_path,
+            {
+                "payload": {"item": legacy_payload},
+                "_meta": {"publication": {"seller_model": "items"}},
+            },
+        )
+        result = self.reader.read(path)
+        assert result.upload_mode == "legacy_items"
+        assert result.payload["title"] == "Produto Teste"
+
     def test_read_nested_payload_envelope_user_products(self, tmp_path: Path) -> None:
         path = _write_payload(
             tmp_path,
@@ -284,12 +353,26 @@ class TestJsonPayloadReader:
         result = self.reader.read(path)
         assert result.publication_ready is None
 
+    def test_read_publication_ready_from_meta_publication(self, tmp_path: Path) -> None:
+        payload = _make_valid_payload()
+        payload["_meta"]["publication"] = {"publication_ready": True}  # type: ignore[index]
+        path = _write_payload(tmp_path, payload)
+        result = self.reader.read(path)
+        assert result.publication_ready is True
+
     def test_read_category_confidence_extracted(self, tmp_path: Path) -> None:
         payload = _make_valid_payload()
         payload["_meta"]["category_confidence"] = 0.85  # type: ignore[index]
         path = _write_payload(tmp_path, payload)
         result = self.reader.read(path)
         assert result.category_confidence == pytest.approx(0.85)
+
+    def test_read_category_confidence_from_meta_category(self, tmp_path: Path) -> None:
+        payload = _make_valid_payload()
+        payload["_meta"]["category"] = {"confidence": 0.77}  # type: ignore[index]
+        path = _write_payload(tmp_path, payload)
+        result = self.reader.read(path)
+        assert result.category_confidence == pytest.approx(0.77)
 
     def test_read_category_confidence_absent_is_none(self, tmp_path: Path) -> None:
         path = _write_payload(tmp_path, _make_valid_payload())
@@ -302,6 +385,13 @@ class TestJsonPayloadReader:
         path = _write_payload(tmp_path, payload)
         result = self.reader.read(path)
         assert result.reviewed_fiscal is True
+
+    def test_read_traceability_publish_item_skus(self, tmp_path: Path) -> None:
+        payload = _make_valid_payload()
+        payload["_meta"]["traceability"] = {"publish_item_skus": [" SKU-A ", "SKU-B", None]}  # type: ignore[index]
+        path = _write_payload(tmp_path, payload)
+        result = self.reader.read(path)
+        assert result.publish_item_skus == ["SKU-A", "SKU-B"]
 
     # --- picture URL validation ---
 
@@ -331,3 +421,90 @@ class TestJsonPayloadReader:
         path = _write_payload(tmp_path, payload)
         with pytest.raises(InvalidPayloadError, match="local"):
             self.reader.read(path)
+
+    # --- user_products per-item required fields ---
+
+    def _make_up_envelope(self, items: list, *, family_name: str = "Linha Alpha") -> dict:
+        return _make_envelope(
+            {
+                "model": "user_products",
+                "family_name": family_name,
+                "items": items,
+            },
+            {"publication": {"model": "user_products"}},
+        )
+
+    def _valid_up_item(self, **overrides: object) -> dict:
+        base: dict = {
+            "category_id": "MLB271599",
+            "price": 99.90,
+            "currency_id": "BRL",
+            "available_quantity": 10,
+            "buying_mode": "buy_it_now",
+            "listing_type_id": "gold_special",
+            "condition": "new",
+            "pictures": [{"source": "https://cdn.ml.com/abc.jpg"}],
+        }
+        base.update(overrides)
+        return base
+
+    @pytest.mark.parametrize(
+        "missing_field",
+        [
+            "category_id",
+            "price",
+            "currency_id",
+            "available_quantity",
+            "buying_mode",
+            "listing_type_id",
+            "condition",
+            "pictures",
+        ],
+    )
+    def test_up_item_missing_required_field_raises(
+        self, tmp_path: Path, missing_field: str
+    ) -> None:
+        item = self._valid_up_item()
+        del item[missing_field]
+        path = _write_payload(tmp_path, self._make_up_envelope([item]))
+        with pytest.raises(InvalidPayloadError, match=missing_field):
+            self.reader.read(path)
+
+    def test_up_item_all_required_fields_passes(self, tmp_path: Path) -> None:
+        path = _write_payload(tmp_path, self._make_up_envelope([self._valid_up_item()]))
+        result = self.reader.read(path)
+        assert result.upload_mode == "user_products"
+
+    def test_up_item_missing_family_name_raises_when_envelope_enabled(self, tmp_path: Path) -> None:
+        from mercadolivre_upload.adapters import json_payload_reader
+
+        original = json_payload_reader.VALIDATE_UP_ENVELOPE
+        json_payload_reader.VALIDATE_UP_ENVELOPE = True
+        try:
+            envelope = _make_envelope(
+                {"model": "user_products", "items": [self._valid_up_item()]},
+                {"publication": {"model": "user_products"}},
+            )
+            path = _write_payload(tmp_path, envelope)
+            with pytest.raises(InvalidPayloadError, match="family_name"):
+                self.reader.read(path)
+        finally:
+            json_payload_reader.VALIDATE_UP_ENVELOPE = original
+
+    def test_up_item_missing_family_name_allowed_when_envelope_disabled(
+        self, tmp_path: Path
+    ) -> None:
+        from mercadolivre_upload.adapters import json_payload_reader
+
+        original = json_payload_reader.VALIDATE_UP_ENVELOPE
+        json_payload_reader.VALIDATE_UP_ENVELOPE = False
+        try:
+            envelope = _make_envelope(
+                {"model": "user_products", "items": [self._valid_up_item()]},
+                {"publication": {"model": "user_products"}},
+            )
+            path = _write_payload(tmp_path, envelope)
+            result = self.reader.read(path)
+            assert result.upload_mode == "user_products"
+        finally:
+            json_payload_reader.VALIDATE_UP_ENVELOPE = original

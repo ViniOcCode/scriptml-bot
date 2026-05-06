@@ -60,6 +60,7 @@ def wait_for_sku_link(
     api_client: Any,
     item_id: str,
     sku: str,
+    variation_id: str | None,
     max_retries: int,
     wait_delay: float,
     retryable_statuses: set[int],
@@ -71,7 +72,10 @@ def wait_for_sku_link(
     """Wait until SKU can be linked to the published item."""
     for attempt in range(max_retries + 1):
         try:
-            response = api_client.link_fiscal_sku_to_item(sku=sku, item_id=item_id)
+            link_payload: dict[str, Any] = {"sku": sku, "item_id": item_id}
+            if variation_id is not None:
+                link_payload["variation_id"] = variation_id
+            response = api_client.link_fiscal_sku_to_item(**link_payload)
             if attempt > 0:
                 logger_instance.info(
                     f"SKU {sku} linked to item {item_id} after {attempt} wait cycles"
