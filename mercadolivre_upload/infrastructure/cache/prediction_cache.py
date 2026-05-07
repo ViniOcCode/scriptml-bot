@@ -9,6 +9,7 @@ import logging
 import time
 from pathlib import Path
 from typing import Any
+from ml_workflow_contracts.runtime_paths import resolve_ml_bot_paths
 
 logger = logging.getLogger(__name__)
 
@@ -17,9 +18,12 @@ class PredictionCache:
     """TTL-based cache for domain discovery predictions."""
 
     def __init__(  # noqa: D107
-        self, cache_dir: str = "cache/predictions", ttl_seconds: int = 86400
+        self, cache_dir: str | None = None, ttl_seconds: int = 86400
     ):
-        self.cache_dir = Path(cache_dir)
+        default_cache_dir = (
+            resolve_ml_bot_paths().cache_root / "scriptml" / "mercadolivre" / "categories" / "predictions"
+        )
+        self.cache_dir = Path(cache_dir) if cache_dir is not None else default_cache_dir
         self.ttl_seconds = ttl_seconds
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 

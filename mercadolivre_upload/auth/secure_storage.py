@@ -8,6 +8,8 @@ import logging
 import os
 from pathlib import Path
 from typing import Any
+from ml_workflow_contracts.file_safety import atomic_write_bytes, file_lock
+from ml_workflow_contracts.runtime_paths import resolve_ml_bot_paths
 
 try:
     import keyring
@@ -50,7 +52,9 @@ class SecureTokenStorage:
         Args:
             token_path: Path to encrypted token file. Defaults to tokens.json.enc
         """
-        self.token_path = token_path or Path("tokens.json.enc")
+        canonical = resolve_ml_bot_paths().mercadolivre_tokens_enc
+        self.token_path = token_path or canonical
+        self._lock_path = resolve_ml_bot_paths().mercadolivre_auth_lock
         self._cipher = None
 
     def _get_or_create_key(self) -> bytes:
@@ -153,7 +157,8 @@ class SecureTokenStorage:
             json_data = json.dumps(tokens, indent=2)
             encrypted = fernet.encrypt(json_data.encode())
 
-            self.token_path.write_bytes(encrypted)
+            with file_lock(self._lock_path):
+                atomic_write_bytes(self.token_path, encrypted)
             logger.info(f"Tokens saved securely to {self.token_path}")
 
             # Set restrictive permissions (owner read/write only)
@@ -189,39 +194,3 @@ class SecureTokenStorage:
         if self.token_path.exists():
             self.token_path.unlink()
             logger.info(f"Token file {self.token_path} deleted")
-
-
-def migrate_plaintext_tokens(
-    plaintext_path: Path = Path("tokens.json"),
-    encrypted_path: Path = Path("tokens.json.enc"),
-) -> bool:
-    """Migrate tokens from plaintext to encrypted storage.
-
-    Args:
-        plaintext_path: Path to old plaintext tokens.json
-        encrypted_path: Path to new encrypted tokens.json.enc
-
-    Returns:
-        True if migration successful, False otherwise
-    """
-    if not plaintext_path.exists():
-        return False
-
-    try:
-        logger.info(f"Migrating tokens from {plaintext_path} to encrypted storage...")
-        tokens = json.loads(plaintext_path.read_text())
-
-        storage = SecureTokenStorage(encrypted_path)
-        storage.save_tokens(tokens)
-
-        # Backup and remove old plaintext file
-        backup_path = plaintext_path.with_suffix(".json.backup")
-        plaintext_path.rename(backup_path)
-        logger.info(f"Plaintext tokens backed up to {backup_path}")
-        logger.info("Migration complete. Please delete the backup file manually.")
-
-        return True
-
-    except Exception as e:
-        logger.error(f"Migration failed: {e}")
-        return False

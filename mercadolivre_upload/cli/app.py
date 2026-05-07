@@ -12,6 +12,10 @@ from rich.console import Console
 from rich.theme import Theme
 
 from mercadolivre_upload.infrastructure.logging import setup_logging as setup_app_logging
+from mercadolivre_upload.cli.commands.common import (
+    resolve_default_category_cache_dir,
+    resolve_default_report_dir,
+)
 
 # Configure custom theme
 console_theme = Theme(
@@ -60,7 +64,9 @@ def upload(
     verbose: bool = typer.Option(False, "--verbose", "-v"),  # noqa: B008
     detailed: bool = typer.Option(False, "--detailed", "-d"),  # noqa: B008
     batch_size: int = typer.Option(5, "--batch-size", min=1),  # noqa: B008
-    report_dir: Path = typer.Option(Path("cache/reports"), "--report-dir"),  # noqa: B008
+    workspace: Path | None = typer.Option(None, "--workspace"),  # noqa: B008
+    cache_root: Path | None = typer.Option(None, "--cache-root"),  # noqa: B008
+    report_dir: Path | None = typer.Option(None, "--report-dir"),  # noqa: B008
     publish_inactive: bool = typer.Option(  # noqa: B008
         False,
         "--publish-inactive/--no-publish-inactive",
@@ -82,10 +88,10 @@ def upload(
         excel=selected_excel,
         images=images,
         category=category,
-        cache_dir=Path("cache/categories"),
+        cache_dir=resolve_default_category_cache_dir(workspace=workspace, cache_root=cache_root),
         detailed=detailed,
         batch_size=batch_size,
-        report_dir=report_dir,
+        report_dir=report_dir or resolve_default_report_dir(workspace),
         publish_inactive=publish_inactive,
     )
 
@@ -98,7 +104,9 @@ def validate(
     category: str | None = typer.Option(None, "--category", "-c"),  # noqa: B008
     detailed: bool = typer.Option(False, "--detailed", "-d"),  # noqa: B008
     batch_size: int = typer.Option(5, "--batch-size", min=1),  # noqa: B008
-    report_dir: Path = typer.Option(Path("cache/reports"), "--report-dir"),  # noqa: B008
+    workspace: Path | None = typer.Option(None, "--workspace"),  # noqa: B008
+    cache_root: Path | None = typer.Option(None, "--cache-root"),  # noqa: B008
+    report_dir: Path | None = typer.Option(None, "--report-dir"),  # noqa: B008
 ) -> Any:
     """Validate products using the new CLI implementation only."""
     selected_excel = excel_option or excel
@@ -114,10 +122,29 @@ def validate(
         excel=selected_excel,
         images=images,
         category=category,
-        cache_dir=Path("cache/categories"),
+        cache_dir=resolve_default_category_cache_dir(workspace=workspace, cache_root=cache_root),
         detailed=detailed,
         batch_size=batch_size,
+        report_dir=report_dir or resolve_default_report_dir(workspace),
+    )
+
+
+@app.command("publish-batch")
+def publish_batch_command(
+    source: Path = typer.Argument(..., help="Batch directory, batch_manifest.json, or payload.json"),  # noqa: B008
+    workspace: Path | None = typer.Option(None, "--workspace"),  # noqa: B008
+    cache_root: Path | None = typer.Option(None, "--cache-root"),  # noqa: B008
+    report_dir: Path | None = typer.Option(None, "--report-dir"),  # noqa: B008
+    dry_run: bool = typer.Option(False, "--dry-run"),  # noqa: B008
+) -> Any:
+    """Publish builder-generated payload artifacts."""
+    publish_batch_mod = import_module("mercadolivre_upload.cli.commands.publish_batch")
+    return publish_batch_mod.publish_batch(
+        source=source,
+        workspace=workspace,
+        cache_root=cache_root,
         report_dir=report_dir,
+        dry_run=dry_run,
     )
 
 

@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from typing import Any, Protocol
+from ml_workflow_contracts.runtime_paths import resolve_ml_bot_paths
 
 import typer
 from rich.console import Console
@@ -31,6 +32,31 @@ def coerce_path_option(
     if isinstance(path_value, Path):
         return path_value
     return Path(path_value)
+
+
+def resolve_scriptml_workspace(workspace: Path | str | None) -> Path:
+    if workspace is not None:
+        return Path(workspace).expanduser().resolve()
+    return (resolve_ml_bot_paths().runs_root / "scriptml-standalone").resolve()
+
+
+def resolve_scriptml_cache_root(cache_root: Path | str | None) -> Path:
+    if cache_root is not None:
+        return Path(cache_root).expanduser().resolve()
+    return (resolve_ml_bot_paths().cache_root / "scriptml").resolve()
+
+
+def resolve_default_category_cache_dir(
+    *,
+    workspace: Path | str | None,
+    cache_root: Path | str | None,
+) -> Path:
+    del workspace
+    return resolve_scriptml_cache_root(cache_root) / "mercadolivre" / "categories"
+
+
+def resolve_default_report_dir(workspace: Path | str | None) -> Path:
+    return resolve_scriptml_workspace(workspace) / "publish"
 
 
 def parse_products_or_exit(

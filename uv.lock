@@ -809,6 +809,7 @@ dependencies = [
     { name = "aiohttp" },
     { name = "cryptography" },
     { name = "keyring" },
+    { name = "ml-workflow-contracts" },
     { name = "openpyxl" },
     { name = "pandas" },
     { name = "pydantic" },
@@ -843,6 +844,7 @@ requires-dist = [
     { name = "black", marker = "extra == 'dev'", specifier = ">=23.0.0" },
     { name = "cryptography", specifier = ">=41.0.0" },
     { name = "keyring", specifier = ">=24.0.0" },
+    { name = "ml-workflow-contracts", editable = "../../packages/ml-workflow-contracts" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.7.0" },
     { name = "openpyxl", specifier = ">=3.0.0" },
     { name = "pandas", specifier = ">=1.5.0" },
@@ -863,6 +865,15 @@ requires-dist = [
     { name = "typer", specifier = ">=0.9.0" },
     { name = "xlrd", specifier = ">=2.0.1" },
 ]
+provides-extras = ["dev"]
+
+[[package]]
+name = "ml-workflow-contracts"
+version = "0.1.0"
+source = { editable = "../../packages/ml-workflow-contracts" }
+
+[package.metadata]
+requires-dist = [{ name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" }]
 provides-extras = ["dev"]
 
 [[package]]

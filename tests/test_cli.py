@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from typer.testing import CliRunner
+from ml_workflow_contracts.runtime_paths import resolve_ml_bot_paths
 
 # Ensure mercadolivre_upload is importable
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -53,10 +54,14 @@ class TestUploadCommand:
         assert kwargs["excel"] == Path("test.xlsx")
         assert kwargs["images"] == Path("imgs")
         assert kwargs["category"] == "test-category"
-        assert kwargs["cache_dir"] == Path("cache/categories")
+        assert kwargs["cache_dir"] == (
+            resolve_ml_bot_paths().cache_root / "scriptml" / "mercadolivre" / "categories"
+        )
         assert kwargs["detailed"] is False
         assert kwargs["batch_size"] == 5
-        assert kwargs["report_dir"] == Path("cache/reports")
+        assert kwargs["report_dir"] == (
+            resolve_ml_bot_paths().runs_root / "scriptml-standalone" / "publish"
+        )
 
     @patch("mercadolivre_upload.cli.app.import_module")
     def test_upload_accepts_excel_option(self, mock_import_module):
@@ -188,10 +193,14 @@ class TestValidateCommand:
         assert kwargs["excel"] == Path("test.xlsx")
         assert kwargs["images"] == Path("imgs")
         assert kwargs["category"] == "test-category"
-        assert kwargs["cache_dir"] == Path("cache/categories")
+        assert kwargs["cache_dir"] == (
+            resolve_ml_bot_paths().cache_root / "scriptml" / "mercadolivre" / "categories"
+        )
         assert kwargs["detailed"] is True
         assert kwargs["batch_size"] == 5
-        assert kwargs["report_dir"] == Path("cache/reports")
+        assert kwargs["report_dir"] == (
+            resolve_ml_bot_paths().runs_root / "scriptml-standalone" / "publish"
+        )
 
     def test_validate_requires_new_flow_params(self):
         """Test validate requires --images and --category."""
@@ -323,3 +332,35 @@ class TestMainBlock:
         )
 
         assert result.returncode in [0, 1, 2]
+
+class TestPublishBatchCommand:
+    @patch("mercadolivre_upload.cli.app.import_module")
+    def test_publish_batch_delegates_to_command(self, mock_import_module):
+        mock_module = MagicMock()
+        mock_import_module.return_value = mock_module
+
+        with runner.isolated_filesystem():
+            Path("payload.json").write_text('{"payload":{"title":"Item"}}')
+            result = runner.invoke(
+                app,
+                [
+                    "publish-batch",
+                    "payload.json",
+                    "--workspace",
+                    "workspace",
+                    "--cache-root",
+                    "cache",
+                    "--report-dir",
+                    "reports",
+                    "--dry-run",
+                ],
+            )
+
+        assert result.exit_code == 0
+        mock_import_module.assert_called_with("mercadolivre_upload.cli.commands.publish_batch")
+        kwargs = mock_module.publish_batch.call_args.kwargs
+        assert kwargs["source"] == Path("payload.json")
+        assert kwargs["workspace"] == Path("workspace")
+        assert kwargs["cache_root"] == Path("cache")
+        assert kwargs["report_dir"] == Path("reports")
+        assert kwargs["dry_run"] is True
