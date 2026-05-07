@@ -5,10 +5,12 @@ import os
 import time
 from pathlib import Path
 from typing import Any
+from ml_workflow_contracts.file_safety import atomic_write_json, file_lock
+from ml_workflow_contracts.runtime_paths import resolve_ml_bot_paths
 
 from .exceptions import AuthError, TokenExpiredError
 from .oauth import OAuthHandler
-from .secure_storage import SecureStorageError, SecureTokenStorage, migrate_plaintext_tokens
+from .secure_storage import SecureStorageError, SecureTokenStorage
 
 
 def _is_truthy_env(value: str | None) -> bool:
@@ -48,11 +50,13 @@ class TokenManager:
         """Initialize the token manager.
 
         Args:
-            token_path: Path to tokens.json. Defaults to 'tokens.json' in current directory
+            token_path: Path to token file. Defaults to canonical shared auth path
             oauth_handler: OAuthHandler for token refresh. If None, creates default
         """
-        default_path = token_path or os.getenv("MERCADO_LIVRE_TOKEN_PATH") or "tokens.json"
+        canonical_default = resolve_ml_bot_paths().mercadolivre_tokens_json
+        default_path = token_path or str(canonical_default)
         self.token_path = Path(default_path)
+        self._lock_path = resolve_ml_bot_paths().mercadolivre_auth_lock
         self.oauth_handler = oauth_handler or OAuthHandler()
         self._tokens: dict[str, Any] | None = None
         self._secure_storage: SecureTokenStorage | None = None
@@ -64,15 +68,6 @@ class TokenManager:
                 if self.token_path.suffix == ".enc"
                 else Path(f"{self.token_path}.enc")
             )
-            auto_migrate = _env_flag("MERCADO_LIVRE_AUTO_MIGRATE_TOKENS", default=True)
-            if auto_migrate and self.token_path.exists() and not secure_path.exists():
-                migrated = migrate_plaintext_tokens(self.token_path, secure_path)
-                if not migrated:
-                    raise AuthError(
-                        f"Secure token migration failed for {self.token_path}. "
-                        "Fix token file contents or disable auto-migration."
-                    )
-
             self.token_path = secure_path
             self._secure_storage = SecureTokenStorage(token_path=self.token_path)
 
@@ -128,8 +123,7 @@ class TokenManager:
             except SecureStorageError as err:
                 raise AuthError(f"Secure token storage error at {self.token_path}: {err}") from err
         else:
-            with open(self.token_path, "w", encoding="utf-8") as f:
-                json.dump(persisted_tokens, f, indent=2)
+            atomic_write_json(self.token_path, persisted_tokens)
         self._tokens = persisted_tokens
 
     def is_token_expired(self, buffer_seconds: int = 300) -> bool:
@@ -194,16 +188,17 @@ class TokenManager:
             TokenExpiredError: If no refresh token is available.
             OAuthError: If the OAuth provider rejects the refresh.
         """
-        tokens = self.load_tokens()
-        refresh_token_value = tokens.get("refresh_token")
-        if not refresh_token_value:
-            raise TokenExpiredError("No refresh token available")
+        with file_lock(self._lock_path):
+            tokens = self.load_tokens()
+            refresh_token_value = tokens.get("refresh_token")
+            if not refresh_token_value:
+                raise TokenExpiredError("No refresh token available")
 
-        new_tokens = self.oauth_handler.refresh_token(refresh_token_value)
-        if "refresh_token" not in new_tokens and isinstance(refresh_token_value, str):
-            new_tokens["refresh_token"] = refresh_token_value
-        self.save_tokens(new_tokens)
-        return new_tokens
+            new_tokens = self.oauth_handler.refresh_token(refresh_token_value)
+            if "refresh_token" not in new_tokens and isinstance(refresh_token_value, str):
+                new_tokens["refresh_token"] = refresh_token_value
+            self.save_tokens(new_tokens)
+            return new_tokens
 
     def get_refresh_token(self) -> str:
         """Get the current refresh token.

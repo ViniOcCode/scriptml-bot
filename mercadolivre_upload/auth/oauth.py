@@ -5,14 +5,24 @@ from typing import Any
 from urllib.parse import urlencode
 
 import requests
-from dotenv import find_dotenv, load_dotenv
+from dotenv import load_dotenv
 
 from mercadolivre_upload.infrastructure.http import ResilientHTTPClient, RetryPolicy
 
 from .exceptions import OAuthError
 
-# Load environment variables from .env file (searches up from this file)
-load_dotenv(find_dotenv(usecwd=True))
+# Load env only from explicit shared runtime path when provided.
+_env_override = os.getenv("ML_UPLOAD_ENV_FILE", "").strip()
+_disable_local = os.getenv("ML_UPLOAD_DISABLE_LOCAL_DOTENV", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+if _env_override:
+    load_dotenv(_env_override)
+elif not _disable_local:
+    load_dotenv(".env")
 
 TOKEN_REQUEST_RETRY_POLICY = RetryPolicy(max_retries=1, base_delay=0.5, max_delay=5.0)
 

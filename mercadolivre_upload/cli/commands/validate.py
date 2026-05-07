@@ -22,6 +22,8 @@ from mercadolivre_upload.cli.commands.common import (
     coerce_path_option,
     merge_category_resolution_fields,
     parse_products_or_exit,
+    resolve_default_category_cache_dir,
+    resolve_default_report_dir,
 )
 from mercadolivre_upload.cli.commands.upload import (
     _build_row_category_metadata,
@@ -50,16 +52,21 @@ def validate(
     excel: Path = typer.Option(..., "--excel", "-e", help="Excel file path"),  # noqa: B008
     images: Path = typer.Option(..., "--images", "-i", help="Images directory"),  # noqa: B008
     category: str = typer.Option(..., "--category", "-c", help="Category name"),  # noqa: B008
-    cache_dir: Path = typer.Option(Path("cache/categories"), "--cache-dir"),  # noqa: B008
+    workspace: Path | None = typer.Option(None, "--workspace"),  # noqa: B008
+    cache_root: Path | None = typer.Option(None, "--cache-root"),  # noqa: B008
+    cache_dir: Path | None = typer.Option(None, "--cache-dir"),  # noqa: B008
     detailed: bool = typer.Option(False, "--detailed", "-d"),  # noqa: B008
     batch_size: int = typer.Option(5, "--batch-size", min=1, help="Items per batch"),  # noqa: B008
-    report_dir: Path = typer.Option(Path("cache/reports"), "--report-dir"),  # noqa: B008
+    report_dir: Path | None = typer.Option(None, "--report-dir"),  # noqa: B008
 ) -> None:
     """Validate products against Mercado Livre APIs without publishing."""
     console.print(Panel.fit("Pre-Validation", style="yellow"))
 
-    cache_dir = coerce_path_option(cache_dir, default=Path("cache/categories"))
-    report_dir = coerce_path_option(report_dir, default=Path("cache/reports"))
+    resolved_cache_default = resolve_default_category_cache_dir(
+        workspace=workspace, cache_root=cache_root
+    )
+    cache_dir = coerce_path_option(cache_dir, default=resolved_cache_default)
+    report_dir = coerce_path_option(report_dir, default=resolve_default_report_dir(workspace))
 
     if batch_size < 1:
         err_console.print("[red]batch-size must be greater than zero[/red]")

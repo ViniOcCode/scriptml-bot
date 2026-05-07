@@ -5,6 +5,7 @@ import logging
 import time
 from pathlib import Path
 from typing import Any
+from ml_workflow_contracts.runtime_paths import resolve_ml_bot_paths
 
 logger = logging.getLogger(__name__)
 
@@ -16,12 +17,13 @@ class AttributeCache:
 
     def __init__(  # noqa: D107
         self,
-        cache_dir: str | Path = "cache/categories",
+        cache_dir: str | Path | None = None,
         ttl_hours: int | None = None,
         cache_file: str | None = None,
         ttl: int | None = None,
     ):
-        self.cache_dir = Path(cache_dir)
+        default_cache_dir = resolve_ml_bot_paths().cache_root / "scriptml" / "mercadolivre" / "categories"
+        self.cache_dir = Path(cache_dir) if cache_dir is not None else default_cache_dir
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         ttl_seconds = ttl if ttl is not None else (ttl_hours * 3600 if ttl_hours else None)
         self.ttl = ttl_seconds or self.DEFAULT_TTL

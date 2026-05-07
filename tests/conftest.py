@@ -52,27 +52,20 @@ def mock_credentials():
 
 
 @pytest.fixture(autouse=True)
-def isolate_token_path_for_tests():
+def isolate_ml_bot_home_for_tests(tmp_path: Path):
     """
-    Redireciona tokens de teste para tests/tokens.test.json para evitar
-    sobrescrever tokens.json real do projeto.
+    Redireciona workspace compartilhado para diretório temporário por teste.
     """
-    token_path = project_root / "tests" / "tokens.test.json"
-    original_token_path = os.environ.get("MERCADO_LIVRE_TOKEN_PATH")
-    os.environ["MERCADO_LIVRE_TOKEN_PATH"] = str(token_path)
-
-    if token_path.exists():
-        token_path.unlink()
+    ml_bot_home = tmp_path / "ml-bot-home"
+    original_home = os.environ.get("ML_BOT_HOME")
+    os.environ["ML_BOT_HOME"] = str(ml_bot_home)
 
     yield
 
-    if token_path.exists():
-        token_path.unlink()
-
-    if original_token_path is not None:
-        os.environ["MERCADO_LIVRE_TOKEN_PATH"] = original_token_path
-    elif "MERCADO_LIVRE_TOKEN_PATH" in os.environ:
-        del os.environ["MERCADO_LIVRE_TOKEN_PATH"]
+    if original_home is not None:
+        os.environ["ML_BOT_HOME"] = original_home
+    elif "ML_BOT_HOME" in os.environ:
+        del os.environ["ML_BOT_HOME"]
 
 
 @pytest.fixture(autouse=True)

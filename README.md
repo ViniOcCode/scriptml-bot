@@ -8,7 +8,7 @@ CLI application for validating and publishing Mercado Livre listings from Excel 
 - Resolves categories and required metadata before publish.
 - Uploads product images (and optional clips in the publish flow).
 - Supports validation-only runs (`validate`) and publish runs (`upload`).
-- Writes machine-readable reports in `cache/reports/` for retry and auditing.
+- Writes machine-readable reports under the shared `.ml-bot` workspace for retry and auditing.
 
 ## Requirements
 
@@ -32,21 +32,16 @@ Entrypoint: `ml-upload` -> `mercadolivre_upload.main:main`.
 ### 1) Configure authentication
 
 - Secure token storage is enabled by default.
-- Default token path behavior:
-  - if `MERCADO_LIVRE_TOKEN_PATH` is unset, runtime uses `tokens.json.enc`
-  - if `MERCADO_LIVRE_TOKEN_PATH=tokens.json`, runtime stores encrypted tokens in
-    `tokens.json.enc`
+- Canonical token path:
+  - `~/.ml-bot/auth/mercadolivre/tokens.json.enc`
+  - override shared root with `ML_BOT_HOME`
 - Persisted token payload stores only:
   - `access_token`
   - `refresh_token`
   - `expires_at`
 - Plaintext mode is explicit opt-out only:
   - `MERCADO_LIVRE_USE_SECURE_STORAGE=0`
-- Migration behavior:
-  - `MERCADO_LIVRE_AUTO_MIGRATE_TOKENS` defaults to enabled in secure mode
-  - existing plaintext `tokens.json` is migrated automatically to `.enc` (backup created as
-    `tokens.json.backup`)
-- Secure mode errors (key setup/decryption/migration) fail explicitly.
+- Secure mode errors (key setup/decryption) fail explicitly.
 
 #### External secret managers (1Password, Vault, etc.)
 
@@ -76,9 +71,8 @@ op run --env-file=.env.1password -- \
 
 Important behavior to plan for:
 
-- Tokens are still persisted locally in an encrypted file (`tokens.json.enc` by default).
+- Tokens are persisted locally in an encrypted file under `.ml-bot/auth/mercadolivre/`.
 - `ENCRYPTION_KEY` must stay stable to decrypt existing token files.
-- Use `MERCADO_LIVRE_TOKEN_PATH` if you want a custom token-file location.
 
 #### Access/refresh token lifecycle in secure mode
 
@@ -117,7 +111,7 @@ uv run ml-upload upload anuncios/2.xlsx -i anuncios/ -c "quadros decorativos" --
 
 ### 5) Check generated reports
 
-Default report directory: `cache/reports/`
+Default report directory: `~/.ml-bot/runs/<run_id>/publish/`
 
 - Validation run: `validation-summary-<timestamp>.json`
 - Upload run: `upload-summary-<timestamp>.json`
@@ -145,7 +139,7 @@ ml-upload --help
   - `--images/-i`
   - `--category/-c`
   - `--batch-size` (default: `5`)
-  - `--report-dir` (default: `cache/reports`)
+  - `--report-dir` (default resolved from shared workspace run directory)
   - `--detailed`
 - `upload` also supports `--verbose`.
 
@@ -181,8 +175,8 @@ Key behavior controlled there includes:
 - Protocol ports (clean boundaries): `mercadolivre_upload/application/ports.py`.
 - Resilient HTTP client (retry/backoff/rate limit): `mercadolivre_upload/infrastructure/http.py`.
 - Caches:
-  - category attributes under `cache/categories/`
-  - category predictions under `cache/categories/predictions/`
+  - category attributes under `~/.ml-bot/cache/scriptml/categories/`
+  - category predictions under `~/.ml-bot/cache/scriptml/categories/predictions/`
 
 ## Development commands
 
