@@ -78,6 +78,9 @@ class ReadPayloadResult:
     publish_item_skus: list[str] = field(
         default_factory=list
     )  # _meta.traceability.publish_item_skus
+    attribute_suggestions: list[dict[str, Any]] = field(
+        default_factory=list
+    )  # _meta.attribute_suggestions (band=="auto_apply" only)
 
 
 def _normalize_upload_mode(raw_mode: Any) -> str | None:
@@ -361,6 +364,18 @@ class JsonPayloadReader:
         fiscal_items = _extract_root_fiscal_items(raw)
         publish_item_skus = _extract_traceability_publish_item_skus(meta)
 
+        # F1: fallback to publish_item_skus[0] when _meta.sku is absent
+        if not sku and publish_item_skus:
+            sku = publish_item_skus[0]
+
+        # N1: extract attribute_suggestions, keeping only auto_apply entries
+        attribute_suggestions: list[dict[str, Any]] = []
+        raw_suggestions = meta.get("attribute_suggestions", [])
+        if isinstance(raw_suggestions, list):
+            attribute_suggestions = [
+                s for s in raw_suggestions if isinstance(s, dict) and s.get("band") == "auto_apply"
+            ]
+
         payload_obj = raw.get("payload")
         if isinstance(payload_obj, dict):
             payload = dict(payload_obj)
@@ -392,6 +407,7 @@ class JsonPayloadReader:
             reviewed_fiscal=reviewed_fiscal,
             fiscal_items=fiscal_items,
             publish_item_skus=publish_item_skus,
+            attribute_suggestions=attribute_suggestions,
         )
 
     def read_batch(self, batch_dir: Path) -> list[tuple[Path, ReadPayloadResult | Exception]]:

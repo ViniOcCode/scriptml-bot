@@ -817,8 +817,8 @@ class TestPublishJsonApiErrors:
         assert result.status == "failed"
         assert "item.attributes.missing_required" in (result.error or "")
         assert "BRAND" in (result.error or "")
-        assert "\"error\": \"validation_error\"" in (result.error or "")
-        assert "\"references\": [\"item.attributes\"]" in (result.error or "")
+        assert '"error": "validation_error"' in (result.error or "")
+        assert '"references": ["item.attributes"]' in (result.error or "")
 
     def test_400_without_ml_body_falls_back_to_http_error_str(self, tmp_path: Path) -> None:
         """Plain HTTPError (no ML body) must still produce a failed result with error string."""
@@ -936,8 +936,14 @@ class TestFiscalWarningGate:
         self, tmp_path: Path
     ) -> None:
         """publication_ready=True with reviewed_fiscal=False emits a warning but still publishes."""
-        use_case, reader, publisher = _make_use_case()
-        read_result = replace(_make_read_result(), publication_ready=True, reviewed_fiscal=False)
+        mock_fiscal_service = MagicMock()
+        mock_fiscal_service.submit_fiscal_data_workflow.return_value = MagicMock(success=True)
+        use_case, reader, publisher = _make_use_case(fiscal_service=mock_fiscal_service)
+        read_result = replace(
+            _make_read_result(fiscal_items=[{"sku": "ABC-001", "type": "single"}]),
+            publication_ready=True,
+            reviewed_fiscal=False,
+        )
         reader.read.return_value = read_result
 
         result = use_case.execute(tmp_path / "payload.json")

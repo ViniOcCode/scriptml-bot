@@ -508,3 +508,63 @@ class TestJsonPayloadReader:
             assert result.upload_mode == "user_products"
         finally:
             json_payload_reader.VALIDATE_UP_ENVELOPE = original
+
+    # --- F1: _meta.sku fallback ---
+
+    def test_sku_fallback_from_publish_item_skus(self, tmp_path: Path) -> None:
+        """When _meta.sku is absent, fallback to _meta.traceability.publish_item_skus[0]."""
+        payload = _make_valid_payload()
+        payload["_meta"].pop("sku")  # type: ignore[attr-defined]
+        payload["_meta"]["traceability"] = {"publish_item_skus": ["FALLBACK-SKU"]}  # type: ignore[index]
+        path = _write_payload(tmp_path, payload)
+        result = self.reader.read(path)
+        assert result.sku == "FALLBACK-SKU"
+
+    # --- N1: attribute_suggestions ---
+
+    def test_attribute_suggestions_auto_apply_extracted(self, tmp_path: Path) -> None:
+        """attribute_suggestions with band=auto_apply are surfaced in ReadPayloadResult."""
+        payload = _make_valid_payload()
+        payload["_meta"]["attribute_suggestions"] = [  # type: ignore[index]
+            {
+                "attr_id": "COLOR",
+                "canonical_value": "Azul",
+                "band": "auto_apply",
+                "confidence": 0.95,
+            },
+            {
+                "attr_id": "BRAND",
+                "canonical_value": "Nike",
+                "band": "auto_apply",
+                "confidence": 0.88,
+            },
+        ]
+        path = _write_payload(tmp_path, payload)
+        result = self.reader.read(path)
+        assert len(result.attribute_suggestions) == 2
+        assert result.attribute_suggestions[0]["attr_id"] == "COLOR"
+        assert result.attribute_suggestions[1]["attr_id"] == "BRAND"
+
+    def test_attribute_suggestions_filters_non_auto_apply(self, tmp_path: Path) -> None:
+        """Suggestions where band != auto_apply are filtered out."""
+        payload = _make_valid_payload()
+        payload["_meta"]["attribute_suggestions"] = [  # type: ignore[index]
+            {
+                "attr_id": "COLOR",
+                "canonical_value": "Azul",
+                "band": "auto_apply",
+                "confidence": 0.95,
+            },
+            {"attr_id": "SIZE", "canonical_value": "M", "band": "manual", "confidence": 0.60},
+            {"attr_id": "BRAND", "canonical_value": "Nike", "band": None, "confidence": 0.50},
+        ]
+        path = _write_payload(tmp_path, payload)
+        result = self.reader.read(path)
+        assert len(result.attribute_suggestions) == 1
+        assert result.attribute_suggestions[0]["attr_id"] == "COLOR"
+
+    def test_attribute_suggestions_absent_is_empty(self, tmp_path: Path) -> None:
+        """When attribute_suggestions is absent, result has empty list."""
+        path = _write_payload(tmp_path, _make_valid_payload())
+        result = self.reader.read(path)
+        assert result.attribute_suggestions == []

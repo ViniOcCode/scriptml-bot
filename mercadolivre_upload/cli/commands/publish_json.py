@@ -139,6 +139,14 @@ def _read_batch_manifest(batch_dir: Path) -> dict[str, Any]:
     return {}
 
 
+def _write_batch_manifest(manifest_path: Path, manifest: dict[str, Any]) -> None:
+    """Atomically write manifest dict to batch_manifest.json (temp file + replace)."""
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = manifest_path.with_suffix(".tmp.json")
+    tmp.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(manifest_path)
+
+
 def publish_json(
     path: Path,
     *,
@@ -165,6 +173,7 @@ def publish_batch(
     use_case = _build_use_case()
     reader = JsonPayloadReader()
 
+    manifest_path = batch_dir / "batch_manifest.json"
     manifest = _read_batch_manifest(batch_dir)
     failed_skus: set[str] = set(manifest.get("failed_skus", []))
     published_skus: set[str] = set(manifest.get("published_skus", []))
@@ -228,6 +237,12 @@ def publish_batch(
         _print_result(result)
         if result.status == "published" and result.sku:
             published_skus.add(result.sku)
+            manifest["published_skus"] = sorted(published_skus)
+            _write_batch_manifest(manifest_path, manifest)
+        elif result.status == "failed" and result.sku:
+            failed_skus.add(result.sku)
+            manifest["failed_skus"] = sorted(failed_skus)
+            _write_batch_manifest(manifest_path, manifest)
 
     published_count = sum(1 for r in results if r.status == "published")
     failed_count = sum(1 for r in results if r.status == "failed")
