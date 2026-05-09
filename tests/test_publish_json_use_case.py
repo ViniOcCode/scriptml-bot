@@ -189,6 +189,20 @@ class TestPublishJsonUseCase:
             "MLB987654321", "Descrição do produto"
         )
 
+    def test_publish_fails_when_api_validation_returns_error(self, tmp_path: Path) -> None:
+        use_case, reader, publisher = _make_use_case()
+        reader.read.return_value = _make_read_result()
+        publisher.validate_item.return_value = {
+            "cause": [{"type": "error", "code": "item.title.required", "message": "titulo"}]
+        }
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "failed"
+        assert result.error is not None
+        assert "item.title.required" in result.error
+        publisher.create_item.assert_not_called()
+
     def test_publish_dry_run(self, tmp_path: Path) -> None:
         use_case, reader, publisher = _make_use_case()
         reader.read.return_value = _make_read_result()

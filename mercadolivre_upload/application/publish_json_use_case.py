@@ -93,6 +93,35 @@ def _format_ml_api_error(exc: MLApiError) -> str:
     return " | ".join(parts) if parts else str(exc)
 
 
+def _extract_validation_errors(validation: Any) -> list[str]:
+    """Extract blocking Mercado Livre validation errors from a validation response."""
+    if not isinstance(validation, dict):
+        return []
+
+    raw_causes = validation.get("cause", validation.get("causes", []))
+    if isinstance(raw_causes, dict):
+        causes = [raw_causes]
+    elif isinstance(raw_causes, list):
+        causes = [cause for cause in raw_causes if isinstance(cause, dict)]
+    else:
+        causes = []
+
+    errors: list[str] = []
+    for cause in causes:
+        cause_type = str(cause.get("type") or "").lower()
+        if cause_type and cause_type != "error":
+            continue
+        code = str(cause.get("code") or "?")
+        message = str(cause.get("message") or cause)
+        errors.append(f"[{code}] {message}")
+
+    error_value = validation.get("error")
+    message_value = validation.get("message")
+    if error_value and not errors:
+        errors.append(str(message_value or error_value))
+    return errors
+
+
 def _normalize_optional_text(value: Any) -> str | None:
     if not isinstance(value, str):
         return None
@@ -397,7 +426,51 @@ class PublishJsonUseCase:
                 for p in publish_payloads
             ]
 
-        # 5. Publish one or more items.
+        # 5. Validate with Mercado Livre before creating one or more items.
+        for index, publish_payload in enumerate(publish_payloads, start=1):
+            try:
+                if read_result.upload_mode == "user_products":
+                    validation = self._publisher.validate_user_product_item(publish_payload)
+                else:
+                    validation = self._publisher.validate_item(publish_payload)
+            except MLApiError as exc:
+                validation_error = _prefix_message(_format_ml_api_error(exc), index, total_payloads)
+                logger.error("ML API validation rejected %s: %s", path, validation_error)
+                return PublishJsonResult(
+                    sku=read_result.sku,
+                    path=str(path),
+                    status="failed",
+                    error=validation_error,
+                    warnings=warnings,
+                )
+            except Exception as exc:  # noqa: BLE001
+                validation_error = _prefix_message(str(exc), index, total_payloads)
+                logger.error("ML API validation failed for %s: %s", path, validation_error)
+                return PublishJsonResult(
+                    sku=read_result.sku,
+                    path=str(path),
+                    status="failed",
+                    error=validation_error,
+                    warnings=warnings,
+                )
+
+            validation_errors = _extract_validation_errors(validation)
+            if validation_errors:
+                validation_error = _prefix_message(
+                    "; ".join(validation_errors),
+                    index,
+                    total_payloads,
+                )
+                logger.error("ML API validation errors for %s: %s", path, validation_error)
+                return PublishJsonResult(
+                    sku=read_result.sku,
+                    path=str(path),
+                    status="failed",
+                    error=validation_error,
+                    warnings=warnings,
+                )
+
+        # 6. Publish one or more items.
         created_item_ids: list[str] = []
         first_item_id: str | None = None
         user_product_id: str | None = None

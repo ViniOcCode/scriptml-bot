@@ -47,10 +47,17 @@ class OAuthHandler:
             redirect_uri: OAuth redirect URI. Defaults to env var.
             http_client: Optional resilient HTTP client for token requests.
         """
-        self.client_id = client_id or os.getenv("MERCADO_LIVRE_CLIENT_ID")
-        self.client_secret = client_secret or os.getenv("MERCADO_LIVRE_CLIENT_SECRET")
+        self.client_id = client_id or os.getenv("MERCADO_LIVRE_CLIENT_ID") or os.getenv(
+            "ML_APP_ID"
+        )
+        self.client_secret = (
+            client_secret
+            or os.getenv("MERCADO_LIVRE_CLIENT_SECRET")
+            or os.getenv("ML_APP_SECRET")
+        )
         self.redirect_uri = redirect_uri or os.getenv(
-            "MERCADO_LIVRE_REDIRECT_URI", "http://localhost:8000/callback"
+            "MERCADO_LIVRE_REDIRECT_URI",
+            os.getenv("ML_REDIRECT_URI", "http://localhost:8000/callback"),
         )
         self.http_client = http_client or ResilientHTTPClient(timeout=30)
 
@@ -68,7 +75,7 @@ class OAuthHandler:
         """
         if not self.client_id:
             raise OAuthError(
-                "Client ID is required. Set MERCADO_LIVRE_CLIENT_ID environment variable."
+                "Client ID is required. Set MERCADO_LIVRE_CLIENT_ID or ML_APP_ID."
             )
 
         params = {

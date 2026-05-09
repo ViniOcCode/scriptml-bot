@@ -3,6 +3,7 @@
 Apenas inicialização e configuração. Comandos estão em cli/commands/.
 """
 
+import json
 from importlib import import_module
 from pathlib import Path
 from typing import Any
@@ -164,6 +165,33 @@ def publish_json(
     setup_logging()
     cmd = import_module("mercadolivre_upload.cli.commands.publish_json")
     cmd.publish_json(path=path, dry_run=dry_run, report_dir=report_dir)
+
+
+@app.command()
+def publish_payload(
+    path: Path = typer.Argument(..., help="Path to payload.json or 70_payload.json"),  # noqa: B008
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Validate without publishing."
+    ),  # noqa: B008
+    publish_inactive: bool = typer.Option(  # noqa: B008
+        False,
+        "--publish-inactive/--no-publish-inactive",
+        help="Publish items in paused (inactive) state. Items can be activated later.",
+    ),
+    report_dir: Path = typer.Option(Path("cache/reports"), "--report-dir"),  # noqa: B008
+) -> None:
+    """Publish a ready-made builder payload JSON file."""
+    setup_logging()
+    api = import_module("mercadolivre_upload.application.publish_payload")
+    result = api.publish_payload_file(
+        path,
+        report_dir=report_dir,
+        dry_run=dry_run,
+        publish_inactive=publish_inactive,
+    )
+    console.print(json.dumps(result, ensure_ascii=False, indent=2))
+    if result.get("status") == "failed":
+        raise typer.Exit(1)
 
 
 @app.command()
