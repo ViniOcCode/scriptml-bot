@@ -254,17 +254,13 @@ class SellerPolicyValidator:
 
         # AI confidence threshold check
         min_conf = self._config.batch.min_ai_confidence
-        if (
-            ai_suggested
-            and min_conf > 0.0
-            and category_confidence is not None
-            and category_confidence < min_conf
-        ):
+        confidence = category_confidence if category_confidence is not None else 0.0
+        if ai_suggested and min_conf > 0.0 and confidence < min_conf:
             violations.append(
                 PolicyViolation(
                     field="category_id",
                     message=(
-                        f"Confiança da categoria IA {category_confidence:.1%} abaixo do mínimo "
+                        f"Confiança da categoria IA {confidence:.1%} abaixo do mínimo "
                         f"configurado {min_conf:.1%}. Revise a categoria manualmente."
                     ),
                     severity="error",

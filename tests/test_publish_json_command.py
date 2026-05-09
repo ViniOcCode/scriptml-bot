@@ -360,3 +360,261 @@ class TestPublishedSkusIdempotency:
         publish_json_cmd.publish_batch(batch_dir, report_dir=tmp_path / "reports")
 
         assert mock_use_case.execute.call_count == 2
+
+
+class TestBatchManifestWriteBack:
+    """F2: published_skus/failed_skus must be persisted after each publish."""
+
+    def _setup_batch_dir(self, tmp_path: Path, skus: list[str]) -> Path:
+        batch_dir = tmp_path / "batch_f2"
+        for sku in skus:
+            d = batch_dir / "MLB271599" / sku
+            d.mkdir(parents=True)
+            (d / "payload.json").write_text("{}")
+        return batch_dir
+
+    def test_published_sku_written_to_manifest(self, tmp_path: Path, monkeypatch) -> None:
+        batch_dir = self._setup_batch_dir(tmp_path, ["SKU001"])
+
+        mock_reader = MagicMock()
+        mock_reader.read_batch.return_value = [
+            (batch_dir / "MLB271599/SKU001/payload.json", _make_read_result(sku="SKU001")),
+        ]
+        mock_use_case = MagicMock(spec=PublishJsonUseCase)
+        mock_use_case.execute.return_value = PublishJsonResult(
+            sku="SKU001", path="p", status="published", item_id="MLB1"
+        )
+
+        write_calls = []
+
+        def tracking_write(manifest_path, manifest):
+            write_calls.append(dict(manifest))
+
+        monkeypatch.setattr(publish_json_cmd, "_build_use_case", lambda: mock_use_case)
+        monkeypatch.setattr(
+            publish_json_cmd, "JsonPayloadReader", MagicMock(return_value=mock_reader)
+        )
+        monkeypatch.setattr(publish_json_cmd, "_write_batch_manifest", tracking_write)
+
+        publish_json_cmd.publish_batch(batch_dir, report_dir=tmp_path / "reports")
+
+        assert len(write_calls) >= 1
+        assert "SKU001" in write_calls[-1].get("published_skus", [])
+
+    def test_failed_sku_written_to_manifest(self, tmp_path: Path, monkeypatch) -> None:
+        batch_dir = self._setup_batch_dir(tmp_path, ["SKU001"])
+
+        mock_reader = MagicMock()
+        mock_reader.read_batch.return_value = [
+            (batch_dir / "MLB271599/SKU001/payload.json", _make_read_result(sku="SKU001")),
+        ]
+        mock_use_case = MagicMock(spec=PublishJsonUseCase)
+        mock_use_case.execute.return_value = PublishJsonResult(
+            sku="SKU001", path="p", status="failed", error="error"
+        )
+
+        write_calls = []
+
+        def tracking_write(manifest_path, manifest):
+            write_calls.append(dict(manifest))
+
+        monkeypatch.setattr(publish_json_cmd, "_build_use_case", lambda: mock_use_case)
+        monkeypatch.setattr(
+            publish_json_cmd, "JsonPayloadReader", MagicMock(return_value=mock_reader)
+        )
+        monkeypatch.setattr(publish_json_cmd, "_write_batch_manifest", tracking_write)
+
+        with pytest.raises(typer.Exit):
+            publish_json_cmd.publish_batch(batch_dir, report_dir=tmp_path / "reports")
+
+        assert len(write_calls) >= 1
+        assert "SKU001" in write_calls[-1].get("failed_skus", [])
+
+
+class TestUseCaseDirect:
+    """Tests for PublishJsonUseCase internals (F3, N1, N2)."""
+
+    def test_reviewed_fiscal_none_with_fiscal_items_warns(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """F3: reviewed_fiscal=None + fiscal_items non-empty → warning log."""
+        from mercadolivre_upload.application.publish_json_use_case import (
+            PublishJsonUseCase,
+        )
+        from mercadolivre_upload.adapters.json_payload_reader import ReadPayloadResult
+
+        warnings_list = []
+
+        def mock_execute_side_effect(*args, **kwargs):
+            return PublishJsonResult(
+                sku="SKU001",
+                path=str(tmp_path / "p.json"),
+                status="published",
+                warnings=warnings_list,
+            )
+
+        mock_reader = MagicMock()
+        mock_reader.read.return_value = ReadPayloadResult(
+            payload={
+                "title": "Test",
+                "category_id": "MLB271599",
+                "price": 100.0,
+                "currency_id": "BRL",
+                "available_quantity": 1,
+                "buying_mode": "buy_it_now",
+                "listing_type_id": "gold_special",
+                "condition": "new",
+                "pictures": [{"source": "https://cdn.ml.com/img.jpg"}],
+            },
+            description=None,
+            sku="SKU001",
+            category_id="MLB271599",
+            ai_suggested=False,
+            publication_ready=True,
+            reviewed_fiscal=None,
+            fiscal_items=[{"sku": "SKU001", "type": "single", "measurement_unit": "UN"}],
+        )
+
+        mock_policy = MagicMock()
+        mock_policy.apply_overrides.side_effect = lambda p: dict(p)
+        mock_policy.validate.return_value = MagicMock(violations=[])
+
+        mock_publisher = MagicMock()
+        mock_publisher.create_item.return_value = {"id": "MLB123"}
+
+        use_case = PublishJsonUseCase(
+            reader=mock_reader,
+            policy=mock_policy,
+            publisher=mock_publisher,
+        )
+
+        result = use_case.execute(tmp_path / "p.json")
+
+        assert len(result.warnings) == 1
+        assert "Fiscal" in result.warnings[0] or "fiscal" in result.warnings[0].lower()
+
+    def test_apply_attribute_suggestions_merges_new(self) -> None:
+        """N1: _apply_attribute_suggestions adds missing attrs, skips existing."""
+        from mercadolivre_upload.application.publish_json_use_case import (
+            _apply_attribute_suggestions,
+        )
+
+        payload = {
+            "title": "Test",
+            "attributes": [{"id": "COLOR", "value_name": "Red"}],
+        }
+        suggestions = [
+            {"attr_id": "COLOR", "canonical_value": "Azul", "confidence": 0.95},  # already present
+            {"attr_id": "BRAND", "canonical_value": "Nike", "confidence": 0.88},  # new
+        ]
+
+        result = _apply_attribute_suggestions(payload, suggestions)
+
+        assert len(result["attributes"]) == 2
+        assert result["attributes"][0]["id"] == "COLOR"
+        assert result["attributes"][0]["value_name"] == "Red"
+        assert result["attributes"][1]["id"] == "BRAND"
+        assert result["attributes"][1]["value_name"] == "Nike"
+
+    def test_apply_attribute_suggestions_no_existing_attrs(self) -> None:
+        """N1: When payload has no attributes, suggestions create the list."""
+        from mercadolivre_upload.application.publish_json_use_case import (
+            _apply_attribute_suggestions,
+        )
+
+        payload: dict = {"title": "Test"}
+        suggestions = [
+            {"attr_id": "COLOR", "canonical_value": "Azul", "confidence": 0.95},
+        ]
+
+        result = _apply_attribute_suggestions(payload, suggestions)
+
+        assert len(result["attributes"]) == 1
+        assert result["attributes"][0]["id"] == "COLOR"
+
+    def test_description_retry_success_on_second_attempt(self, tmp_path, monkeypatch):
+        """N2: description POST fails once then succeeds → published + warning."""
+        from mercadolivre_upload.application.publish_json_use_case import (
+            PublishJsonUseCase,
+        )
+
+        mock_reader = MagicMock()
+        mock_reader.read.return_value = _make_read_result(description="Test description")
+
+        mock_policy = MagicMock()
+        mock_policy.apply_overrides.side_effect = lambda p: dict(p)
+        mock_policy.validate.return_value = MagicMock(violations=[])
+
+        call_count = {"n": 0}
+        warning_logs = []
+
+        def failing_once(*args, **kwargs):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                raise Exception("first attempt failed")
+            return None
+
+        mock_publisher = MagicMock()
+        mock_publisher.create_item.return_value = {"id": "MLB123"}
+        mock_publisher.create_item_description.side_effect = failing_once
+
+        def warning_logger(message, *args, **kwargs):
+            if "Description POST" in message:
+                warning_logs.append(message)
+
+        monkeypatch.setattr(
+            "mercadolivre_upload.application.publish_json_use_case.logger.warning",
+            warning_logger,
+        )
+
+        use_case = PublishJsonUseCase(
+            reader=mock_reader,
+            policy=mock_policy,
+            publisher=mock_publisher,
+        )
+
+        result = use_case.execute(tmp_path / "p.json")
+
+        assert result.status == "published"
+        assert call_count["n"] == 2  # first fails, second succeeds
+        assert len(warning_logs) == 1  # one warning (second attempt succeeded)
+        assert "retrying" in warning_logs[0] or "attempt" in warning_logs[0]
+
+    def test_description_retry_both_fail(self, tmp_path, monkeypatch):
+        """N2: both description attempts fail → published + 2 warnings."""
+        from mercadolivre_upload.application.publish_json_use_case import (
+            PublishJsonUseCase,
+        )
+
+        mock_reader = MagicMock()
+        mock_reader.read.return_value = _make_read_result(description="Test description")
+
+        mock_policy = MagicMock()
+        mock_policy.apply_overrides.side_effect = lambda p: dict(p)
+        mock_policy.validate.return_value = MagicMock(violations=[])
+
+        warning_logs = []
+
+        mock_publisher = MagicMock()
+        mock_publisher.create_item.return_value = {"id": "MLB123"}
+        mock_publisher.create_item_description.side_effect = Exception("always fails")
+
+        def warning_logger(message, *args, **kwargs):
+            if "Description POST" in message:
+                warning_logs.append(message)
+
+        monkeypatch.setattr(
+            "mercadolivre_upload.application.publish_json_use_case.logger.warning",
+            warning_logger,
+        )
+
+        use_case = PublishJsonUseCase(
+            reader=mock_reader,
+            policy=mock_policy,
+            publisher=mock_publisher,
+        )
+
+        result = use_case.execute(tmp_path / "p.json")
+
+        assert result.status == "published"  # non-blocking
+        assert len(warning_logs) == 2  # two warnings (attempt + retry)

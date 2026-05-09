@@ -176,9 +176,10 @@ class TestSellerPolicyConfidenceThreshold:
         result = validator.validate(_make_payload(), ai_suggested=False, category_confidence=0.20)
         assert not any("Confiança" in v.message for v in result.violations)
 
-    def test_ai_confidence_none_value_skipped(self) -> None:
-        """category_confidence=None with threshold configured → skip check (no data)."""
+    def test_ai_confidence_none_value_treated_as_zero(self) -> None:
+        """category_confidence=None with threshold configured → treated as 0.0, triggers violation."""
         config = _make_config(human_review_required=False, min_ai_confidence=0.70)
         validator = SellerPolicyValidator(config)
         result = validator.validate(_make_payload(), ai_suggested=True, category_confidence=None)
-        assert not result.has_errors
+        assert result.has_errors
+        assert any("Confiança" in v.message for v in result.violations)

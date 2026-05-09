@@ -69,9 +69,7 @@ def _expand_publish_payloads(payload: dict[str, Any], upload_mode: str) -> list[
 def _format_ml_api_error(exc: MLApiError) -> str:
     """Format ML API errors, preserving full response payload when available."""
     blocking = [c for c in exc.causes if c.get("type") == "error"]
-    blocking_message = "; ".join(
-        f"[{c.get('code', '?')}] {c.get('message', '')}" for c in blocking
-    )
+    blocking_message = "; ".join(f"[{c.get('code', '?')}] {c.get('message', '')}" for c in blocking)
 
     response_fragment: str | None = None
     response_body: Any | None = exc.response_body
@@ -220,6 +218,40 @@ def _build_fiscal_data(
     )
 
 
+def _apply_attribute_suggestions(
+    payload: dict[str, Any], suggestions: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Merge auto-apply attribute suggestions into payload attributes.
+
+    Only adds attr_ids not already present in the payload's existing attributes.
+    Returns a new dict (original is not mutated).
+    """
+    existing_ids = {
+        attr.get("id")
+        for attr in payload.get("attributes", [])
+        if isinstance(attr, dict) and attr.get("id")
+    }
+    result: dict[str, Any] = dict(payload)
+    for suggestion in suggestions:
+        attr_id = suggestion.get("attr_id")
+        if not attr_id or attr_id in existing_ids:
+            continue
+        result.setdefault("attributes", []).append(
+            {
+                "id": attr_id,
+                "value_name": suggestion.get("canonical_value", ""),
+            }
+        )
+        existing_ids.add(attr_id)
+        logger.info(
+            "Applied attribute suggestion: %s = %s (confidence: %s)",
+            attr_id,
+            suggestion.get("canonical_value"),
+            suggestion.get("confidence"),
+        )
+    return result
+
+
 class PublishJsonUseCase:
     """Publishes a single payload.json to Mercado Livre.
 
@@ -304,7 +336,12 @@ class PublishJsonUseCase:
         publish_payloads: list[dict[str, Any]] = []
         # 1c. Fiscal reviewed gate (warning-only — full FiscalService integration is separate)
         warnings: list[str] = []
-        if read_result.publication_ready is True and read_result.reviewed_fiscal is False:
+        has_fiscal = bool(read_result.fiscal_items)
+        if (
+            read_result.publication_ready is True
+            and read_result.reviewed_fiscal is not True
+            and has_fiscal
+        ):
             warnings.append(
                 "Fiscal não revisado (_meta.reviewed_fiscal=false): publicando com aviso"
             )
@@ -352,6 +389,13 @@ class PublishJsonUseCase:
                 status="skipped",
                 warnings=warnings,
             )
+
+        # 4b. Auto-apply attribute suggestions into each publish payload
+        if read_result.attribute_suggestions:
+            publish_payloads = [
+                _apply_attribute_suggestions(p, read_result.attribute_suggestions)
+                for p in publish_payloads
+            ]
 
         # 5. Publish one or more items.
         created_item_ids: list[str] = []
@@ -450,10 +494,23 @@ class PublishJsonUseCase:
 
             # 6. Post description separately after the first successful item creation.
             if read_result.description and not description_posted:
-                try:
-                    self._publisher.create_item_description(item_id, read_result.description)
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("Failed to post description for %s: %s", item_id, exc)
+                for attempt in range(2):
+                    try:
+                        self._publisher.create_item_description(item_id, read_result.description)
+                        break
+                    except Exception as exc:  # noqa: BLE001
+                        if attempt == 0:
+                            logger.warning(
+                                "Description POST failed for %s (attempt 1), retrying: %s",
+                                item_id,
+                                exc,
+                            )
+                        else:
+                            logger.warning(
+                                "Description POST failed for %s after retry: %s",
+                                item_id,
+                                exc,
+                            )
                 description_posted = True
 
         # 7. Submit fiscal workflow for each fiscal.items entry.
