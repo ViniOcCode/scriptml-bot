@@ -353,15 +353,15 @@ Located in `config/`:
 ### Environment Variables
 
 **Token & Auth:**
-- `MERCADO_LIVRE_CLIENT_ID` – OAuth client ID
-- `MERCADO_LIVRE_CLIENT_SECRET` – OAuth client secret
-- `MERCADO_LIVRE_REDIRECT_URI` – Callback URL (optional)
-- `MERCADO_LIVRE_TOKEN_PATH` – Custom token file location
-- `ENCRYPTION_KEY` – Master encryption key for tokens (from keyring or env)
+- `ML_PIPE_MERCADO_LIVRE_CLIENT_ID` – OAuth client ID
+- `ML_PIPE_MERCADO_LIVRE_CLIENT_SECRET` – OAuth client secret
+- `ML_PIPE_MERCADO_LIVRE_REDIRECT_URI` – Callback URL (optional)
+- `ML_PIPE_MERCADO_LIVRE_TOKEN_PATH` – Custom token file location
+- `ML_PIPE_ENCRYPTION_KEY` – Master encryption key for tokens (from keyring or env)
 
 **Storage Mode:**
-- `MERCADO_LIVRE_USE_SECURE_STORAGE` – Default enabled; set `0` to disable
-- `MERCADO_LIVRE_AUTO_MIGRATE_TOKENS` – Auto-migrate plaintext tokens to encrypted
+- `ML_PIPE_MERCADO_LIVRE_USE_SECURE_STORAGE` – Default enabled; set `0` to disable
+- `ML_PIPE_MERCADO_LIVRE_AUTO_MIGRATE_TOKENS` – Auto-migrate plaintext tokens to encrypted
 
 **Runtime:**
 - `PYTHONPATH`, `DEBUG`, etc. (standard Python vars)
@@ -385,7 +385,7 @@ Located in `config/`:
 
 **Encryption:**
 - Uses `cryptography.Fernet` (symmetric encryption)
-- Key from keyring (system credential store) or `ENCRYPTION_KEY` env var
+- Key from keyring (system credential store) or `ML_PIPE_ENCRYPTION_KEY` env var
 
 **Lifecycle:**
 1. `get_access_token()` – Reads persisted `access_token`

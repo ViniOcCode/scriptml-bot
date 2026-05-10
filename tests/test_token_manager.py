@@ -21,8 +21,8 @@ def _sample_tokens() -> dict[str, object]:
 
 def test_secure_storage_mode_saves_encrypted_tokens(tmp_path: Path, monkeypatch) -> None:
     """When secure mode is enabled, tokens should be persisted to .enc file."""
-    monkeypatch.setenv("MERCADO_LIVRE_USE_SECURE_STORAGE", "1")
-    monkeypatch.setenv("ENCRYPTION_KEY", Fernet.generate_key().decode())
+    monkeypatch.setenv("ML_PIPE_MERCADO_LIVRE_USE_SECURE_STORAGE", "1")
+    monkeypatch.setenv("ML_PIPE_ENCRYPTION_KEY", Fernet.generate_key().decode())
     token_path = tmp_path / "tokens.json"
     tokens = _sample_tokens()
 
@@ -40,8 +40,8 @@ def test_secure_storage_mode_saves_encrypted_tokens(tmp_path: Path, monkeypatch)
 
 def test_secure_storage_default_is_enabled(tmp_path: Path, monkeypatch) -> None:
     """Secure mode should be enabled when no explicit env flag is provided."""
-    monkeypatch.delenv("MERCADO_LIVRE_USE_SECURE_STORAGE", raising=False)
-    monkeypatch.setenv("ENCRYPTION_KEY", Fernet.generate_key().decode())
+    monkeypatch.delenv("ML_PIPE_MERCADO_LIVRE_USE_SECURE_STORAGE", raising=False)
+    monkeypatch.setenv("ML_PIPE_ENCRYPTION_KEY", Fernet.generate_key().decode())
     token_path = tmp_path / "tokens.json"
 
     manager = TokenManager(token_path=str(token_path), oauth_handler=MagicMock())
@@ -53,9 +53,9 @@ def test_secure_storage_default_is_enabled(tmp_path: Path, monkeypatch) -> None:
 
 def test_secure_storage_auto_migration(tmp_path: Path, monkeypatch) -> None:
     """Default auto-migration should move plaintext tokens to encrypted storage."""
-    monkeypatch.setenv("MERCADO_LIVRE_USE_SECURE_STORAGE", "1")
-    monkeypatch.delenv("MERCADO_LIVRE_AUTO_MIGRATE_TOKENS", raising=False)
-    monkeypatch.setenv("ENCRYPTION_KEY", Fernet.generate_key().decode())
+    monkeypatch.setenv("ML_PIPE_MERCADO_LIVRE_USE_SECURE_STORAGE", "1")
+    monkeypatch.delenv("ML_PIPE_MERCADO_LIVRE_AUTO_MIGRATE_TOKENS", raising=False)
+    monkeypatch.setenv("ML_PIPE_ENCRYPTION_KEY", Fernet.generate_key().decode())
 
     token_path = tmp_path / "tokens.json"
     tokens = _sample_tokens()
@@ -73,7 +73,7 @@ def test_secure_storage_auto_migration(tmp_path: Path, monkeypatch) -> None:
 
 def test_save_tokens_drops_non_persisted_fields(tmp_path: Path, monkeypatch) -> None:
     """Only access/refresh/expires_at should be persisted."""
-    monkeypatch.setenv("MERCADO_LIVRE_USE_SECURE_STORAGE", "0")
+    monkeypatch.setenv("ML_PIPE_MERCADO_LIVRE_USE_SECURE_STORAGE", "0")
     token_path = tmp_path / "tokens.json"
     manager = TokenManager(token_path=str(token_path), oauth_handler=MagicMock())
     manager.save_tokens(
@@ -92,8 +92,8 @@ def test_save_tokens_drops_non_persisted_fields(tmp_path: Path, monkeypatch) -> 
 
 def test_secure_storage_load_failure_is_explicit(tmp_path: Path, monkeypatch) -> None:
     """Secure mode should raise AuthError when encrypted token file is unreadable."""
-    monkeypatch.setenv("MERCADO_LIVRE_USE_SECURE_STORAGE", "1")
-    monkeypatch.setenv("ENCRYPTION_KEY", Fernet.generate_key().decode())
+    monkeypatch.setenv("ML_PIPE_MERCADO_LIVRE_USE_SECURE_STORAGE", "1")
+    monkeypatch.setenv("ML_PIPE_ENCRYPTION_KEY", Fernet.generate_key().decode())
     token_path = tmp_path / "tokens.json"
     encrypted_path = tmp_path / "tokens.json.enc"
     encrypted_path.write_bytes(b"invalid-encrypted-payload")
@@ -106,9 +106,9 @@ def test_secure_storage_load_failure_is_explicit(tmp_path: Path, monkeypatch) ->
 
 def test_secure_storage_auto_migration_failure_is_explicit(tmp_path: Path, monkeypatch) -> None:
     """Auto migration failures must not silently continue in secure mode."""
-    monkeypatch.setenv("MERCADO_LIVRE_USE_SECURE_STORAGE", "1")
-    monkeypatch.setenv("MERCADO_LIVRE_AUTO_MIGRATE_TOKENS", "1")
-    monkeypatch.setenv("ENCRYPTION_KEY", Fernet.generate_key().decode())
+    monkeypatch.setenv("ML_PIPE_MERCADO_LIVRE_USE_SECURE_STORAGE", "1")
+    monkeypatch.setenv("ML_PIPE_MERCADO_LIVRE_AUTO_MIGRATE_TOKENS", "1")
+    monkeypatch.setenv("ML_PIPE_ENCRYPTION_KEY", Fernet.generate_key().decode())
 
     token_path = tmp_path / "tokens.json"
     token_path.write_text("{invalid-json", encoding="utf-8")

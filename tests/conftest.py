@@ -20,35 +20,35 @@ sys.path.insert(0, str(project_root))
 @pytest.fixture(autouse=True)
 def mock_credentials():
     """
-    Fixture que garante que as variáveis de ambiente ML_APP_ID e ML_APP_SECRET
-    estejam configuradas para todos os testes.
+    Fixture que garante variáveis ML_PIPE_MERCADO_LIVRE_CLIENT_ID e
+    ML_PIPE_MERCADO_LIVRE_CLIENT_SECRET para todos os testes.
     """
     # Seta variáveis de ambiente mock
-    original_app_id = os.environ.get("ML_APP_ID")
-    original_app_secret = os.environ.get("ML_APP_SECRET")
-    original_redirect_uri = os.environ.get("ML_REDIRECT_URI")
+    original_app_id = os.environ.get("ML_PIPE_MERCADO_LIVRE_CLIENT_ID")
+    original_app_secret = os.environ.get("ML_PIPE_MERCADO_LIVRE_CLIENT_SECRET")
+    original_redirect_uri = os.environ.get("ML_PIPE_MERCADO_LIVRE_REDIRECT_URI")
 
-    os.environ["ML_APP_ID"] = "mock_app_id_12345"
-    os.environ["ML_APP_SECRET"] = "mock_app_secret_67890"
-    os.environ["ML_REDIRECT_URI"] = "http://localhost:8000/callback"
+    os.environ["ML_PIPE_MERCADO_LIVRE_CLIENT_ID"] = "mock_app_id_12345"
+    os.environ["ML_PIPE_MERCADO_LIVRE_CLIENT_SECRET"] = "mock_app_secret_67890"
+    os.environ["ML_PIPE_MERCADO_LIVRE_REDIRECT_URI"] = "http://localhost:8000/callback"
 
     yield
 
     # Restaura valores originais
     if original_app_id is not None:
-        os.environ["ML_APP_ID"] = original_app_id
-    elif "ML_APP_ID" in os.environ:
-        del os.environ["ML_APP_ID"]
+        os.environ["ML_PIPE_MERCADO_LIVRE_CLIENT_ID"] = original_app_id
+    elif "ML_PIPE_MERCADO_LIVRE_CLIENT_ID" in os.environ:
+        del os.environ["ML_PIPE_MERCADO_LIVRE_CLIENT_ID"]
 
     if original_app_secret is not None:
-        os.environ["ML_APP_SECRET"] = original_app_secret
-    elif "ML_APP_SECRET" in os.environ:
-        del os.environ["ML_APP_SECRET"]
+        os.environ["ML_PIPE_MERCADO_LIVRE_CLIENT_SECRET"] = original_app_secret
+    elif "ML_PIPE_MERCADO_LIVRE_CLIENT_SECRET" in os.environ:
+        del os.environ["ML_PIPE_MERCADO_LIVRE_CLIENT_SECRET"]
 
     if original_redirect_uri is not None:
-        os.environ["ML_REDIRECT_URI"] = original_redirect_uri
-    elif "ML_REDIRECT_URI" in os.environ:
-        del os.environ["ML_REDIRECT_URI"]
+        os.environ["ML_PIPE_MERCADO_LIVRE_REDIRECT_URI"] = original_redirect_uri
+    elif "ML_PIPE_MERCADO_LIVRE_REDIRECT_URI" in os.environ:
+        del os.environ["ML_PIPE_MERCADO_LIVRE_REDIRECT_URI"]
 
 
 @pytest.fixture(autouse=True)
@@ -58,8 +58,8 @@ def isolate_token_path_for_tests():
     sobrescrever tokens.json real do projeto.
     """
     token_path = project_root / "tests" / "tokens.test.json"
-    original_token_path = os.environ.get("MERCADO_LIVRE_TOKEN_PATH")
-    os.environ["MERCADO_LIVRE_TOKEN_PATH"] = str(token_path)
+    original_token_path = os.environ.get("ML_PIPE_MERCADO_LIVRE_TOKEN_PATH")
+    os.environ["ML_PIPE_MERCADO_LIVRE_TOKEN_PATH"] = str(token_path)
 
     if token_path.exists():
         token_path.unlink()
@@ -70,9 +70,9 @@ def isolate_token_path_for_tests():
         token_path.unlink()
 
     if original_token_path is not None:
-        os.environ["MERCADO_LIVRE_TOKEN_PATH"] = original_token_path
-    elif "MERCADO_LIVRE_TOKEN_PATH" in os.environ:
-        del os.environ["MERCADO_LIVRE_TOKEN_PATH"]
+        os.environ["ML_PIPE_MERCADO_LIVRE_TOKEN_PATH"] = original_token_path
+    elif "ML_PIPE_MERCADO_LIVRE_TOKEN_PATH" in os.environ:
+        del os.environ["ML_PIPE_MERCADO_LIVRE_TOKEN_PATH"]
 
 
 @pytest.fixture(autouse=True)

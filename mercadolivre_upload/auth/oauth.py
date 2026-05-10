@@ -1,18 +1,14 @@
 """OAuth handler for Mercado Livre API authentication."""
 
-import os
 from typing import Any
 from urllib.parse import urlencode
 
 import requests
-from dotenv import find_dotenv, load_dotenv
 
+from mercadolivre_upload.infrastructure.env import get_pipeline_env
 from mercadolivre_upload.infrastructure.http import ResilientHTTPClient, RetryPolicy
 
 from .exceptions import OAuthError
-
-# Load environment variables from .env file (searches up from this file)
-load_dotenv(find_dotenv(usecwd=True))
 
 TOKEN_REQUEST_RETRY_POLICY = RetryPolicy(max_retries=1, base_delay=0.5, max_delay=5.0)
 
@@ -47,17 +43,13 @@ class OAuthHandler:
             redirect_uri: OAuth redirect URI. Defaults to env var.
             http_client: Optional resilient HTTP client for token requests.
         """
-        self.client_id = client_id or os.getenv("MERCADO_LIVRE_CLIENT_ID") or os.getenv(
-            "ML_APP_ID"
+        self.client_id = client_id or get_pipeline_env("ML_PIPE_MERCADO_LIVRE_CLIENT_ID")
+        self.client_secret = client_secret or get_pipeline_env(
+            "ML_PIPE_MERCADO_LIVRE_CLIENT_SECRET"
         )
-        self.client_secret = (
-            client_secret
-            or os.getenv("MERCADO_LIVRE_CLIENT_SECRET")
-            or os.getenv("ML_APP_SECRET")
-        )
-        self.redirect_uri = redirect_uri or os.getenv(
-            "MERCADO_LIVRE_REDIRECT_URI",
-            os.getenv("ML_REDIRECT_URI", "http://localhost:8000/callback"),
+        self.redirect_uri = redirect_uri or get_pipeline_env(
+            "ML_PIPE_MERCADO_LIVRE_REDIRECT_URI",
+            "http://localhost:8000/callback",
         )
         self.http_client = http_client or ResilientHTTPClient(timeout=30)
 
@@ -74,9 +66,7 @@ class OAuthHandler:
             OAuthError: If client_id is not configured
         """
         if not self.client_id:
-            raise OAuthError(
-                "Client ID is required. Set MERCADO_LIVRE_CLIENT_ID or ML_APP_ID."
-            )
+            raise OAuthError("Client ID is required. Set ML_PIPE_MERCADO_LIVRE_CLIENT_ID.")
 
         params = {
             "response_type": "code",

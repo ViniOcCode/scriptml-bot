@@ -9,6 +9,8 @@ import os
 from pathlib import Path
 from typing import Any
 
+from mercadolivre_upload.infrastructure.env import get_pipeline_env
+
 try:
     import keyring
     from cryptography.fernet import Fernet
@@ -31,7 +33,7 @@ class SecureTokenStorage:
 
     The encryption key is derived from:
     1. System keyring (preferred) - keyring service specific to this app
-    2. Environment variable ENCRYPTION_KEY (fallback for CI/automation)
+    2. Environment variable ML_PIPE_ENCRYPTION_KEY (fallback for CI/automation)
     3. Generated key stored in keyring (if neither above exists)
 
     Usage:
@@ -57,7 +59,7 @@ class SecureTokenStorage:
         """Get or create encryption key.
 
         Priority:
-        1. Environment variable ENCRYPTION_KEY
+        1. Environment variable ML_PIPE_ENCRYPTION_KEY
         2. System keyring
         3. Generate new key and store in keyring
 
@@ -65,7 +67,7 @@ class SecureTokenStorage:
             32-byte encryption key
         """
         # Priority 1: Environment variable
-        env_key = os.environ.get("ENCRYPTION_KEY")
+        env_key = get_pipeline_env("ML_PIPE_ENCRYPTION_KEY")
         if env_key:
             logger.debug("Using encryption key from environment variable")
             env_key_bytes = env_key.encode()
@@ -96,11 +98,11 @@ class SecureTokenStorage:
             except Exception as e:
                 raise SecureStorageError(
                     "Failed to persist encryption key in keyring. "
-                    "Set ENCRYPTION_KEY or configure a working keyring backend."
+                    "Set ML_PIPE_ENCRYPTION_KEY or configure a working keyring backend."
                 ) from e
         else:
             raise SecureStorageError(
-                "Secure storage requires ENCRYPTION_KEY when keyring is unavailable."
+                "Secure storage requires ML_PIPE_ENCRYPTION_KEY when keyring is unavailable."
             )
 
         return key

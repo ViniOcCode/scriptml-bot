@@ -1,29 +1,15 @@
 """Token manager for Mercado Livre API authentication."""
 
 import json
-import os
 import time
 from pathlib import Path
 from typing import Any
 
+from mercadolivre_upload.infrastructure.env import get_pipeline_env, get_pipeline_flag
+
 from .exceptions import AuthError, TokenExpiredError
 from .oauth import OAuthHandler
 from .secure_storage import SecureStorageError, SecureTokenStorage, migrate_plaintext_tokens
-
-
-def _is_truthy_env(value: str | None) -> bool:
-    """Return whether an environment value should be interpreted as true."""
-    if value is None:
-        return False
-    return value.strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _env_flag(name: str, *, default: bool) -> bool:
-    """Read a boolean env var using a secure-by-default fallback."""
-    value = os.getenv(name)
-    if value is None:
-        return default
-    return _is_truthy_env(value)
 
 
 class TokenManager:
@@ -51,20 +37,28 @@ class TokenManager:
             token_path: Path to tokens.json. Defaults to 'tokens.json' in current directory
             oauth_handler: OAuthHandler for token refresh. If None, creates default
         """
-        default_path = token_path or os.getenv("MERCADO_LIVRE_TOKEN_PATH") or "tokens.json"
+        default_path = (
+            token_path or get_pipeline_env("ML_PIPE_MERCADO_LIVRE_TOKEN_PATH") or "tokens.json"
+        )
         self.token_path = Path(default_path)
         self.oauth_handler = oauth_handler or OAuthHandler()
         self._tokens: dict[str, Any] | None = None
         self._secure_storage: SecureTokenStorage | None = None
 
-        use_secure_storage = _env_flag("MERCADO_LIVRE_USE_SECURE_STORAGE", default=True)
+        use_secure_storage = get_pipeline_flag(
+            "ML_PIPE_MERCADO_LIVRE_USE_SECURE_STORAGE",
+            default=True,
+        )
         if use_secure_storage or self.token_path.suffix == ".enc":
             secure_path = (
                 self.token_path
                 if self.token_path.suffix == ".enc"
                 else Path(f"{self.token_path}.enc")
             )
-            auto_migrate = _env_flag("MERCADO_LIVRE_AUTO_MIGRATE_TOKENS", default=True)
+            auto_migrate = get_pipeline_flag(
+                "ML_PIPE_MERCADO_LIVRE_AUTO_MIGRATE_TOKENS",
+                default=True,
+            )
             if auto_migrate and self.token_path.exists() and not secure_path.exists():
                 migrated = migrate_plaintext_tokens(self.token_path, secure_path)
                 if not migrated:

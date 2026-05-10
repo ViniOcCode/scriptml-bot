@@ -54,7 +54,7 @@ Start here: read the README first for high-level workflow, then inspect `mercado
 
 ## Security note
 
-This repository stores tokens in an encrypted file by default (`tokens.json.enc`) and reads secrets from environment variables (`MERCADO_LIVRE_*`, `ENCRYPTION_KEY`). Do NOT commit plaintext tokens or secret values.
+This repository stores tokens in an encrypted file by default (`tokens.json.enc`) and reads secrets from environment variables (`ML_PIPE_*`). Do NOT commit plaintext tokens or secret values.
 
 ## Where to begin for programmatic analysis
 

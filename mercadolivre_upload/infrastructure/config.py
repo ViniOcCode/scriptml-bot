@@ -59,7 +59,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
-        env_prefix="ML_UPLOAD_",
+        env_prefix="ML_PIPE_",
         case_sensitive=False,
         extra="ignore",
         validate_assignment=True,
