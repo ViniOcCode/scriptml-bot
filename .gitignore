@@ -22,7 +22,6 @@ htmlcov/
 
 # Logs
 *.log
-*.json
 pre-commit-config.yaml
 
 # IDE
@@ -43,16 +42,19 @@ CLAUDE.md
 /cache/
 /cache/**/
 AGENTS/
-.github/
+.agents/skills/
+.opencode/skills/
+.github/skills/
+.codex/
+_bmad-output/
+_bmad/
 .claude/*
 .benchmarks/*
 .ruff_cache/
-scripts/
 config/seller.yaml
 
-# Documentation build (ADRs are versioned; generated docs are not)
-docs/*
-!docs/adr/
-!docs/adr/*.md
+# Documentation build artifacts only
+docs/_build/
+docs/site/
 *:Zone.Identifier
 *.Zone.Identifier
