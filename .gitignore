@@ -53,7 +53,17 @@ _bmad/
 .ruff_cache/
 config/seller.yaml
 
+# AI guidance files/folders (not repo-worthy for this branch)
+.github/instructions/
+.github/agents/
+.github/copilot-instructions.md
+AGENTS.md
+llms.txt
+llm.txt
+
 # Documentation build artifacts only
+docs/*
+scenarios/*
 docs/_build/
 docs/site/
 *:Zone.Identifier
