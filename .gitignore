@@ -62,8 +62,6 @@ llms.txt
 llm.txt
 
 # Documentation build artifacts only
-docs/*
-scenarios/*
 docs/_build/
 docs/site/
 *:Zone.Identifier
