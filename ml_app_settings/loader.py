@@ -486,37 +486,41 @@ def _resolve_explicit_settings_path(raw_path: str) -> Path:
 
 
 def _load_effective_payload(app: Literal["builder", "bot"] | None) -> tuple[dict[str, Any], SettingsSources, Path]:
-    explicit_app_settings = os.getenv("APP_SETTINGS_FILE")
-    legacy_settings_file = os.getenv("ML_PIPE_SETTINGS_FILE")
+    # Use app-specific explicit env var if provided; do not auto-load APP_SETTINGS_FILE or ML_PIPE_SETTINGS_FILE
+    if app == "builder":
+        app_env_var = "ML_BUILDER_SETTINGS_FILE"
+        autodiscovery_candidates = (
+            _REPO_ROOT / "config/builder.yaml",
+            _REPO_ROOT.parent / "config/builder.yaml",
+        )
+    elif app == "bot":
+        app_env_var = "ML_PUBLISHER_SETTINGS_FILE"
+        autodiscovery_candidates = (
+            _REPO_ROOT / "config/publisher.yaml",
+            _REPO_ROOT.parent / "config/publisher.yaml",
+        )
+    else:
+        app_env_var = None
+        autodiscovery_candidates = (
+            _REPO_ROOT / "config/settings.yaml",
+            _REPO_ROOT.parent / "config/settings.yaml",
+        )
+
+    explicit_app_settings = os.getenv(app_env_var) if app_env_var else None
 
     if explicit_app_settings and explicit_app_settings.strip():
         resolved_explicit_path = _resolve_explicit_settings_path(explicit_app_settings.strip())
         if not resolved_explicit_path.exists():
-            raise FileNotFoundError(
-                f"Configured settings file does not exist: {explicit_app_settings.strip()}"
-            )
+            raise FileNotFoundError(f"Configured settings file does not exist: {explicit_app_settings.strip()}")
         payload = _coerce_legacy_payload(_read_yaml(resolved_explicit_path), app)
         sources = SettingsSources(mode="canonical", settings_file=resolved_explicit_path)
         return payload, sources, resolved_explicit_path.parent
 
-    autodiscovered_settings = _first_existing(
-        _REPO_ROOT / "config/settings.yaml",
-        _REPO_ROOT.parent / "config/settings.yaml",
-    )
+    autodiscovered_settings = _first_existing(*autodiscovery_candidates)
     if autodiscovered_settings is not None:
         payload = _coerce_legacy_payload(_read_yaml(autodiscovered_settings), app)
         sources = SettingsSources(mode="canonical", settings_file=autodiscovered_settings)
         return payload, sources, autodiscovered_settings.parent
-
-    if legacy_settings_file and legacy_settings_file.strip():
-        resolved_legacy_path = _resolve_explicit_settings_path(legacy_settings_file.strip())
-        if not resolved_legacy_path.exists():
-            raise FileNotFoundError(
-                f"Configured settings file does not exist: {legacy_settings_file.strip()}"
-            )
-        payload = _coerce_legacy_payload(_read_yaml(resolved_legacy_path), app)
-        sources = SettingsSources(mode="canonical", settings_file=resolved_legacy_path)
-        return payload, sources, resolved_legacy_path.parent
 
     payload = _packaged_defaults()
     if app == "builder":

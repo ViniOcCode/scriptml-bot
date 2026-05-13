@@ -169,6 +169,9 @@ def publish_payload(
 ) -> None:
     """Publish a ready-made builder payload JSON file."""
     setup_logging()
+    if not seller_config.exists():
+        err_console.print(f"[error]Seller config not found: {seller_config}[/error]")
+        raise typer.Exit(2)
     api = import_module("mercadolivre_upload.application.publish_payload")
     result = api.publish_payload_file(
         path,
@@ -198,6 +201,9 @@ def publish_manifest(
 ) -> None:
     """Publish payloads declared in run_manifest.json."""
     setup_logging()
+    if not seller_config.exists():
+        err_console.print(f"[error]Seller config not found: {seller_config}[/error]")
+        raise typer.Exit(2)
     cmd = import_module("mercadolivre_upload.cli.commands.publish_manifest")
     cmd.publish_manifest(
         manifest_path=manifest_path,
