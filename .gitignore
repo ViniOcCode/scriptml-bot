@@ -52,6 +52,7 @@ _bmad/
 .benchmarks/*
 .ruff_cache/
 config/seller.yaml
+config/publisher.yaml
 
 # AI guidance files/folders (not repo-worthy for this branch)
 .github/instructions/

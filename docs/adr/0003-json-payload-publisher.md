@@ -34,7 +34,7 @@ Key constraints and drivers:
 
 ## Decision
 
-Introduce two new Typer commands (`publish-json`, `publish-batch`) backed by a dedicated adapter,
+Introduce two Typer commands (`publish-payload`, `publish-manifest`) backed by a dedicated adapter,
 use-case, and CLI module — completely separate from the existing Excel pipeline:
 
 - **`mercadolivre_upload/adapters/json_payload_reader.py`** — reads and validates a single
@@ -43,9 +43,10 @@ use-case, and CLI module — completely separate from the existing Excel pipelin
 - **`mercadolivre_upload/application/publish_json_use_case.py`** — orchestrates
   read → seller-policy override → seller-policy validation → publish → description post.
   Reuses `MLApiClient.create_item()` and `MLApiClient.create_item_description()` (already present).
-- **`mercadolivre_upload/cli/commands/publish_json.py`** — Typer commands with `--dry-run`,
-  `--report-dir`, and `--all` flags; reads `batch_manifest.json` for failed-SKU skipping and
-  AI-review gating.
+- **`mercadolivre_upload/cli/commands/publish_json.py`** — single-payload helper command
+  implementation used by `publish-payload`.
+- **`mercadolivre_upload/cli/commands/publish_manifest.py`** — manifest-driven command with
+  `--dry-run` and `--report-dir`; reads `run_manifest.json` as explicit handoff contract.
 - Commands registered in `app.py` using the existing `import_module` lazy-load pattern.
 
 The `_meta` block is consumed (stripped) by the reader adapter before the payload reaches the
@@ -70,9 +71,9 @@ endpoint after the item is created.
 
 ### Negative
 
-- **NEG-001**: `publish-json` and `publish-batch` are synchronous despite the `MLApiClient`
+- **NEG-001**: `publish-payload` and `publish-manifest` are synchronous despite the `MLApiClient`
   supporting async patterns; batch throughput is limited to sequential item publishing.
-- **NEG-002**: `batch_manifest.json` format is defined implicitly by convention (not via a schema);
+- **NEG-002**: `run_manifest.json` format must remain versioned and schema-validated;
   schema drift between `ml-builder` and `scriptml` is a future risk.
 - **NEG-003**: `seller.yaml` is per-tenant and git-ignored; operators must copy from
   `seller.example.yaml` manually — no automatic provisioning.
@@ -113,10 +114,10 @@ endpoint after the item is created.
 - **IMP-001**: The `import_module` lazy-load pattern (`mercadolivre_upload.cli.commands.publish_json`)
   is used in `app.py` consistent with other commands — avoids circular imports and keeps startup
   fast.
-- **IMP-002**: `config/seller.yaml` is git-ignored; `config/seller.example.yaml` is versioned as
-  the canonical template. Operators must copy and customize before running `publish-json`.
-- **IMP-003**: Smoke test: `uv run ml-upload publish-json --help` and
-  `uv run ml-upload publish-batch --help` must show both commands after any `app.py` change.
+- **IMP-002**: `config/publisher.yaml` is git-ignored; `config/publisher.example.yaml` is versioned as
+  the canonical template. Operators must copy and customize before running publish commands.
+- **IMP-003**: Smoke test: `uv run ml-upload publish-payload --help` and
+  `uv run ml-upload publish-manifest --help` must show both commands after any `app.py` change.
 - **IMP-004**: Success criteria — `uv run pytest -q` passes with ≥ 60% coverage and all four
   quality gates (`ruff`, `black --check`, `mypy`, `pytest`) exit 0.
 
@@ -125,7 +126,7 @@ endpoint after the item is created.
 - **REF-001**: ADR-0001 — Repository architecture (ADR placement convention)
 - **REF-002**: `plans/json-payload-publisher/implementation.md` — full 5-step implementation spec
 - **REF-003**: `mercadolivre_upload/application/ports.py` — `ItemPublisherPort` protocol reused
-  by `publish_json_use_case.py`
+  by publish use-cases
 - **REF-004**: Mercado Livre Items API — `POST /items`, `POST /items/{id}/description`
 - **REF-005**: ADR-0004 (this session) — Seller Policy Validation Layer
 - **REF-006**: ADR-0005 (this session) — Synchronous-Only Execution Model

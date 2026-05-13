@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import logging
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -21,9 +20,7 @@ from mercadolivre_upload.application.validators.seller_policy import (
 from mercadolivre_upload.auth import TokenManager
 from mercadolivre_upload.domain.fiscal.service import FiscalService
 
-logger = logging.getLogger(__name__)
-
-_DEFAULT_SELLER_CONFIG_PATH = Path("config/seller.yaml")
+_DEFAULT_SELLER_CONFIG_PATH = Path("config/publisher.yaml")
 
 
 def _build_use_case(
@@ -36,15 +33,7 @@ def _build_use_case(
 
     config_path = seller_config_path or _DEFAULT_SELLER_CONFIG_PATH
     if config_path.exists():
-        try:
-            seller_config = load_seller_config(config_path)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "Failed to load seller config %s: %s. Using permissive defaults.",
-                config_path,
-                exc,
-            )
-            seller_config = default_seller_config()
+        seller_config = load_seller_config(config_path)
     else:
         seller_config = default_seller_config()
 
@@ -135,6 +124,7 @@ def publish_payload_file(
     report_dir: Path | None = None,
     dry_run: bool = False,
     publish_inactive: bool = False,
+    seller_config_path: Path | None = None,
 ) -> dict[str, Any]:
     """Publish a ready-made payload JSON file produced by ml-builder.
 
@@ -179,7 +169,10 @@ def publish_payload_file(
             report_dir=report_dir,
         )
 
-    use_case = _build_use_case(publish_inactive=publish_inactive)
+    use_case = _build_use_case(
+        publish_inactive=publish_inactive,
+        seller_config_path=seller_config_path,
+    )
     result = use_case.execute(path, dry_run=dry_run)
     report_path = _write_report([result], report_dir) if report_dir is not None else None
     return _result_to_dict(result, report_path=report_path)

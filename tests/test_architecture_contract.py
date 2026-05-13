@@ -36,6 +36,22 @@ def _application_api_imports() -> list[str]:
     return sorted(imports)
 
 
+def _publisher_builder_imports() -> list[str]:
+    imports: set[str] = set()
+    for path in PACKAGE_ROOT.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name.startswith("ml_listing_builder"):
+                        imports.add(str(path.relative_to(PACKAGE_ROOT)))
+            elif isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                if module.startswith("ml_listing_builder"):
+                    imports.add(str(path.relative_to(PACKAGE_ROOT)))
+    return sorted(imports)
+
+
 def test_item_publisher_port_covers_publish_flow_surface() -> None:
     methods = _class_method_names(PORTS_FILE, "ItemPublisherPort")
     required = {
@@ -64,5 +80,10 @@ def test_publish_flow_avoids_dynamic_publisher_getattr_calls() -> None:
 def test_application_api_import_boundary_has_single_documented_exception() -> None:
     assert _application_api_imports() == [
         "application/publish_json_use_case.py",
+        "application/publish_payload.py",
         "application/publish_product.py",
     ]
+
+
+def test_publisher_does_not_import_builder_package() -> None:
+    assert _publisher_builder_imports() == []

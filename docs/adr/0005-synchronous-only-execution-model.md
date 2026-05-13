@@ -35,8 +35,8 @@ test infrastructure, and the CLI runner — a large blast radius for a speculati
 
 ## Decision
 
-The `PublishJsonUseCase.execute()` method and all new CLI commands (`publish-json`, `publish-batch`)
-are implemented as synchronous (`def`, not `async def`). Batch publishing in `publish-batch`
+The payload publish use-cases and CLI commands (`publish-payload`, `publish-manifest`)
+are implemented as synchronous (`def`, not `async def`). Batch publishing in `publish-manifest`
 processes items sequentially.
 
 The existing HTTP resilience layer (`infrastructure/http.py` — retry, backoff+jitter, token-bucket
@@ -110,7 +110,7 @@ and throughput becomes a measured bottleneck, a future ADR may introduce concurr
   extended without changing the synchronous baseline.
 - **IMP-003**: The existing `infrastructure/http.py` rate limiter (token-bucket + `Retry-After`)
   applies automatically to all `MLApiClient` calls, providing resilience for sequential batches.
-- **IMP-004**: Success metric: `publish-batch` of 10 items should complete in under 60 seconds
+- **IMP-004**: Success metric: `publish-manifest` of 10 items should complete in under 60 seconds
   on a standard network; measure in production before declaring throughput a bottleneck.
 
 ## References

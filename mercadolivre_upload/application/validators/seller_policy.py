@@ -1,6 +1,6 @@
 """Seller policy validator.
 
-Validates payload dicts against per-seller business rules loaded from seller.yaml.
+Validates payload dicts against per-seller business rules loaded from publisher.yaml.
 Pure business logic — no API calls.
 """
 
@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 logger = logging.getLogger(__name__)
 
@@ -25,12 +25,16 @@ logger = logging.getLogger(__name__)
 class ListingConfig(BaseModel):
     """Listing type restrictions for this seller."""
 
+    model_config = ConfigDict(extra="forbid")
+
     allowed_types: list[str]
     default_type: str
 
 
 class PricingConfig(BaseModel):
     """Price range constraints for this seller."""
+
+    model_config = ConfigDict(extra="forbid")
 
     min_price: float
     max_price: float
@@ -39,12 +43,16 @@ class PricingConfig(BaseModel):
 class CategoriesConfig(BaseModel):
     """Category-level restrictions and overrides."""
 
-    blocked: list[str] = []
-    overrides: dict[str, str] = {}
+    model_config = ConfigDict(extra="forbid")
+
+    blocked: list[str] = Field(default_factory=list)
+    overrides: dict[str, str] = Field(default_factory=dict)
 
 
 class BatchConfig(BaseModel):
     """Batch publishing safety settings."""
+
+    model_config = ConfigDict(extra="forbid")
 
     human_review_required: bool = True
     publish_inactive: bool = False
@@ -54,10 +62,12 @@ class BatchConfig(BaseModel):
 class SellerConfig(BaseModel):
     """Top-level seller configuration loaded from seller.yaml."""
 
+    model_config = ConfigDict(extra="forbid")
+
     listing: ListingConfig
     pricing: PricingConfig
-    categories: CategoriesConfig = CategoriesConfig()
-    batch: BatchConfig = BatchConfig()
+    categories: CategoriesConfig = Field(default_factory=CategoriesConfig)
+    batch: BatchConfig = Field(default_factory=BatchConfig)
 
 
 # ---------------------------------------------------------------------------
@@ -97,10 +107,10 @@ class PolicyResult:
 
 
 def load_seller_config(path: Path) -> SellerConfig:
-    """Load and validate seller.yaml.
+    """Load and validate publisher.yaml.
 
     Args:
-        path: Path to seller.yaml.
+        path: Path to publisher.yaml.
 
     Returns:
         Validated SellerConfig instance.
@@ -109,9 +119,23 @@ def load_seller_config(path: Path) -> SellerConfig:
         FileNotFoundError: If path does not exist.
         pydantic.ValidationError: If YAML content fails schema validation.
     """
-    raw: dict[str, Any] = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    # Support both top-level keys and nested under "seller:"
-    seller_raw = raw.get("seller", raw)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"Publisher config must contain a mapping: {path}")
+
+    # Support both top-level keys and nested under "seller:", but forbid mixed top-level ownership.
+    if "seller" in raw:
+        extra_top_level = sorted(set(raw.keys()) - {"seller"})
+        if extra_top_level:
+            raise ValueError(
+                "Publisher config contains unsupported top-level fields: "
+                + ", ".join(extra_top_level)
+            )
+        seller_raw = raw["seller"]
+    else:
+        seller_raw = raw
+    if not isinstance(seller_raw, dict):
+        raise ValueError(f"Publisher config seller section must be a mapping: {path}")
     return SellerConfig.model_validate(seller_raw)
 
 
@@ -245,8 +269,8 @@ class SellerPolicyValidator:
                     field="category_id",
                     message=(
                         "Categoria sugerida por IA não foi revisada por humano. "
-                        "Defina human_reviewed: true em batch_manifest.json ou "
-                        "human_review_required: false em seller.yaml"
+                        "Defina review evidence no run_manifest.json ou "
+                        "human_review_required: false em publisher.yaml"
                     ),
                     severity="error",
                 )

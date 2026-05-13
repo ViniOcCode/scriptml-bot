@@ -1,0 +1,24 @@
+# publisher.example.yaml — copy to config/publisher.yaml and fill in your values.
+# config/publisher.yaml is git-ignored (per-tenant, never commit real values).
+#
+# Publisher-owned settings for manifest/payload publishing policy.
+
+seller:
+  listing:
+    allowed_types:
+      - "gold_special"
+      - "gold_pro"
+    default_type: "gold_special"
+
+  pricing:
+    min_price: 5.00
+    max_price: 999.00
+
+  categories:
+    blocked: []
+    overrides: {}
+
+  batch:
+    human_review_required: false
+    publish_inactive: true
+

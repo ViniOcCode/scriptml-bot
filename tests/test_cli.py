@@ -294,6 +294,27 @@ class TestAuthCommand:
         assert "Não autenticado" in result.output
 
 
+class TestPublishManifestCommand:
+    """Tests for publish-manifest command."""
+
+    @patch("mercadolivre_upload.cli.app.import_module")
+    def test_publish_manifest_delegates_to_command_module(self, mock_import_module):
+        mock_module = MagicMock()
+        mock_import_module.return_value = mock_module
+
+        with runner.isolated_filesystem():
+            Path("run_manifest.json").write_text("{}", encoding="utf-8")
+            result = runner.invoke(app, ["publish-manifest", "run_manifest.json"])
+
+        assert result.exit_code == 0
+        mock_import_module.assert_called_once_with("mercadolivre_upload.cli.commands.publish_manifest")
+        mock_module.publish_manifest.assert_called_once()
+        kwargs = mock_module.publish_manifest.call_args.kwargs
+        assert kwargs["manifest_path"] == Path("run_manifest.json")
+        assert kwargs["dry_run"] is False
+        assert kwargs["publish_inactive"] is False
+        assert kwargs["seller_config"] == Path("config/publisher.yaml")
+
 class TestMain:
     """Tests for main function."""
 

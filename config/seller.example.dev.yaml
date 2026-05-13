@@ -38,10 +38,9 @@ seller:
     overrides: {}         # e.g. MLB1234: "gold_pro"
 
   # -----------------------------------------------------------------------
-  # batch: safety gates for publish-batch.
-  # human_review_required — when true, blocks batches where the ml-builder
-  #   used AI to suggest the category and batch_manifest.json does NOT have
-  #   human_reviewed: true.  Set to false to skip this gate.
+  # batch: safety gates for publish-manifest.
+  # human_review_required — when true, blocks runs where ml-builder
+  #   emitted blocking/review-required category evidence in run_manifest.json.
   # publish_inactive — reserved for future use (publish as paused).
   # -----------------------------------------------------------------------
   batch:

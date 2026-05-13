@@ -154,20 +154,6 @@ def auth(
 
 
 @app.command()
-def publish_json(
-    path: Path = typer.Argument(..., help="Path to payload.json"),  # noqa: B008
-    dry_run: bool = typer.Option(
-        False, "--dry-run", help="Validate without publishing."
-    ),  # noqa: B008
-    report_dir: Path = typer.Option(Path("cache/reports"), "--report-dir"),  # noqa: B008
-) -> None:
-    """Publish a single payload.json to Mercado Livre."""
-    setup_logging()
-    cmd = import_module("mercadolivre_upload.cli.commands.publish_json")
-    cmd.publish_json(path=path, dry_run=dry_run, report_dir=report_dir)
-
-
-@app.command()
 def publish_payload(
     path: Path = typer.Argument(..., help="Path to payload.json or 70_payload.json"),  # noqa: B008
     dry_run: bool = typer.Option(
@@ -179,6 +165,7 @@ def publish_payload(
         help="Publish items in paused (inactive) state. Items can be activated later.",
     ),
     report_dir: Path = typer.Option(Path("cache/reports"), "--report-dir"),  # noqa: B008
+    seller_config: Path = typer.Option(Path("config/publisher.yaml"), "--config"),  # noqa: B008
 ) -> None:
     """Publish a ready-made builder payload JSON file."""
     setup_logging()
@@ -188,6 +175,7 @@ def publish_payload(
         report_dir=report_dir,
         dry_run=dry_run,
         publish_inactive=publish_inactive,
+        seller_config_path=seller_config,
     )
     console.print(json.dumps(result, ensure_ascii=False, indent=2))
     if result.get("status") == "failed":
@@ -195,19 +183,29 @@ def publish_payload(
 
 
 @app.command()
-def publish_batch(
-    batch_dir: Path = typer.Argument(  # noqa: B008
-        ..., help="Batch directory containing payload.json files"
-    ),
+def publish_manifest(
+    manifest_path: Path = typer.Argument(..., help="Path to run_manifest.json"),  # noqa: B008
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Validate without publishing."
     ),  # noqa: B008
+    publish_inactive: bool = typer.Option(  # noqa: B008
+        False,
+        "--publish-inactive/--no-publish-inactive",
+        help="Publish items in paused (inactive) state. Items can be activated later.",
+    ),
     report_dir: Path = typer.Option(Path("cache/reports"), "--report-dir"),  # noqa: B008
+    seller_config: Path = typer.Option(Path("config/publisher.yaml"), "--config"),  # noqa: B008
 ) -> None:
-    """Publish all payload.json files in a batch directory."""
+    """Publish payloads declared in run_manifest.json."""
     setup_logging()
-    cmd = import_module("mercadolivre_upload.cli.commands.publish_json")
-    cmd.publish_batch(batch_dir=batch_dir, dry_run=dry_run, report_dir=report_dir)
+    cmd = import_module("mercadolivre_upload.cli.commands.publish_manifest")
+    cmd.publish_manifest(
+        manifest_path=manifest_path,
+        dry_run=dry_run,
+        publish_inactive=publish_inactive,
+        report_dir=report_dir,
+        seller_config=seller_config,
+    )
 
 
 def main() -> None:

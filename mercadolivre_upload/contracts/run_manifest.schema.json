@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://vinioccode.github.io/mlbot/schemas/run_manifest.schema.json",
+  "title": "RunManifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_id",
+    "created_at",
+    "workspace_path",
+    "artifacts",
+    "blocking_issues",
+    "warnings",
+    "diagnostics"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string"
+    },
+    "run_id": {
+      "type": "string"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "workspace_path": {
+      "type": "string"
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sku",
+          "status",
+          "payload_paths",
+          "category_id",
+          "category_name",
+          "error"
+        ],
+        "properties": {
+          "sku": { "type": "string" },
+          "status": {
+            "type": "string",
+            "enum": ["done", "review_required", "error", "skipped"]
+          },
+          "payload_paths": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "category_id": { "type": "string" },
+          "category_name": { "type": "string" },
+          "error": {}
+        }
+      }
+    },
+    "blocking_issues": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "warnings": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "diagnostics": {
+      "type": "object",
+      "additionalProperties": { "type": ["string", "null"] }
+    }
+  }
+}

@@ -1,8 +1,4 @@
-"""CLI command implementations for JSON payload publishing.
-
-Exposes publish_json() and publish_batch() plain functions which are called
-by the Typer commands registered in cli/app.py.
-"""
+"""CLI support helpers for single JSON payload publishing."""
 
 from __future__ import annotations
 
@@ -15,10 +11,7 @@ from typing import Any
 import typer
 from rich.console import Console
 
-from mercadolivre_upload.adapters.json_payload_reader import (
-    JsonPayloadReader,
-    ReadPayloadResult,
-)
+from mercadolivre_upload.adapters.json_payload_reader import JsonPayloadReader
 from mercadolivre_upload.api.client import MLApiClient
 from mercadolivre_upload.application.publish_json_use_case import (
     PublishJsonResult,
@@ -36,7 +29,7 @@ logger = logging.getLogger(__name__)
 console = Console()
 err_console = Console(stderr=True)
 
-_DEFAULT_SELLER_CONFIG_PATH = Path("config/seller.yaml")
+_DEFAULT_SELLER_CONFIG_PATH = Path("config/publisher.yaml")
 
 
 def _build_use_case(seller_config_path: Path | None = None) -> PublishJsonUseCase:
@@ -131,22 +124,6 @@ def _write_report(
     return report_path
 
 
-def _read_batch_manifest(batch_dir: Path) -> dict[str, Any]:
-    """Read batch_manifest.json from batch_dir, return empty dict if absent."""
-    manifest_path = batch_dir / "batch_manifest.json"
-    if manifest_path.exists():
-        return json.loads(manifest_path.read_text(encoding="utf-8"))  # type: ignore[no-any-return]
-    return {}
-
-
-def _write_batch_manifest(manifest_path: Path, manifest: dict[str, Any]) -> None:
-    """Atomically write manifest dict to batch_manifest.json (temp file + replace)."""
-    manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = manifest_path.with_suffix(".tmp.json")
-    tmp.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(manifest_path)
-
-
 def publish_json(
     path: Path,
     *,
@@ -160,107 +137,4 @@ def publish_json(
     report_path = _write_report([result], report_dir)
     console.print(f"[cyan]Relatório: {report_path}[/cyan]")
     if result.status == "failed":
-        raise typer.Exit(1)
-
-
-def publish_batch(
-    batch_dir: Path,
-    *,
-    dry_run: bool = False,
-    report_dir: Path = Path("cache/reports"),
-) -> None:
-    """Publish all payload.json files in a batch directory."""
-    use_case = _build_use_case()
-    reader = JsonPayloadReader()
-
-    manifest_path = batch_dir / "batch_manifest.json"
-    manifest = _read_batch_manifest(batch_dir)
-    failed_skus: set[str] = set(manifest.get("failed_skus", []))
-    published_skus: set[str] = set(manifest.get("published_skus", []))
-    ai_suggested_category: bool = bool(manifest.get("ai_suggested_category", False))
-    human_reviewed: bool = bool(manifest.get("human_reviewed", False))
-
-    # Safety gate: block batch if AI-suggested category was not reviewed
-    if ai_suggested_category and not human_reviewed:
-        config_path = _DEFAULT_SELLER_CONFIG_PATH
-        try:
-            seller_config = (
-                load_seller_config(config_path) if config_path.exists() else default_seller_config()
-            )
-        except Exception:  # noqa: BLE001
-            seller_config = default_seller_config()
-
-        if seller_config.batch.human_review_required:
-            category_id = manifest.get("category_id", batch_dir.name)
-            err_console.print(
-                f"[red]Erro:[/red] Batch {category_id} não foi revisado por humano. "
-                "Defina [bold]human_reviewed: true[/bold] em batch_manifest.json "
-                "ou [bold]human_review_required: false[/bold] em seller.yaml"
-            )
-            raise typer.Exit(1)
-
-    payload_entries = reader.read_batch(batch_dir)
-    if not payload_entries:
-        console.print("[yellow]Nenhum payload.json encontrado.[/yellow]")
-        return
-
-    category_id_str = str(manifest.get("category_id", batch_dir.name))
-    action = "Validando" if dry_run else "Publicando"
-    console.print(f"{action} {len(payload_entries)} payload(s) em {category_id_str}/")
-
-    results: list[PublishJsonResult] = []
-    for payload_path, read_result in payload_entries:
-        if isinstance(read_result, Exception):
-            r = PublishJsonResult(
-                sku=None,
-                path=str(payload_path),
-                status="failed",
-                error=str(read_result),
-            )
-            results.append(r)
-            _print_result(r)
-            continue
-
-        assert isinstance(read_result, ReadPayloadResult)
-        # Skip SKUs that failed during ml-builder phase
-        if read_result.sku and read_result.sku in failed_skus:
-            console.print(f"[dim]– {read_result.sku}  (pulado: falhou no builder)[/dim]")
-            continue
-
-        # Idempotency: skip SKUs already published in a prior run
-        if read_result.sku and read_result.sku in published_skus:
-            console.print(f"[dim]– {read_result.sku}  (pulado: já publicado)[/dim]")
-            continue
-
-        result = use_case.execute(payload_path, dry_run=dry_run)
-        results.append(result)
-        _print_result(result)
-        if result.status == "published" and result.sku:
-            published_skus.add(result.sku)
-            manifest["published_skus"] = sorted(published_skus)
-            _write_batch_manifest(manifest_path, manifest)
-        elif result.status == "failed" and result.sku:
-            failed_skus.add(result.sku)
-            manifest["failed_skus"] = sorted(failed_skus)
-            _write_batch_manifest(manifest_path, manifest)
-
-    published_count = sum(1 for r in results if r.status == "published")
-    failed_count = sum(1 for r in results if r.status == "failed")
-    skipped_count = sum(1 for r in results if r.status == "skipped")
-
-    if dry_run:
-        console.print(
-            f"\n{len(results)} validados — " f"{skipped_count} ok, " f"{failed_count} com erro"
-        )
-        console.print(
-            "Para publicar os válidos: [cyan]ml-upload publish-batch[/cyan] (sem --dry-run)"
-        )
-    else:
-        console.print(f"\nResultado: {published_count} publicados, " f"{failed_count} falha(s)")
-
-    if results:
-        report_path = _write_report(results, report_dir, category_id_str)
-        console.print(f"[cyan]Relatório: {report_path}[/cyan]")
-
-    if failed_count > 0:
         raise typer.Exit(1)

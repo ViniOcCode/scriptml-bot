@@ -79,7 +79,10 @@ def test_publish_payload_file_uses_mocked_use_case(tmp_path: Path, monkeypatch) 
         publish_inactive=True,
     )
 
-    build_use_case.assert_called_once_with(publish_inactive=True)
+    build_use_case.assert_called_once_with(
+        publish_inactive=True,
+        seller_config_path=None,
+    )
     mock_use_case.execute.assert_called_once_with(payload_path, dry_run=False)
     assert result["status"] == "published"
     assert result["item_id"] == "MLB123"
@@ -111,3 +114,4 @@ def test_publish_payload_cli_delegates_to_public_api(tmp_path: Path) -> None:
     assert call_args.args == (payload_path,)
     assert call_args.kwargs["dry_run"] is False
     assert call_args.kwargs["publish_inactive"] is False
+    assert call_args.kwargs["seller_config_path"] == Path("config/publisher.yaml")
