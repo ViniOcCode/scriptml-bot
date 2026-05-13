@@ -58,4 +58,3 @@ def test_publish_json_cmd_failure_exits_one(tmp_path: Path, monkeypatch) -> None
     with pytest.raises(typer.Exit) as exc_info:
         publish_json_cmd.publish_json(payload_path, report_dir=tmp_path / "reports")
     assert exc_info.value.exit_code == 1
-

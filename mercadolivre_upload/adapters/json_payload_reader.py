@@ -151,7 +151,7 @@ def _extract_root_fiscal_items(raw: dict[str, Any]) -> list[dict[str, Any]]:
     return [dict(item) for item in items if isinstance(item, dict)]
 
 
-def _resolve_upload_mode(meta: dict[str, Any], payload: dict[str, Any], path_name: str) -> str:
+def _resolve_upload_mode(meta: dict[str, Any], payload: Any, path_name: str) -> str:
     publication = meta.get("publication")
     if not isinstance(publication, dict):
         publication = {}
@@ -168,7 +168,8 @@ def _resolve_upload_mode(meta: dict[str, Any], payload: dict[str, Any], path_nam
 
     _add_mode_hint("_meta.publication.model", publication.get("model"))
     _add_mode_hint("_meta.publication.seller_model", publication.get("seller_model"))
-    _add_mode_hint("payload.model", payload.get("model"))
+    payload_model = payload.get("model") if isinstance(payload, dict) else None
+    _add_mode_hint("payload.model", payload_model)
 
     if mode_hints:
         first_source, resolved_mode = mode_hints[0]
@@ -178,7 +179,9 @@ def _resolve_upload_mode(meta: dict[str, Any], payload: dict[str, Any], path_nam
         return resolved_mode
 
     # Last-resort inference when explicit model hints are absent.
-    items = payload.get("items")
+    if isinstance(payload, list):
+        return "user_products"
+    items = payload.get("items") if isinstance(payload, dict) else None
     if isinstance(items, list):
         return "user_products"
     return "legacy_items"
@@ -252,16 +255,44 @@ def _validate_legacy_payload(payload: dict[str, Any], path_name: str) -> None:
     _validate_picture_sources(payload["pictures"], path_name)
 
 
-def _validate_user_products_payload(payload: dict[str, Any], path_name: str) -> None:
+def _validate_user_products_payload(payload: Any, path_name: str) -> None:
     """Validate a local user-products upload envelope payload."""
-    items = payload.get("items")
+    family_name: str | None = None
+    using_payload_array = False
+    if isinstance(payload, list):
+        items = payload
+        using_payload_array = True
+    elif isinstance(payload, dict):
+        # New builder artifacts use payload[] directly.
+        if isinstance(payload.get("payload"), list):
+            items = payload.get("payload")
+            using_payload_array = True
+            family_name_value = payload.get("family_name")
+            if isinstance(family_name_value, str):
+                family_name = family_name_value
+        else:
+            # Backward-compatible UP envelope variant.
+            items = payload.get("items")
+            family_name_value = payload.get("family_name")
+            if isinstance(family_name_value, str):
+                family_name = family_name_value
+    else:
+        items = None
+
     if not isinstance(items, list) or not items:
-        raise InvalidPayloadError(f"Campo obrigatório 'items' ausente ou vazio em {path_name}")
+        missing_field = "payload" if using_payload_array else "items"
+        raise InvalidPayloadError(f"Campo obrigatório '{missing_field}' ausente ou vazio em {path_name}")
 
     # Per-item required fields (ML API docs) — validated first, always.
     for index, item in enumerate(items, start=1):
         if not isinstance(item, dict) or not item:
             raise InvalidPayloadError(f"Item inválido em payload.items[{index}] de {path_name}")
+        if using_payload_array:
+            item_family_name = item.get("family_name")
+            if not isinstance(item_family_name, str) or not item_family_name.strip():
+                raise InvalidPayloadError(
+                    f"Campo obrigatório 'family_name' ausente em item[{index}] de {path_name}"
+                )
         missing = UP_ITEM_REQUIRED_FIELDS - item.keys()
         if missing:
             raise InvalidPayloadError(
@@ -272,8 +303,7 @@ def _validate_user_products_payload(payload: dict[str, Any], path_name: str) -> 
             _validate_picture_sources(item_pictures, f"{path_name}[item {index}]")
 
     # Envelope-level check — behind VALIDATE_UP_ENVELOPE feature flag.
-    if VALIDATE_UP_ENVELOPE:
-        family_name = payload.get("family_name")
+    if VALIDATE_UP_ENVELOPE and isinstance(payload, dict) and "items" in payload:
         if not isinstance(family_name, str) or not family_name.strip():
             raise InvalidPayloadError(f"Campo obrigatório 'family_name' ausente em {path_name}")
 
@@ -288,10 +318,17 @@ def _extract_category_id(payload: dict[str, Any], upload_mode: str) -> str:
         return ""
 
     items = payload.get("items")
-    if not isinstance(items, list):
+    if isinstance(items, list):
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            item_category_id = item.get("category_id")
+            if isinstance(item_category_id, str) and item_category_id.strip():
+                return item_category_id.strip()
+    payload_items = payload.get("payload")
+    if not isinstance(payload_items, list):
         return ""
-
-    for item in items:
+    for item in payload_items:
         if not isinstance(item, dict):
             continue
         item_category_id = item.get("category_id")

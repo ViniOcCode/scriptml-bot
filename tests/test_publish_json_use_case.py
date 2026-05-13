@@ -122,6 +122,37 @@ def _make_user_products_read_result(
     )
 
 
+def _make_user_products_payload_array_read_result(
+    *,
+    description: str | None = "Descrição do produto",
+    sku: str | None = "ABC-001",
+    entries: list[dict[str, Any]] | None = None,
+    ai_suggested: bool = False,
+) -> ReadPayloadResult:
+    payload_entries = entries or [
+        {
+            "family_name": "Linha Alpha",
+            "category_id": "MLB271599",
+            "price": 50.0,
+            "currency_id": "BRL",
+            "available_quantity": 10,
+            "buying_mode": "buy_it_now",
+            "listing_type_id": "gold_special",
+            "condition": "new",
+            "pictures": [{"source": "https://cdn.ml.com/img.jpg"}],
+            "attributes": [{"id": "BRAND", "value_name": "Marca"}],
+        }
+    ]
+    return ReadPayloadResult(
+        payload={"payload": payload_entries},
+        description=description,
+        sku=sku,
+        category_id="MLB271599",
+        ai_suggested=ai_suggested,
+        upload_mode="user_products",
+    )
+
+
 def _make_read_result_with_variations(
     *,
     variation_prices: list[float],
@@ -735,6 +766,52 @@ class TestPublishJsonUseCase:
         assert second_payload["family_name"] == "Linha Alpha"
         assert second_payload["user_product_id"] == "MLBU123"
         publisher.create_item_description.assert_called_once_with("MLB1", "Descrição do produto")
+
+    def test_publish_user_products_payload_array_sends_separate_requests(
+        self, tmp_path: Path
+    ) -> None:
+        use_case, reader, publisher = _make_use_case()
+        reader.read.return_value = _make_user_products_payload_array_read_result(
+            entries=[
+                {
+                    "family_name": "Linha Alpha",
+                    "category_id": "MLB271599",
+                    "price": 50.0,
+                    "currency_id": "BRL",
+                    "available_quantity": 10,
+                    "buying_mode": "buy_it_now",
+                    "listing_type_id": "gold_special",
+                    "condition": "new",
+                    "pictures": [{"source": "https://cdn.ml.com/img-1.jpg"}],
+                },
+                {
+                    "family_name": "Linha Alpha",
+                    "category_id": "MLB271599",
+                    "price": 60.0,
+                    "currency_id": "BRL",
+                    "available_quantity": 5,
+                    "buying_mode": "buy_it_now",
+                    "listing_type_id": "gold_special",
+                    "condition": "new",
+                    "pictures": [{"source": "https://cdn.ml.com/img-2.jpg"}],
+                },
+            ]
+        )
+        publisher.create_user_product_item.side_effect = [
+            {"id": "MLB1", "user_product_id": "MLBU123"},
+            {"id": "MLB2", "user_product_id": "MLBU123"},
+        ]
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "published"
+        assert publisher.create_user_product_item.call_count == 2
+        first_payload = publisher.create_user_product_item.call_args_list[0].args[0]
+        second_payload = publisher.create_user_product_item.call_args_list[1].args[0]
+        assert "items" not in first_payload
+        assert "payload" not in first_payload
+        assert first_payload["family_name"] == "Linha Alpha"
+        assert second_payload["user_product_id"] == "MLBU123"
 
     def test_publish_user_products_missing_user_product_id_fails_after_first_item(
         self, tmp_path: Path

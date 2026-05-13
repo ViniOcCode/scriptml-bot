@@ -309,6 +309,56 @@ class TestJsonPayloadReader:
         with pytest.raises(InvalidPayloadError, match="items"):
             self.reader.read(path)
 
+    def test_read_user_products_payload_array_via_seller_model(self, tmp_path: Path) -> None:
+        path = _write_payload(
+            tmp_path,
+            {
+                "payload": [
+                    {
+                        "family_name": "Linha Alpha",
+                        "category_id": "MLB271599",
+                        "price": 99.90,
+                        "currency_id": "BRL",
+                        "available_quantity": 10,
+                        "buying_mode": "buy_it_now",
+                        "listing_type_id": "gold_special",
+                        "condition": "new",
+                        "pictures": [{"source": "https://cdn.ml.com/abc.jpg"}],
+                    }
+                ],
+                "_meta": {"publication": {"seller_model": "user_products"}},
+            },
+        )
+        result = self.reader.read(path)
+        assert result.upload_mode == "user_products"
+        assert isinstance(result.payload["payload"], list)
+        assert len(result.payload["payload"]) == 1
+        assert result.category_id == "MLB271599"
+
+    def test_read_user_products_payload_array_requires_family_name_per_item(
+        self, tmp_path: Path
+    ) -> None:
+        path = _write_payload(
+            tmp_path,
+            {
+                "payload": [
+                    {
+                        "category_id": "MLB271599",
+                        "price": 99.90,
+                        "currency_id": "BRL",
+                        "available_quantity": 10,
+                        "buying_mode": "buy_it_now",
+                        "listing_type_id": "gold_special",
+                        "condition": "new",
+                        "pictures": [{"source": "https://cdn.ml.com/abc.jpg"}],
+                    }
+                ],
+                "_meta": {"publication": {"seller_model": "user_products"}},
+            },
+        )
+        with pytest.raises(InvalidPayloadError, match="family_name"):
+            self.reader.read(path)
+
     def test_read_payload_model_mismatch_raises(self, tmp_path: Path) -> None:
         path = _write_payload(
             tmp_path,

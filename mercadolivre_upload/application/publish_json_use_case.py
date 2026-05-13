@@ -51,8 +51,14 @@ def _expand_publish_payloads(payload: dict[str, Any], upload_mode: str) -> list[
     if upload_mode != "user_products":
         return [dict(payload)]
 
-    base_payload = {key: value for key, value in payload.items() if key != "items"}
-    raw_items = payload.get("items", [])
+    base_payload = {
+        key: value
+        for key, value in payload.items()
+        if key not in {"items", "payload", "_meta", "fiscal", "description"}
+    }
+    raw_items = payload.get("payload")
+    if not isinstance(raw_items, list):
+        raw_items = payload.get("items", [])
     if not isinstance(raw_items, list):
         return [base_payload]
 
