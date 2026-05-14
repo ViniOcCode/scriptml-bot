@@ -299,17 +299,23 @@ class TestPublishManifestCommand:
 
     @patch("mercadolivre_upload.cli.app.import_module")
     def test_publish_manifest_delegates_to_command_module(self, mock_import_module):
-        mock_module = MagicMock()
-        mock_import_module.return_value = mock_module
+        mock_runtime_module = MagicMock()
+        mock_runtime_module.resolve_workspace_root.return_value = Path("/tmp/workspace")
+        mock_runtime_module.build_attempt_report_dir.return_value = Path(
+            "/tmp/workspace/cache/report/20260514-010203"
+        )
+        mock_manifest_module = MagicMock()
+        mock_import_module.side_effect = [mock_runtime_module, mock_manifest_module]
 
         with runner.isolated_filesystem():
             Path("run_manifest.json").write_text("{}", encoding="utf-8")
+            Path("config").mkdir()
+            Path("config/publisher.yaml").write_text("seller: {}\n", encoding="utf-8")
             result = runner.invoke(app, ["publish-manifest", "run_manifest.json"])
 
         assert result.exit_code == 0
-        mock_import_module.assert_called_once_with("mercadolivre_upload.cli.commands.publish_manifest")
-        mock_module.publish_manifest.assert_called_once()
-        kwargs = mock_module.publish_manifest.call_args.kwargs
+        mock_manifest_module.publish_manifest.assert_called_once()
+        kwargs = mock_manifest_module.publish_manifest.call_args.kwargs
         assert kwargs["manifest_path"] == Path("run_manifest.json")
         assert kwargs["dry_run"] is False
         assert kwargs["publish_inactive"] is False

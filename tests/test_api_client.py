@@ -97,6 +97,30 @@ def test_validate_user_product_item_raises_when_family_name_is_missing():
     client.validate_item.assert_not_called()
 
 
+def test_validate_existing_user_product_sales_condition_does_not_require_family_name():
+    client = MLApiClient(http_client=MagicMock())
+    client.validate_item = MagicMock(return_value={"cause": []})
+
+    result = client.validate_user_product_item(
+        {
+            "user_product_id": " MLBU123 ",
+            "price": 100.0,
+            "category_id": "MLB1055",
+            "currency_id": "BRL",
+            "buying_mode": "buy_it_now",
+            "listing_type_id": "gold_special",
+            "available_quantity": 1,
+            "attributes": [{"id": "BRAND", "value_name": "Marca"}],
+            "pictures": [{"id": "123"}],
+            "family_name": "Linha Alpha",
+            "title": "Linha Alpha Model X",
+        }
+    )
+
+    assert result == {}
+    client.validate_item.assert_not_called()
+
+
 def test_create_user_product_item_sanitizes_payload_before_create():
     client = MLApiClient(http_client=MagicMock())
     payload = {
@@ -139,6 +163,9 @@ def test_create_user_product_item_routes_sales_condition_when_user_product_id_pr
         "buying_mode": "buy_it_now",
         "listing_type_id": "gold_special",
         "available_quantity": 1,
+        "attributes": [{"id": "BRAND", "value_name": "Marca"}],
+        "pictures": [{"id": "123"}],
+        "domain_id": "MLB-CELLPHONES",
         "condition": "new",
     }
 

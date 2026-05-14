@@ -21,12 +21,16 @@ from mercadolivre_upload.application.ports import ItemPublisherPort
 from mercadolivre_upload.application.validators.seller_policy import SellerPolicyValidator
 from mercadolivre_upload.domain.fiscal.data import FiscalData
 from mercadolivre_upload.domain.fiscal.service import FiscalService
+from mercadolivre_upload.application.publish.internals.validation import (
+    MercadoLivreValidationResult,
+    classify_mercado_livre_validation_response,
+)
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
-class PublishJsonResult:
+class PublishPayloadResult:
     """Result of publishing a single payload.json."""
 
     sku: str | None
@@ -37,6 +41,10 @@ class PublishJsonResult:
     user_product_id: str | None = None
     error: str | None = None
     warnings: list[str] = field(default_factory=list)
+    validation_status: str | None = None
+    validation_report: dict[str, Any] | None = None
+    fiscal_status: str | None = None
+    fiscal_report: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _prefix_message(message: str, index: int, total: int) -> str:
@@ -99,33 +107,12 @@ def _format_ml_api_error(exc: MLApiError) -> str:
     return " | ".join(parts) if parts else str(exc)
 
 
-def _extract_validation_errors(validation: Any) -> list[str]:
-    """Extract blocking Mercado Livre validation errors from a validation response."""
-    if not isinstance(validation, dict):
-        return []
-
-    raw_causes = validation.get("cause", validation.get("causes", []))
-    if isinstance(raw_causes, dict):
-        causes = [raw_causes]
-    elif isinstance(raw_causes, list):
-        causes = [cause for cause in raw_causes if isinstance(cause, dict)]
-    else:
-        causes = []
-
-    errors: list[str] = []
-    for cause in causes:
-        cause_type = str(cause.get("type") or "").lower()
-        if cause_type and cause_type != "error":
-            continue
-        code = str(cause.get("code") or "?")
-        message = str(cause.get("message") or cause)
-        errors.append(f"[{code}] {message}")
-
-    error_value = validation.get("error")
-    message_value = validation.get("message")
-    if error_value and not errors:
-        errors.append(str(message_value or error_value))
-    return errors
+def _format_validation_response(validation: Any) -> str:
+    """Format full validation response for diagnostics."""
+    try:
+        return json.dumps(validation, sort_keys=True)
+    except (TypeError, ValueError):
+        return str(validation)
 
 
 def _normalize_optional_text(value: Any) -> str | None:
@@ -287,7 +274,7 @@ def _apply_attribute_suggestions(
     return result
 
 
-class PublishJsonUseCase:
+class PublishPayloadUseCase:
     """Publishes a single payload.json to Mercado Livre.
 
     Does not know about Excel, Drive, image generation, or category resolution.
@@ -310,7 +297,7 @@ class PublishJsonUseCase:
         self._fiscal_service = fiscal_service
         self._publish_inactive = publish_inactive
 
-    def execute(self, path: Path, *, dry_run: bool = False) -> PublishJsonResult:
+    def execute(self, path: Path, *, dry_run: bool = False) -> PublishPayloadResult:
         """Publish a single payload.json.
 
         Pipeline:
@@ -328,14 +315,14 @@ class PublishJsonUseCase:
             dry_run: When True, validates only — does not call the API.
 
         Returns:
-            PublishJsonResult with status "published", "skipped", or "failed".
+            PublishPayloadResult with status "published", "skipped", or "failed".
         """
         # 1. Read and validate schema
         try:
             read_result = self._reader.read(path)
         except InvalidPayloadError as exc:
             logger.warning("Invalid payload %s: %s", path, exc)
-            return PublishJsonResult(
+            return PublishPayloadResult(
                 sku=None,
                 path=str(path),
                 status="failed",
@@ -350,7 +337,7 @@ class PublishJsonUseCase:
                 else "sem detalhes"
             )
             logger.warning("Publish blocked by publication_ready=False for %s: %s", path, reasons)
-            return PublishJsonResult(
+            return PublishPayloadResult(
                 sku=read_result.sku,
                 path=str(path),
                 status="failed",
@@ -408,7 +395,7 @@ class PublishJsonUseCase:
         if errors:
             error_message = "; ".join(errors)
             logger.warning("Policy errors for %s: %s", path, error_message)
-            return PublishJsonResult(
+            return PublishPayloadResult(
                 sku=read_result.sku,
                 path=str(path),
                 status="failed",
@@ -418,7 +405,7 @@ class PublishJsonUseCase:
 
         # 4. Dry run — skip actual publish
         if dry_run:
-            return PublishJsonResult(
+            return PublishPayloadResult(
                 sku=read_result.sku,
                 path=str(path),
                 status="skipped",
@@ -433,6 +420,8 @@ class PublishJsonUseCase:
             ]
 
         # 5. Validate with Mercado Livre before creating one or more items.
+        aggregate_validation_status = "validation_passed"
+        validation_report: dict[str, Any] | None = None
         for index, publish_payload in enumerate(publish_payloads, start=1):
             try:
                 if read_result.upload_mode == "user_products":
@@ -442,7 +431,7 @@ class PublishJsonUseCase:
             except MLApiError as exc:
                 validation_error = _prefix_message(_format_ml_api_error(exc), index, total_payloads)
                 logger.error("ML API validation rejected %s: %s", path, validation_error)
-                return PublishJsonResult(
+                return PublishPayloadResult(
                     sku=read_result.sku,
                     path=str(path),
                     status="failed",
@@ -452,7 +441,7 @@ class PublishJsonUseCase:
             except Exception as exc:  # noqa: BLE001
                 validation_error = _prefix_message(str(exc), index, total_payloads)
                 logger.error("ML API validation failed for %s: %s", path, validation_error)
-                return PublishJsonResult(
+                return PublishPayloadResult(
                     sku=read_result.sku,
                     path=str(path),
                     status="failed",
@@ -460,20 +449,44 @@ class PublishJsonUseCase:
                     warnings=warnings,
                 )
 
-            validation_errors = _extract_validation_errors(validation)
-            if validation_errors:
+            validation_result: MercadoLivreValidationResult = (
+                classify_mercado_livre_validation_response(validation)
+            )
+            validation_report = validation_result.to_report_dict()
+            if validation_result.status == "validation_passed_with_warnings":
+                aggregate_validation_status = "validation_passed_with_warnings"
+
+            validation_warnings = validation_result.warning_messages()
+            if validation_warnings:
+                warnings.extend(
+                    [
+                        _prefix_message(f"ML validation warning: {warning}", index, total_payloads)
+                        for warning in validation_warnings
+                    ]
+                )
+                logger.warning(
+                    "Validation passed with warnings for %s; continuing publication: %s",
+                    path,
+                    "; ".join(validation_warnings),
+                )
+            if validation_result.should_block:
+                validation_errors = validation_result.error_messages()
                 validation_error = _prefix_message(
-                    "; ".join(validation_errors),
+                    "; ".join(validation_errors) or "Validation failed",
                     index,
                     total_payloads,
                 )
+                validation_response = _format_validation_response(validation)
+                validation_error = f"{validation_error} | response={validation_response}"
                 logger.error("ML API validation errors for %s: %s", path, validation_error)
-                return PublishJsonResult(
+                return PublishPayloadResult(
                     sku=read_result.sku,
                     path=str(path),
                     status="failed",
                     error=validation_error,
                     warnings=warnings,
+                    validation_status=validation_result.status,
+                    validation_report=validation_report,
                 )
 
         # 6. Publish one or more items.
@@ -497,7 +510,7 @@ class PublishJsonUseCase:
             except MLApiError as exc:
                 causes_str = _prefix_message(_format_ml_api_error(exc), index, total_payloads)
                 logger.error("ML API rejected %s: %s", path, causes_str)
-                return PublishJsonResult(
+                return PublishPayloadResult(
                     sku=read_result.sku,
                     path=str(path),
                     status="failed",
@@ -510,7 +523,7 @@ class PublishJsonUseCase:
             except Exception as exc:  # noqa: BLE001
                 error_message = _prefix_message(str(exc), index, total_payloads)
                 logger.error("Failed to publish %s: %s", path, error_message)
-                return PublishJsonResult(
+                return PublishPayloadResult(
                     sku=read_result.sku,
                     path=str(path),
                     status="failed",
@@ -560,7 +573,7 @@ class PublishJsonUseCase:
                     "item[1]: first user-products publish did not return user_product_id"
                 )
                 logger.error("Failed to continue UP publish for %s: %s", path, error_message)
-                return PublishJsonResult(
+                return PublishPayloadResult(
                     sku=read_result.sku,
                     path=str(path),
                     status="failed",
@@ -594,6 +607,7 @@ class PublishJsonUseCase:
 
         # 7. Submit fiscal workflow for each fiscal.items entry.
         fiscal_blocking_errors: list[str] = []
+        fiscal_report: list[dict[str, Any]] = []
         if read_result.fiscal_items:
             if self._fiscal_service is None:
                 fiscal_blocking_errors.append(
@@ -603,6 +617,11 @@ class PublishJsonUseCase:
             else:
                 fallback_payload = publish_payloads[0] if publish_payloads else {}
                 for fiscal_index, fiscal_item in enumerate(read_result.fiscal_items, start=1):
+                    tax_info_raw = (
+                        fiscal_item.get("tax_information")
+                        if isinstance(fiscal_item.get("tax_information"), dict)
+                        else {}
+                    )
                     fiscal_sku = _normalize_optional_text(fiscal_item.get("sku"))
                     target_item_id = first_item_id
                     target_payload = fallback_payload
@@ -620,10 +639,48 @@ class PublishJsonUseCase:
                                 f"{fiscal_index}"
                                 f"]: sku '{fiscal_sku}' não mapeado para item publicado"
                             )
+                            fiscal_report.append(
+                                {
+                                    "index": fiscal_index,
+                                    "item_id": None,
+                                    "sku": fiscal_sku,
+                                    "ncm": tax_info_raw.get("ncm"),
+                                    "raw_origin_type": tax_info_raw.get("origin_type"),
+                                    "normalized_origin_type": None,
+                                    "raw_origin_detail": tax_info_raw.get("origin_detail"),
+                                    "normalized_origin_detail": None,
+                                    "missing_fields": [],
+                                    "validation_errors": [
+                                        "sku não mapeado para item publicado"
+                                    ],
+                                    "api_response": None,
+                                    "published_item_exists": False,
+                                    "final_fiscal_status": "failed",
+                                }
+                            )
                             continue
                     elif len(created_item_ids) > 1:
                         fiscal_blocking_errors.append(
                             f"fiscal[{fiscal_index}]: item fiscal sem sku em publicação multi-item"
+                        )
+                        fiscal_report.append(
+                            {
+                                "index": fiscal_index,
+                                "item_id": None,
+                                "sku": None,
+                                "ncm": tax_info_raw.get("ncm"),
+                                "raw_origin_type": tax_info_raw.get("origin_type"),
+                                "normalized_origin_type": None,
+                                "raw_origin_detail": tax_info_raw.get("origin_detail"),
+                                "normalized_origin_detail": None,
+                                "missing_fields": [],
+                                "validation_errors": [
+                                    "item fiscal sem sku em publicação multi-item"
+                                ],
+                                "api_response": None,
+                                "published_item_exists": False,
+                                "final_fiscal_status": "failed",
+                            }
                         )
                         continue
 
@@ -632,6 +689,25 @@ class PublishJsonUseCase:
                             "fiscal["
                             f"{fiscal_index}"
                             "]: sem item publicado para vincular dados fiscais"
+                        )
+                        fiscal_report.append(
+                            {
+                                "index": fiscal_index,
+                                "item_id": None,
+                                "sku": fiscal_sku,
+                                "ncm": tax_info_raw.get("ncm"),
+                                "raw_origin_type": tax_info_raw.get("origin_type"),
+                                "normalized_origin_type": None,
+                                "raw_origin_detail": tax_info_raw.get("origin_detail"),
+                                "normalized_origin_detail": None,
+                                "missing_fields": [],
+                                "validation_errors": [
+                                    "sem item publicado para vincular dados fiscais"
+                                ],
+                                "api_response": None,
+                                "published_item_exists": False,
+                                "final_fiscal_status": "failed",
+                            }
                         )
                         continue
 
@@ -652,6 +728,33 @@ class PublishJsonUseCase:
                                 fiscal_data,
                                 variation_id=target_variation_id,
                             )
+                        fiscal_report.append(
+                            {
+                                "index": fiscal_index,
+                                "item_id": target_item_id,
+                                "sku": fiscal_data.sku,
+                                "ncm": fiscal_data.ncm,
+                                "raw_origin_type": fiscal_data.raw_origin_type,
+                                "normalized_origin_type": fiscal_data.origin_type,
+                                "raw_origin_detail": fiscal_data.raw_origin_detail,
+                                "normalized_origin_detail": fiscal_data.origin_detail,
+                                "missing_fields": fiscal_data.get_missing_fields(),
+                                "validation_errors": fiscal_data.get_validation_errors(),
+                                "api_response": getattr(fiscal_result, "response", None),
+                                "published_item_exists": True,
+                                "final_fiscal_status": (
+                                    str(
+                                        getattr(
+                                            getattr(fiscal_result, "status", None),
+                                            "value",
+                                            getattr(fiscal_result, "status", None),
+                                        )
+                                    )
+                                    if getattr(fiscal_result, "status", None) is not None
+                                    else "unknown"
+                                ),
+                            }
+                        )
                         if not fiscal_result.success:
                             message = fiscal_result.error_message or "falha no envio fiscal"
                             fiscal_blocking_errors.append(f"fiscal[{fiscal_index}]: {message}")
@@ -665,11 +768,28 @@ class PublishJsonUseCase:
                         fiscal_blocking_errors.append(
                             f"fiscal[{fiscal_index}]: erro inesperado ao enviar dados ({exc})"
                         )
+                        fiscal_report.append(
+                            {
+                                "index": fiscal_index,
+                                "item_id": target_item_id,
+                                "sku": fiscal_sku,
+                                "ncm": tax_info_raw.get("ncm"),
+                                "raw_origin_type": tax_info_raw.get("origin_type"),
+                                "normalized_origin_type": None,
+                                "raw_origin_detail": tax_info_raw.get("origin_detail"),
+                                "normalized_origin_detail": None,
+                                "missing_fields": [],
+                                "validation_errors": [str(exc)],
+                                "api_response": None,
+                                "published_item_exists": True,
+                                "final_fiscal_status": "failed",
+                            }
+                        )
 
         if fiscal_blocking_errors:
             fiscal_error_message = "; ".join(fiscal_blocking_errors)
             logger.error("Fiscal submission failed for %s: %s", path, fiscal_error_message)
-            return PublishJsonResult(
+            return PublishPayloadResult(
                 sku=read_result.sku,
                 path=str(path),
                 status="failed",
@@ -678,9 +798,13 @@ class PublishJsonUseCase:
                 user_product_id=user_product_id,
                 error=fiscal_error_message,
                 warnings=warnings,
+                validation_status=aggregate_validation_status,
+                validation_report=validation_report,
+                fiscal_status="failed",
+                fiscal_report=fiscal_report,
             )
 
-        return PublishJsonResult(
+        return PublishPayloadResult(
             sku=read_result.sku,
             path=str(path),
             status="published",
@@ -688,4 +812,8 @@ class PublishJsonUseCase:
             item_ids=created_item_ids,
             user_product_id=user_product_id,
             warnings=warnings,
+            validation_status=aggregate_validation_status,
+            validation_report=validation_report,
+            fiscal_status="submitted" if read_result.fiscal_items else None,
+            fiscal_report=fiscal_report,
         )

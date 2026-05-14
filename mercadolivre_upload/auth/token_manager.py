@@ -29,6 +29,10 @@ class TokenManager:
     def __init__(
         self,
         token_path: str | None = None,
+        workspace_root: Path | None = None,
+        settings_file: Path | None = None,
+        key_path: Path | None = None,
+        allow_fallback: bool = True,
         oauth_handler: OAuthHandler | None = None,
     ):
         """Initialize the token manager.
@@ -37,11 +41,27 @@ class TokenManager:
             token_path: Path to tokens.json. Defaults to 'tokens.json' in current directory
             oauth_handler: OAuthHandler for token refresh. If None, creates default
         """
-        default_path = (
-            token_path or get_pipeline_env("ML_PIPE_MERCADO_LIVRE_TOKEN_PATH") or "tokens.json"
-        )
+        if not allow_fallback and workspace_root is None and token_path is None:
+            raise AuthError("workspace_root or token_path is required when fallback auth is disabled")
+
+        if not allow_fallback and settings_file is None and oauth_handler is None:
+            raise AuthError("settings_file or oauth_handler is required when fallback auth is disabled")
+
+        if workspace_root is not None:
+            resolved_workspace = Path(workspace_root).expanduser().resolve()
+            default_path = str(resolved_workspace / ".ml_token.enc")
+            encryption_key_path = key_path or resolved_workspace / ".ml_fernet_key"
+        else:
+            default_path = token_path
+            if allow_fallback:
+                default_path = (
+                    default_path or get_pipeline_env("ML_PIPE_MERCADO_LIVRE_TOKEN_PATH") or "tokens.json"
+                )
+            encryption_key_path = key_path
+        if default_path is None:
+            raise AuthError("Token path is required")
         self.token_path = Path(default_path)
-        self.oauth_handler = oauth_handler or OAuthHandler()
+        self.oauth_handler = oauth_handler or OAuthHandler(settings_file=settings_file)
         self._tokens: dict[str, Any] | None = None
         self._secure_storage: SecureTokenStorage | None = None
 
@@ -68,7 +88,10 @@ class TokenManager:
                     )
 
             self.token_path = secure_path
-            self._secure_storage = SecureTokenStorage(token_path=self.token_path)
+            self._secure_storage = SecureTokenStorage(
+                token_path=self.token_path,
+                encryption_key_path=encryption_key_path,
+            )
 
     @classmethod
     def _persistable_tokens(cls, tokens: dict[str, Any]) -> dict[str, Any]:

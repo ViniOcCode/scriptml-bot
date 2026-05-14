@@ -30,6 +30,7 @@ _SECRET_ENV_CANDIDATES: dict[str, tuple[str, ...]] = {
 }
 
 _SECRET_FILE_CANDIDATES: dict[str, tuple[str, ...]] = {
+    "ml_client_id": ("meli_client_id",),
     "ml_client_secret": ("ml_app_secret", "meli_client_secret"),
     "seller7_password": ("seller7_password",),
     "openrouter_api_key": ("openrouter_api_key",),
@@ -520,7 +521,15 @@ def _load_effective_payload(app: Literal["builder", "bot"] | None) -> tuple[dict
     if autodiscovered_settings is not None:
         payload = _coerce_legacy_payload(_read_yaml(autodiscovered_settings), app)
         sources = SettingsSources(mode="canonical", settings_file=autodiscovered_settings)
-        return payload, sources, autodiscovered_settings.parent
+        base_dir = autodiscovered_settings.parent
+        # When config is at <project_root>/config/publisher.yaml, resolve paths relative to project root
+        if (
+            autodiscovered_settings.name == "publisher.yaml"
+            and autodiscovered_settings.parent.name == "config"
+            and autodiscovered_settings.parent.parent == _REPO_ROOT
+        ):
+            base_dir = _REPO_ROOT
+        return payload, sources, base_dir
 
     payload = _packaged_defaults()
     if app == "builder":

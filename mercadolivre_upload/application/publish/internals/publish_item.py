@@ -19,7 +19,11 @@ from .decisioning import (
     register_shipping_causes,
 )
 from .shipping import build_shipping_config
-from .validation import build_validation_cause_taxonomy, get_critical_attribute_warnings
+from .validation import (
+    build_validation_cause_taxonomy,
+    classify_mercado_livre_validation_response,
+    get_critical_attribute_warnings,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -194,6 +198,8 @@ def publish_one(use_case: Any, product: Product, category_id: str) -> bool:
     use_case._current_cause_taxonomy = []
     use_case._current_validation_decision = {}
     use_case._current_validation_repair = {}
+    use_case._current_validation_status = None
+    use_case._current_validation_report = {}
     use_case._current_publish_category_id = category_id
     use_case._current_publish_sku = str(product.sku).strip() if product.sku else None
     use_case._current_variation_reference_attributes = []
@@ -492,6 +498,9 @@ def publish_one(use_case: Any, product: Product, category_id: str) -> bool:
         )
         use_case._current_validation_repair = validation_repair_artifact
         logger.debug("Validation response for %s: %s", product.sku, validation)
+        validation_classification = classify_mercado_livre_validation_response(validation)
+        use_case._current_validation_status = validation_classification.status
+        use_case._current_validation_report = validation_classification.to_report_dict()
 
         raw_causes = validation.get("cause", [])
         causes = [cause for cause in raw_causes if isinstance(cause, dict)]
@@ -503,6 +512,11 @@ def publish_one(use_case: Any, product: Product, category_id: str) -> bool:
             stage="validate",
         )
         cause_taxonomy = build_validation_cause_taxonomy(causes)
+        if validation_classification.should_block and not cause_taxonomy:
+            cause_taxonomy = _build_blocking_taxonomy(
+                "validation.unknown",
+                validation_classification.message or "Validation failed without clear causes.",
+            )
         use_case._current_cause_taxonomy = cause_taxonomy
         use_case._current_cause_codes = list(
             dict.fromkeys(

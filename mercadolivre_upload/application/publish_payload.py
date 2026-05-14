@@ -9,39 +9,39 @@ from typing import Any
 
 from mercadolivre_upload.adapters.json_payload_reader import JsonPayloadReader
 from mercadolivre_upload.api.client import MLApiClient
-from mercadolivre_upload.application.publish_json_use_case import (
-    PublishJsonResult,
-    PublishJsonUseCase,
+from mercadolivre_upload.application.publish_payload_use_case import (
+    PublishPayloadUseCase,
+    PublishPayloadResult,
 )
 from mercadolivre_upload.application.validators.seller_policy import (
-    default_seller_config,
     load_seller_config,
 )
-from mercadolivre_upload.auth import TokenManager
+from mercadolivre_upload.auth.publisher_context import build_publisher_auth_context
 from mercadolivre_upload.domain.fiscal.service import FiscalService
-
-_DEFAULT_SELLER_CONFIG_PATH = Path("config/publisher.yaml")
 
 
 def _build_use_case(
     *,
     publish_inactive: bool = False,
-    seller_config_path: Path | None = None,
-) -> PublishJsonUseCase:
+    seller_config_path: Path,
+    workspace_root: Path,
+) -> PublishPayloadUseCase:
     """Wire the JSON publish use case with the normal scriptml-bot infrastructure."""
     from mercadolivre_upload.application.validators.seller_policy import SellerPolicyValidator
 
-    config_path = seller_config_path or _DEFAULT_SELLER_CONFIG_PATH
-    if config_path.exists():
-        seller_config = load_seller_config(config_path)
-    else:
-        seller_config = default_seller_config()
+    config_path = Path(seller_config_path).expanduser().resolve()
+    seller_config = load_seller_config(config_path)
 
     reader = JsonPayloadReader()
-    auth_manager = TokenManager()
+    auth_context = build_publisher_auth_context(
+        settings_file=config_path,
+        workspace_root=workspace_root,
+        strict=True,
+    )
+    auth_manager = auth_context.token_manager
     api_client = MLApiClient(auth_manager)
     fiscal_service = FiscalService(api_client)
-    return PublishJsonUseCase(
+    return PublishPayloadUseCase(
         reader=reader,
         policy=SellerPolicyValidator(seller_config),
         publisher=api_client,
@@ -50,7 +50,7 @@ def _build_use_case(
     )
 
 
-def _result_to_dict(result: PublishJsonResult, *, report_path: Path | None = None) -> dict[str, Any]:
+def _result_to_dict(result: PublishPayloadResult, *, report_path: Path | None = None) -> dict[str, Any]:
     """Convert the existing result dataclass into the public structured response."""
     errors = [result.error] if result.error else []
     return {
@@ -61,6 +61,10 @@ def _result_to_dict(result: PublishJsonResult, *, report_path: Path | None = Non
         "user_product_id": result.user_product_id,
         "errors": errors,
         "warnings": result.warnings,
+        "validation_status": result.validation_status,
+        "validation_report": result.validation_report,
+        "fiscal_status": result.fiscal_status,
+        "fiscal_report": result.fiscal_report,
         "report_path": str(report_path) if report_path is not None else None,
     }
 
@@ -72,7 +76,7 @@ def _failure(
     report_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Return a structured failure, optionally writing it to the report directory."""
-    result = PublishJsonResult(
+    result = PublishPayloadResult(
         sku=None,
         path=str(payload_path),
         status="failed",
@@ -82,11 +86,11 @@ def _failure(
     return _result_to_dict(result, report_path=report_path)
 
 
-def _write_report(results: list[PublishJsonResult], report_dir: Path) -> Path:
+def _write_report(results: list[PublishPayloadResult], report_dir: Path) -> Path:
     """Write a JSON payload publish report and return the created path."""
     report_dir.mkdir(parents=True, exist_ok=True)
     run_id = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-    report_path = report_dir / f"publish-payload-summary-{run_id}.json"
+    report_path = report_dir / "report.json"
 
     published = [r for r in results if r.status == "published"]
     failed = [r for r in results if r.status == "failed"]
@@ -110,6 +114,10 @@ def _write_report(results: list[PublishJsonResult], report_dir: Path) -> Path:
                 "user_product_id": result.user_product_id,
                 "error": result.error,
                 "warnings": result.warnings,
+                "validation_status": result.validation_status,
+                "validation_report": result.validation_report,
+                "fiscal_status": result.fiscal_status,
+                "fiscal_report": result.fiscal_report,
             }
             for result in results
         ],
@@ -124,7 +132,8 @@ def publish_payload_file(
     report_dir: Path | None = None,
     dry_run: bool = False,
     publish_inactive: bool = False,
-    seller_config_path: Path | None = None,
+    seller_config_path: Path,
+    workspace_root: Path,
 ) -> dict[str, Any]:
     """Publish a ready-made payload JSON file produced by ml-builder.
 
@@ -172,6 +181,7 @@ def publish_payload_file(
     use_case = _build_use_case(
         publish_inactive=publish_inactive,
         seller_config_path=seller_config_path,
+        workspace_root=workspace_root,
     )
     result = use_case.execute(path, dry_run=dry_run)
     report_path = _write_report([result], report_dir) if report_dir is not None else None

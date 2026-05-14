@@ -1,9 +1,12 @@
 """OAuth handler for Mercado Livre API authentication."""
 
+import os
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
 import requests
+import yaml
 
 from mercadolivre_upload.infrastructure.env import get_pipeline_env
 from mercadolivre_upload.infrastructure.http import ResilientHTTPClient, RetryPolicy
@@ -11,6 +14,47 @@ from mercadolivre_upload.infrastructure.http import ResilientHTTPClient, RetryPo
 from .exceptions import OAuthError
 
 TOKEN_REQUEST_RETRY_POLICY = RetryPolicy(max_retries=1, base_delay=0.5, max_delay=5.0)
+
+
+def _discover_publisher_config_path(settings_file: Path | None = None) -> Path | None:
+    if settings_file is not None:
+        candidate = settings_file.expanduser().resolve()
+        return candidate if candidate.exists() else None
+    explicit = os.getenv("ML_PUBLISHER_SETTINGS_FILE")
+    if explicit:
+        candidate = Path(explicit.strip()).expanduser()
+        return candidate if candidate.exists() else None
+    default = Path("config/publisher.yaml")
+    return default if default.exists() else None
+
+
+def _load_publisher_auth_defaults(settings_file: Path | None = None) -> tuple[str | None, str | None]:
+    client_id: str | None = None
+    secret: str | None = None
+
+    config_path = _discover_publisher_config_path(settings_file)
+    if config_path is not None:
+        try:
+            payload = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError):
+            payload = {}
+        if isinstance(payload, dict):
+            auth = payload.get("auth")
+            if isinstance(auth, dict):
+                raw_id = auth.get("ml_app_id", auth.get("ml_client_id"))
+                if isinstance(raw_id, str) and raw_id.strip():
+                    client_id = raw_id.strip()
+
+    if config_path is not None and config_path.parent.name == "config":
+        secret_path = (config_path.parent.parent / "secrets" / "ml_app_secret").resolve()
+    else:
+        secret_path = Path("./secrets/ml_app_secret")
+    if secret_path.exists():
+        raw_secret = secret_path.read_text(encoding="utf-8").strip()
+        if raw_secret:
+            secret = raw_secret
+
+    return client_id, secret
 
 
 class OAuthHandler:
@@ -33,6 +77,7 @@ class OAuthHandler:
         client_id: str | None = None,
         client_secret: str | None = None,
         redirect_uri: str | None = None,
+        settings_file: Path | None = None,
         http_client: ResilientHTTPClient | None = None,
     ):
         """Initialize the OAuth handler.
@@ -43,9 +88,14 @@ class OAuthHandler:
             redirect_uri: OAuth redirect URI. Defaults to env var.
             http_client: Optional resilient HTTP client for token requests.
         """
-        self.client_id = client_id or get_pipeline_env("ML_PIPE_MERCADO_LIVRE_CLIENT_ID")
-        self.client_secret = client_secret or get_pipeline_env(
-            "ML_PIPE_MERCADO_LIVRE_CLIENT_SECRET"
+        default_client_id, default_client_secret = _load_publisher_auth_defaults(settings_file)
+        self.client_id = (
+            client_id or default_client_id or get_pipeline_env("ML_PIPE_MERCADO_LIVRE_CLIENT_ID")
+        )
+        self.client_secret = (
+            client_secret
+            or default_client_secret
+            or get_pipeline_env("ML_PIPE_MERCADO_LIVRE_CLIENT_SECRET")
         )
         self.redirect_uri = redirect_uri or get_pipeline_env(
             "ML_PIPE_MERCADO_LIVRE_REDIRECT_URI",

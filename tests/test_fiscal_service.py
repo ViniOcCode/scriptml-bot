@@ -157,6 +157,29 @@ def test_submit_workflow_fails_fast_for_invalid_fiscal_data():
     api_client.verify_invoice_readiness.assert_not_called()
 
 
+def test_submit_workflow_fails_fast_for_invalid_origin_type():
+    api_client = MagicMock()
+    service = FiscalService(api_client=api_client)
+    invalid_fiscal_data = FiscalData(
+        sku="SKU-123",
+        title="Produto Teste",
+        type="single",
+        measurement_unit="UN",
+        cost=10.0,
+        ncm="39263000",
+        origin_type="desconhecido",
+        origin_detail="2",
+    )
+
+    result = service.submit_fiscal_data_workflow("MLB123", invalid_fiscal_data)
+
+    assert result.success is False
+    assert result.status == FiscalSubmissionStatus.SKIPPED
+    assert result.error_code == "INVALID_FISCAL_DATA"
+    assert "origin_type inválido" in (result.error_message or "")
+    api_client.check_fiscal_data_exists.assert_not_called()
+
+
 def test_submit_workflow_checks_fiscal_existence_only_once():
     api_client = MagicMock()
     api_client.check_fiscal_data_exists.return_value = (False, None)
@@ -209,7 +232,11 @@ def test_load_fiscal_config_uses_shared_yaml_loader(monkeypatch):
     config = fiscal_data_module._load_fiscal_config()
 
     assert config == {"fiscal_defaults": {"type": "single"}}
-    loader.assert_called_once_with(Path("config/fiscal_config.yaml"))
+    loader.assert_called_once()
+    call = loader.call_args
+    assert call is not None
+    assert call.args[0] == Path("config/fiscal_config.yaml")
+    assert call.kwargs.get("fallback") == fiscal_data_module._APP_FISCAL_CONFIG_FALLBACK_PATH
 
 
 def test_load_fiscal_config_returns_empty_dict_on_yaml_error(monkeypatch):
@@ -298,6 +325,95 @@ def test_fiscal_data_requires_positive_cost():
 
     assert fiscal_data.is_valid is False
     assert "cost" in fiscal_data.get_missing_fields()
+
+
+def test_fiscal_data_preserves_canonical_origin_type_reseller():
+    fiscal_data = FiscalData(
+        sku="SKU-123",
+        title="Produto Teste",
+        type="single",
+        measurement_unit="UN",
+        cost=10.0,
+        ncm="39263000",
+        origin_type="reseller",
+        origin_detail="2",
+    )
+
+    assert fiscal_data.origin_type == "reseller"
+    assert fiscal_data.raw_origin_type == "reseller"
+    assert "origin_type" not in fiscal_data.get_missing_fields()
+    assert not any("origin_type inválido" in error for error in fiscal_data.get_validation_errors())
+
+
+def test_fiscal_data_maps_revendedor_label_to_reseller():
+    fiscal_data = FiscalData(
+        sku="SKU-123",
+        title="Produto Teste",
+        type="single",
+        measurement_unit="UN",
+        cost=10.0,
+        ncm="39263000",
+        origin_type="Revendedor",
+        origin_detail="2",
+    )
+
+    assert fiscal_data.origin_type == "reseller"
+    assert fiscal_data.raw_origin_type == "Revendedor"
+
+
+def test_fiscal_data_unknown_origin_type_is_invalid_and_not_blank():
+    fiscal_data = FiscalData(
+        sku="SKU-123",
+        title="Produto Teste",
+        type="single",
+        measurement_unit="UN",
+        cost=10.0,
+        ncm="39263000",
+        origin_type="valor_desconhecido",
+        origin_detail="2",
+    )
+
+    assert fiscal_data.origin_type == "valor_desconhecido"
+    assert fiscal_data.raw_origin_type == "valor_desconhecido"
+    assert "origin_type" not in fiscal_data.get_missing_fields()
+    assert any("origin_type inválido" in error for error in fiscal_data.get_validation_errors())
+
+
+def test_fiscal_data_does_not_override_non_empty_origin_type_with_blank_default():
+    with patch(
+        "mercadolivre_upload.domain.fiscal.data._load_fiscal_defaults",
+        return_value={"origin_type": "", "type": "single", "measurement_unit": "UN"},
+    ), patch(
+        "mercadolivre_upload.domain.fiscal.data._load_field_value_mappings",
+        return_value={},
+    ):
+        fiscal_data = FiscalData(
+            sku="SKU-123",
+            title="Produto Teste",
+            cost=10.0,
+            ncm="39263000",
+            origin_type="reseller",
+            origin_detail="2",
+        )
+
+    assert fiscal_data.origin_type == "reseller"
+
+
+def test_fiscal_data_uses_valid_non_empty_default_origin_type_when_missing():
+    with patch(
+        "mercadolivre_upload.domain.fiscal.data._load_fiscal_defaults",
+        return_value={"origin_type": "reseller", "type": "single", "measurement_unit": "UN"},
+    ):
+        fiscal_data = FiscalData(
+            sku="SKU-123",
+            title="Produto Teste",
+            cost=10.0,
+            ncm="39263000",
+            origin_type="",
+            origin_detail="2",
+        )
+
+    assert fiscal_data.origin_type == "reseller"
 
 
 def test_submit_batch_continues_when_one_item_raises_unexpected_error():

@@ -125,7 +125,7 @@ def load_seller_config(path: Path) -> SellerConfig:
 
     # Support both top-level keys and nested under "seller:", but forbid mixed top-level ownership.
     if "seller" in raw:
-        extra_top_level = sorted(set(raw.keys()) - {"seller"})
+        extra_top_level = sorted(set(raw.keys()) - {"seller", "auth", "runtime", "shared"})
         if extra_top_level:
             raise ValueError(
                 "Publisher config contains unsupported top-level fields: "

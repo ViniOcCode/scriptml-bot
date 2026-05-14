@@ -115,6 +115,69 @@ def test_validation_only_mode_persists_informational_warning_taxonomy() -> None:
     assert item_result["cause_codes"] == ["item.pictures.without_main"]
     assert item_result["cause_taxonomy"][0]["classification"] == "informational_warning"
     assert item_result["validation_decision"]["action"] == "allow"
+    assert item_result["validation_status"] == "validation_passed_with_warnings"
+    assert item_result["validation_report"]["warnings"][0]["code"] == "item.pictures.without_main"
+
+
+def test_publish_mode_continues_to_publish_on_warning_only_validation() -> None:
+    publisher = _ValidationPublisher(
+        causes=[
+            {
+                "type": "warning",
+                "code": "item.shipping.mandatory_free_shipping",
+                "message": "Mandatory free shipping added.",
+            }
+        ]
+    )
+    use_case = PublishProductUseCase(
+        category_resolver=_ValidationResolver(),  # type: ignore[arg-type]
+        publisher=publisher,  # type: ignore[arg-type]
+        image_uploader=_ImageUploader(),  # type: ignore[arg-type]
+        config=_base_config(),
+        validation_only=False,
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+
+    result = use_case.execute([_build_product()], "MLB1234")
+
+    assert result["success"] is True
+    assert len(publisher.created_items) == 1
+    item_result = result["item_results"][0]
+    assert item_result["status"] == "success"
+    assert item_result["validation_status"] == "validation_passed_with_warnings"
+    assert (
+        item_result["validation_report"]["warnings"][0]["code"]
+        == "item.shipping.mandatory_free_shipping"
+    )
+
+
+def test_publish_mode_blocks_on_mixed_warning_and_error_validation() -> None:
+    publisher = _ValidationPublisher(
+        causes=[
+            {"type": "warning", "code": "shipping.lost_me1_by_user", "message": "warn"},
+            {"type": "error", "code": "item.price.invalid", "message": "bad price"},
+        ]
+    )
+    use_case = PublishProductUseCase(
+        category_resolver=_ValidationResolver(),  # type: ignore[arg-type]
+        publisher=publisher,  # type: ignore[arg-type]
+        image_uploader=_ImageUploader(),  # type: ignore[arg-type]
+        config=_base_config(),
+        validation_only=False,
+        enable_feedback=False,
+        enable_fiscal_submission=False,
+    )
+
+    result = use_case.execute([_build_product()], "MLB1234")
+
+    assert result["success"] is False
+    assert publisher.created_items == []
+    item_result = result["item_results"][0]
+    assert item_result["status"] == "failed"
+    assert item_result["validation_status"] == "validation_failed"
+    assert item_result["validation_report"]["warnings"][0]["code"] == "shipping.lost_me1_by_user"
+    assert item_result["validation_report"]["errors"][0]["code"] == "item.price.invalid"
 
 
 def test_validation_only_mode_marks_retryable_error_in_controlled_mode() -> None:

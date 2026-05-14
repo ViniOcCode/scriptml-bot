@@ -15,7 +15,9 @@ def validate_item(client: "MLApiClient", item: dict[str, Any]) -> dict[str, Any]
 def validate_user_product_item(client: "MLApiClient", item: dict[str, Any]) -> dict[str, Any]:
     """Validate user-products payload using current MVP endpoint routing."""
     payload = client._sanitize_user_product_item_payload(item)
-    payload.pop("user_product_id", None)
+    user_product_id = payload.pop("user_product_id", None)
+    if isinstance(user_product_id, str) and user_product_id.strip():
+        return {}
     return client.validate_item(payload)
 
 

@@ -1,4 +1,4 @@
-"""Tests for PublishJsonUseCase."""
+"""Tests for PublishPayloadUseCase."""
 
 from __future__ import annotations
 
@@ -15,8 +15,8 @@ from mercadolivre_upload.adapters.json_payload_reader import (
     JsonPayloadReader,
     ReadPayloadResult,
 )
-from mercadolivre_upload.application.publish_json_use_case import (
-    PublishJsonUseCase,
+from mercadolivre_upload.application.publish_payload_use_case import (
+    PublishPayloadUseCase,
 )
 from mercadolivre_upload.application.validators.seller_policy import (
     BatchConfig,
@@ -185,17 +185,19 @@ def _make_use_case(
     config: SellerConfig | None = None,
     fiscal_service: Any | None = None,
     publish_inactive: bool = False,
-) -> tuple[PublishJsonUseCase, MagicMock, MagicMock]:
+) -> tuple[PublishPayloadUseCase, MagicMock, MagicMock]:
     reader = MagicMock(spec=JsonPayloadReader)
     cfg = config or _make_seller_config()
     policy = SellerPolicyValidator(cfg)
     publisher = MagicMock()
+    publisher.validate_item.return_value = {}
+    publisher.validate_user_product_item.return_value = {}
     publisher.create_item.return_value = {"id": "MLB987654321"}
     publisher.create_user_product_item.return_value = {
         "id": "MLB987654321",
         "user_product_id": "MLBU123456",
     }
-    use_case = PublishJsonUseCase(
+    use_case = PublishPayloadUseCase(
         reader=reader,
         policy=policy,
         publisher=publisher,
@@ -205,7 +207,7 @@ def _make_use_case(
     return use_case, reader, publisher
 
 
-class TestPublishJsonUseCase:
+class TestPublishPayloadUseCase:
     def test_publish_sucesso(self, tmp_path: Path) -> None:
         use_case, reader, publisher = _make_use_case()
         reader.read.return_value = _make_read_result()
@@ -232,6 +234,83 @@ class TestPublishJsonUseCase:
         assert result.status == "failed"
         assert result.error is not None
         assert "item.title.required" in result.error
+        publisher.create_item.assert_not_called()
+
+    def test_publish_continues_when_validation_has_only_warning_causes(self, tmp_path: Path) -> None:
+        use_case, reader, publisher = _make_use_case()
+        reader.read.return_value = _make_read_result()
+        publisher.validate_item.return_value = {
+            "error": "validation_error",
+            "status": 400,
+            "cause": [
+                {
+                    "code": "shipping.lost_me1_by_user",
+                    "type": "warning",
+                    "department": "shipping",
+                    "message": "User has not mode me1",
+                    "references": ["item.shipping.mode"],
+                }
+            ],
+        }
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "published"
+        assert result.item_id == "MLB987654321"
+        assert result.validation_status == "validation_passed_with_warnings"
+        assert result.validation_report is not None
+        assert result.validation_report["warnings"][0]["code"] == "shipping.lost_me1_by_user"
+        assert any("shipping.lost_me1_by_user" in warning for warning in result.warnings)
+        publisher.create_item.assert_called_once()
+
+    def test_publish_continues_when_validation_has_mandatory_free_shipping_warning(
+        self, tmp_path: Path
+    ) -> None:
+        use_case, reader, publisher = _make_use_case()
+        reader.read.return_value = _make_read_result()
+        publisher.validate_item.return_value = {
+            "error": "validation_error",
+            "status": 400,
+            "cause": [
+                {
+                    "code": "item.shipping.mandatory_free_shipping",
+                    "type": "warning",
+                    "department": "shipping",
+                    "message": "Mandatory free shipping added",
+                    "references": ["item.shipping.free_shipping"],
+                }
+            ],
+        }
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "published"
+        assert result.item_id == "MLB987654321"
+        assert result.validation_status == "validation_passed_with_warnings"
+        assert any("item.shipping.mandatory_free_shipping" in warning for warning in result.warnings)
+        publisher.create_item.assert_called_once()
+
+    def test_publish_blocks_when_validation_has_warning_and_error(self, tmp_path: Path) -> None:
+        use_case, reader, publisher = _make_use_case()
+        reader.read.return_value = _make_read_result()
+        publisher.validate_item.return_value = {
+            "error": "validation_error",
+            "status": 400,
+            "cause": [
+                {"code": "shipping.lost_me1_by_user", "type": "warning", "message": "warn"},
+                {"code": "item.title.required", "type": "error", "message": "titulo"},
+            ],
+        }
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "failed"
+        assert result.validation_status == "validation_failed"
+        assert result.validation_report is not None
+        assert result.validation_report["warnings"][0]["code"] == "shipping.lost_me1_by_user"
+        assert result.validation_report["errors"][0]["code"] == "item.title.required"
+        assert "item.title.required" in (result.error or "")
+        assert any("shipping.lost_me1_by_user" in warning for warning in result.warnings)
         publisher.create_item.assert_not_called()
 
     def test_publish_dry_run(self, tmp_path: Path) -> None:
@@ -340,12 +419,21 @@ class TestPublishJsonUseCase:
         fiscal_data = call_args[1]
         assert fiscal_data.sku == "ABC-001"
         assert fiscal_data.ncm == "90183929"
+        assert fiscal_data.origin_type == "reseller"
+        assert result.fiscal_status == "submitted"
+        assert result.fiscal_report[0]["item_id"] == "MLB987654321"
+        assert result.fiscal_report[0]["raw_origin_type"] == "reseller"
+        assert result.fiscal_report[0]["normalized_origin_type"] == "reseller"
+        assert result.fiscal_report[0]["raw_origin_detail"] == "0"
+        assert result.fiscal_report[0]["normalized_origin_detail"] == "0"
 
     def test_publish_fiscal_com_falha_bloqueia_resultado(self, tmp_path: Path) -> None:
         fiscal_service = MagicMock()
         fiscal_service.submit_fiscal_data_workflow.return_value = SimpleNamespace(
             success=False,
             error_message="sku não encontrado",
+            response={"error_code": "10086"},
+            status=SimpleNamespace(value="failed"),
         )
         use_case, reader, _publisher = _make_use_case(fiscal_service=fiscal_service)
         reader.read.return_value = _make_read_result(
@@ -369,6 +457,11 @@ class TestPublishJsonUseCase:
         assert result.status == "failed"
         assert "fiscal[1]" in (result.error or "")
         assert "sku não encontrado" in (result.error or "")
+        assert result.item_id == "MLB987654321"
+        assert result.fiscal_status == "failed"
+        assert result.fiscal_report[0]["published_item_exists"] is True
+        assert result.fiscal_report[0]["api_response"] == {"error_code": "10086"}
+        assert result.fiscal_report[0]["final_fiscal_status"] == "failed"
 
     def test_publish_fiscal_up_mapeia_por_sku_independente_da_ordem(self, tmp_path: Path) -> None:
         fiscal_service = MagicMock()
@@ -813,6 +906,53 @@ class TestPublishJsonUseCase:
         assert first_payload["family_name"] == "Linha Alpha"
         assert second_payload["user_product_id"] == "MLBU123"
 
+    def test_publish_user_products_continues_when_validation_has_only_warning(
+        self, tmp_path: Path
+    ) -> None:
+        use_case, reader, publisher = _make_use_case()
+        reader.read.return_value = _make_user_products_read_result()
+        publisher.validate_user_product_item.return_value = {
+            "error": "validation_error",
+            "status": 400,
+            "cause": [
+                {
+                    "type": "warning",
+                    "code": "shipping.lost_me1_by_user",
+                    "message": "warn",
+                    "department": "shipping",
+                }
+            ],
+        }
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "published"
+        assert result.validation_status == "validation_passed_with_warnings"
+        assert result.validation_report is not None
+        assert result.validation_report["warnings"][0]["code"] == "shipping.lost_me1_by_user"
+        publisher.create_user_product_item.assert_called_once()
+
+    def test_publish_user_products_blocks_when_validation_has_warning_and_error(
+        self, tmp_path: Path
+    ) -> None:
+        use_case, reader, publisher = _make_use_case()
+        reader.read.return_value = _make_user_products_read_result()
+        publisher.validate_user_product_item.return_value = {
+            "error": "validation_error",
+            "status": 400,
+            "cause": [
+                {"type": "warning", "code": "shipping.lost_me1_by_user", "message": "warn"},
+                {"type": "error", "code": "item.title.required", "message": "erro"},
+            ],
+        }
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "failed"
+        assert result.validation_status == "validation_failed"
+        assert "item.title.required" in (result.error or "")
+        publisher.create_user_product_item.assert_not_called()
+
     def test_publish_user_products_missing_user_product_id_fails_after_first_item(
         self, tmp_path: Path
     ) -> None:
@@ -880,8 +1020,8 @@ class TestSellerPolicyVariations:
         assert violations.has_errors
 
 
-class TestPublishJsonApiErrors:
-    """PublishJsonUseCase must surface ML API cause codes in PublishJsonResult.error."""
+class TestPublishPayloadApiErrors:
+    """PublishPayloadUseCase must surface ML API cause codes in PublishPayloadResult.error."""
 
     def test_400_with_ml_causes_formats_error_field(self, tmp_path: Path) -> None:
         """MLApiError causes must be formatted into result.error as [code] message."""
@@ -928,7 +1068,7 @@ class TestPublishJsonApiErrors:
 
 
 class TestPublishInactiveFlag:
-    """PublishJsonUseCase must pause items after creation when publish_inactive=True."""
+    """PublishPayloadUseCase must pause items after creation when publish_inactive=True."""
 
     def test_publish_inactive_true_calls_update_item(self, tmp_path: Path) -> None:
         """publish_inactive=True triggers update_item({status: paused}) after creation."""

@@ -10,6 +10,7 @@ import logging
 import math
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -17,6 +18,9 @@ import yaml
 from mercadolivre_upload.shared.utils.config_loader import FISCAL_CONFIG_PATH, load_yaml_config
 
 logger = logging.getLogger(__name__)
+
+_CANONICAL_ORIGIN_TYPES: frozenset[str] = frozenset({"manufacturer", "reseller", "imported"})
+_APP_FISCAL_CONFIG_FALLBACK_PATH = Path(__file__).resolve().parents[3] / "config/fiscal_config.yaml"
 
 
 def _is_blank_value(value: Any) -> bool:
@@ -56,7 +60,7 @@ def _load_fiscal_config() -> dict[str, Any]:
         Full fiscal configuration dictionary
     """
     try:
-        return load_yaml_config(FISCAL_CONFIG_PATH)
+        return load_yaml_config(FISCAL_CONFIG_PATH, fallback=_APP_FISCAL_CONFIG_FALLBACK_PATH)
     except (OSError, yaml.YAMLError) as exc:
         logger.warning("Could not load fiscal config: %s. Using empty config.", exc)
         return {}
@@ -147,6 +151,8 @@ class FiscalData:
 
     # Additional attributes storage
     attributes: dict[str, Any] = field(default_factory=dict)
+    raw_origin_type: str = ""
+    raw_origin_detail: str = ""
 
     def __post_init__(self) -> None:
         """Normalize fiscal data using config defaults and value mappings."""
@@ -170,21 +176,29 @@ class FiscalData:
         # Sanitize origin_type using config-driven value mappings
         # ML API expects: "manufacturer", "reseller", or "imported"
         origin_type_str = str(self.origin_type).strip() if self.origin_type else ""
+        self.raw_origin_type = origin_type_str
         origin_type_mappings = _load_field_value_mappings("origin_type")
         mapped_origin_type = origin_type_mappings.get(origin_type_str.lower(), "")
         if mapped_origin_type:
             self.origin_type = mapped_origin_type
+        elif origin_type_str.lower() in _CANONICAL_ORIGIN_TYPES:
+            self.origin_type = origin_type_str.lower()
         elif not origin_type_str:
-            self.origin_type = defaults.get("origin_type", "")
+            origin_type_default = str(defaults.get("origin_type", "") or "").strip().lower()
+            if origin_type_default in _CANONICAL_ORIGIN_TYPES:
+                self.origin_type = origin_type_default
+            else:
+                self.origin_type = ""
         else:
             logger.warning(
                 f"Unmapped origin_type value: '{origin_type_str}'. "
-                f"Using config default: '{defaults.get('origin_type', '')}'"
+                "keeping raw value for explicit validation failure."
             )
-            self.origin_type = defaults.get("origin_type", "")
+            self.origin_type = origin_type_str
 
         # Sanitize origin_detail: extract digit 0-8 from strings like "0 - NACIONAL..."
         origin_detail_str = str(self.origin_detail).strip() if self.origin_detail else ""
+        self.raw_origin_detail = origin_detail_str
         if origin_detail_str:
             # Try config-driven value mappings first
             origin_detail_mappings = _load_field_value_mappings("origin_detail")
@@ -194,13 +208,17 @@ class FiscalData:
             else:
                 # Extract leading digit from format like "0 - NACIONAL..."
                 match = re.match(r"^(\d)", origin_detail_str)
-                if match:
+                if match and match.group(1) in {"0", "1", "2", "3", "4", "5", "6", "7", "8"}:
                     self.origin_detail = match.group(1)
                 else:
                     logger.warning(
                         f"Could not extract origin_detail digit from: '{origin_detail_str}'"
                     )
-                    self.origin_detail = ""
+                    self.origin_detail = origin_detail_str
+        elif defaults.get("origin_detail"):
+            default_origin_detail = str(defaults.get("origin_detail") or "").strip()
+            if re.fullmatch(r"[0-8]", default_origin_detail):
+                self.origin_detail = default_origin_detail
 
         # Sanitize CSOSN: extract numeric prefix from "102 - TRIBUTADA..."
         csosn_str = _normalize_optional_text(self.csosn)
@@ -318,6 +336,18 @@ class FiscalData:
                 message = str(validation.get("message", "")).strip()
                 errors.append(message or f"Invalid value for {field_name}: {field_value}")
 
+        if self.origin_type and self.origin_type.lower() not in _CANONICAL_ORIGIN_TYPES:
+            accepted = ", ".join(sorted(_CANONICAL_ORIGIN_TYPES))
+            errors.append(
+                "origin_type inválido: "
+                f"'{self.origin_type}'. Valores aceitos: {accepted}."
+            )
+        if self.origin_detail and not re.fullmatch(r"[0-8]", str(self.origin_detail)):
+            errors.append(
+                "origin_detail inválido: "
+                f"'{self.origin_detail}'. Valores aceitos: 0,1,2,3,4,5,6,7,8."
+            )
+
         if self.origin_detail in {"3", "5", "8"} and not self.fci:
             errors.append("FCI é obrigatório quando origin_detail for 3, 5 ou 8")
 
@@ -395,6 +425,8 @@ class FiscalData:
             "ncm": self.ncm,
             "origin_type": self.origin_type,
             "origin_detail": self.origin_detail,
+            "raw_origin_type": self.raw_origin_type,
+            "raw_origin_detail": self.raw_origin_detail,
             "cest": self.cest,
             "csosn": self.csosn,
             "tax_rule_id": self.tax_rule_id,

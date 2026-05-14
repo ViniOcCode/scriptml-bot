@@ -3,6 +3,18 @@
 #
 # Publisher-owned settings for manifest/payload publishing policy.
 
+auth:
+  # Client ID from Mercado Livre Developer Portal
+  # https://developers.mercadolivre.com.br/
+  # Can also be stored in ./secrets/meli_client_id
+  ml_client_id: ""
+
+  # Client Secret - can also be stored in ./secrets/meli_client_secret
+  ml_client_secret: ""
+
+runtime:
+  workspace_root: "./workspace"
+
 seller:
   listing:
     allowed_types:

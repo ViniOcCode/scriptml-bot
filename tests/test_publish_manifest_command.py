@@ -69,7 +69,11 @@ def _manifest_payload(
 def test_publish_manifest_rejects_blocked_runs(tmp_path: Path) -> None:
     manifest_path = _manifest_payload(tmp_path, blocking_issues=["SKU-1: blocked"])
     with pytest.raises(typer.Exit) as exc:
-        publish_manifest(manifest_path, report_dir=tmp_path / "reports")
+        publish_manifest(
+            manifest_path,
+            workspace_root=tmp_path,
+            report_dir=tmp_path / "reports",
+        )
     assert exc.value.exit_code == 1
 
 
@@ -88,6 +92,7 @@ def test_publish_manifest_publishes_done_artifacts(tmp_path: Path, monkeypatch) 
 
     publish_manifest(
         manifest_path,
+        workspace_root=tmp_path,
         report_dir=tmp_path / "reports",
         seller_config=tmp_path / "publisher.yaml",
     )
@@ -95,8 +100,8 @@ def test_publish_manifest_publishes_done_artifacts(tmp_path: Path, monkeypatch) 
     assert len(calls) == 1
     assert calls[0][0].name == "payload.json"
     assert calls[0][1]["seller_config_path"] == tmp_path / "publisher.yaml"
-    report_files = list((tmp_path / "reports").glob("publish-manifest-summary-*.json"))
-    assert len(report_files) == 1
+    assert calls[0][1]["workspace_root"] == tmp_path
+    assert (tmp_path / "reports" / "report.json").exists()
 
 
 def test_publish_manifest_rejects_payload_path_escape(tmp_path: Path, monkeypatch) -> None:
@@ -124,11 +129,12 @@ def test_publish_manifest_rejects_payload_path_escape(tmp_path: Path, monkeypatc
     with pytest.raises(typer.Exit) as exc:
         publish_manifest(
             manifest_path,
+            workspace_root=tmp_path,
             report_dir=tmp_path / "reports",
             seller_config=tmp_path / "publisher.yaml",
         )
     assert exc.value.exit_code == 1
-    report_file = next((tmp_path / "reports").glob("publish-manifest-summary-*.json"))
+    report_file = tmp_path / "reports" / "report.json"
     report = json.loads(report_file.read_text(encoding="utf-8"))
     assert report["summary"]["failed"] == 1
     assert "escapes allowed roots" in report["results"][0]["errors"][0]
@@ -162,13 +168,45 @@ def test_publish_manifest_reports_skipped_non_done_artifacts(tmp_path: Path, mon
 
     publish_manifest(
         manifest_path,
+        workspace_root=tmp_path,
         report_dir=tmp_path / "reports",
         seller_config=tmp_path / "publisher.yaml",
     )
 
     assert not calls
-    report_file = next((tmp_path / "reports").glob("publish-manifest-summary-*.json"))
+    report_file = tmp_path / "reports" / "report.json"
     report = json.loads(report_file.read_text(encoding="utf-8"))
     assert report["summary"]["skipped"] == 1
     assert report["results"][0]["status"] == "skipped"
     assert report["results"][0]["artifact_status"] == "review_required"
+
+
+def test_publish_manifest_prints_continue_message_for_validation_warnings(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    manifest_path = _manifest_payload(tmp_path, blocking_issues=[])
+
+    def _fake_publish(_path: Path, **_kwargs: object) -> dict[str, object]:
+        return {
+            "status": "published",
+            "sku": "SKU-1",
+            "errors": [],
+            "warnings": [
+                "ML validation warning: [item.shipping.mandatory_free_shipping] | department=shipping | Mandatory free shipping added | references=item.shipping.free_shipping"
+            ],
+        }
+
+    monkeypatch.setattr(
+        "mercadolivre_upload.cli.commands.publish_manifest.publish_payload_file",
+        _fake_publish,
+    )
+
+    publish_manifest(
+        manifest_path,
+        workspace_root=tmp_path,
+        report_dir=tmp_path / "reports",
+        seller_config=tmp_path / "publisher.yaml",
+    )
+
+    output = capsys.readouterr().out
+    assert "Validation passed with warnings; continuing publication." in output

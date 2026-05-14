@@ -525,6 +525,40 @@ class TestJsonPayloadReader:
         result = self.reader.read(path)
         assert result.upload_mode == "user_products"
 
+    def test_existing_up_selling_condition_does_not_require_inherited_fields(
+        self, tmp_path: Path
+    ) -> None:
+        envelope = _make_envelope(
+            {
+                "model": "user_products",
+                "items": [
+                    {
+                        "user_product_id": "MLBU123",
+                        "category_id": "MLB271599",
+                        "price": 99.90,
+                        "currency_id": "BRL",
+                        "buying_mode": "buy_it_now",
+                        "listing_type_id": "gold_special",
+                    }
+                ],
+            },
+            {"publication": {"model": "user_products"}},
+        )
+
+        result = self.reader.read(_write_payload(tmp_path, envelope))
+
+        assert result.upload_mode == "user_products"
+        assert "family_name" not in result.payload
+
+    def test_existing_up_selling_condition_keeps_classic_contract_separate(
+        self, tmp_path: Path
+    ) -> None:
+        classic_payload = _make_valid_payload()
+        classic_payload.pop("pictures")
+
+        with pytest.raises(InvalidPayloadError, match="pictures"):
+            self.reader.read(_write_payload(tmp_path, classic_payload))
+
     def test_up_item_missing_family_name_raises_when_envelope_enabled(self, tmp_path: Path) -> None:
         from mercadolivre_upload.adapters import json_payload_reader
 

@@ -258,6 +258,8 @@ class PublishProductUseCase:
         self._current_cause_taxonomy: list[dict[str, str]] = []
         self._current_validation_decision: dict[str, Any] = {}
         self._current_validation_repair: dict[str, Any] = {}
+        self._current_validation_status: str | None = None
+        self._current_validation_report: dict[str, Any] = {}
         self._current_image_diagnostics: dict[str, Any] | None = None
         self._current_shipping_policy: dict[str, Any] | None = None
         self._seller_capabilities_artifact: dict[str, Any] | None = None

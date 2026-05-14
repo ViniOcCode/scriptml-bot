@@ -75,7 +75,7 @@ and throughput becomes a measured bottleneck, a future ADR may introduce concurr
 
 ### `async def` use-case with `asyncio.run()` at CLI boundary
 
-- **ALT-001**: **Description**: Define `PublishJsonUseCase.execute()` as `async def` and wrap it
+- **ALT-001**: **Description**: Define `PublishPayloadUseCase.execute()` as `async def` and wrap it
   with `asyncio.run()` in the Typer command function, requiring `MLApiClient` to be ported to
   `httpx` or wrapped in `asyncio.to_thread`.
 - **ALT-002**: **Rejection Reason**: Requires changes to `MLApiClient` (synchronous `requests`)
@@ -106,7 +106,7 @@ and throughput becomes a measured bottleneck, a future ADR may introduce concurr
 - **IMP-001**: All new use-case and CLI code uses `def` (not `async def`) — no `asyncio` imports
   in the new modules. This is enforced by code review.
 - **IMP-002**: When batch throughput becomes a measured production concern, create a new ADR
-  proposing a concurrent approach. At that point, the `PublishJsonUseCase` interface can be
+  proposing a concurrent approach. At that point, the `PublishPayloadUseCase` interface can be
   extended without changing the synchronous baseline.
 - **IMP-003**: The existing `infrastructure/http.py` rate limiter (token-bucket + `Retry-After`)
   applies automatically to all `MLApiClient` calls, providing resilience for sequential batches.

@@ -83,7 +83,7 @@ git-ignored (added to `.gitignore`) so per-tenant secrets and policy do not leak
 
 ## Alternatives Considered
 
-### Inline validation in `PublishJsonUseCase`
+### Inline validation in `PublishPayloadUseCase`
 
 - **ALT-001**: **Description**: Embed the listing type check, price check, and category block
   logic directly in `execute()` as conditional statements.

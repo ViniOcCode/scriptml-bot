@@ -115,3 +115,27 @@ def test_secure_storage_auto_migration_failure_is_explicit(tmp_path: Path, monke
 
     with pytest.raises(AuthError, match="Secure token migration failed"):
         TokenManager(token_path=str(token_path), oauth_handler=MagicMock())
+
+
+def test_workspace_root_uses_dot_token_and_dot_fernet_key(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("ML_PIPE_ENCRYPTION_KEY", raising=False)
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    key_path = workspace_root / ".ml_fernet_key"
+    key_path.write_text(Fernet.generate_key().decode(), encoding="utf-8")
+
+    manager = TokenManager(workspace_root=workspace_root, oauth_handler=MagicMock())
+    manager.save_tokens(_sample_tokens())
+
+    assert (workspace_root / ".ml_token.enc").exists()
+    assert manager.load_tokens() == _sample_tokens()
+
+
+def test_workspace_root_fails_without_fernet_key_file(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("ML_PIPE_ENCRYPTION_KEY", raising=False)
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir(parents=True, exist_ok=True)
+    manager = TokenManager(workspace_root=workspace_root, oauth_handler=MagicMock())
+
+    with pytest.raises(AuthError, match="Secure token storage error"):
+        manager.save_tokens(_sample_tokens())

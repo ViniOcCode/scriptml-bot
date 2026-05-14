@@ -12,6 +12,7 @@ import typer
 from rich.console import Console
 from rich.theme import Theme
 
+from ml_app_settings.loader import load_app_settings
 from mercadolivre_upload.infrastructure.logging import setup_logging as setup_app_logging
 
 # Configure custom theme
@@ -164,7 +165,7 @@ def publish_payload(
         "--publish-inactive/--no-publish-inactive",
         help="Publish items in paused (inactive) state. Items can be activated later.",
     ),
-    report_dir: Path = typer.Option(Path("cache/reports"), "--report-dir"),  # noqa: B008
+    workspace: Path | None = typer.Option(None, "--workspace"),  # noqa: B008
     seller_config: Path = typer.Option(Path("config/publisher.yaml"), "--config"),  # noqa: B008
 ) -> None:
     """Publish a ready-made builder payload JSON file."""
@@ -172,6 +173,13 @@ def publish_payload(
     if not seller_config.exists():
         err_console.print(f"[error]Seller config not found: {seller_config}[/error]")
         raise typer.Exit(2)
+    runtime = import_module("mercadolivre_upload.cli.commands.publish_runtime")
+    try:
+        workspace_root = runtime.resolve_workspace_root(workspace=workspace, seller_config=seller_config)
+    except ValueError as exc:
+        err_console.print(f"[error]{exc}[/error]")
+        raise typer.Exit(2) from exc
+    report_dir = runtime.build_attempt_report_dir(workspace_root=workspace_root)
     api = import_module("mercadolivre_upload.application.publish_payload")
     result = api.publish_payload_file(
         path,
@@ -179,7 +187,10 @@ def publish_payload(
         dry_run=dry_run,
         publish_inactive=publish_inactive,
         seller_config_path=seller_config,
+        workspace_root=workspace_root,
     )
+    if result.get("validation_status") == "validation_passed_with_warnings":
+        console.print("[yellow]Validation passed with warnings; continuing publication.[/yellow]")
     console.print(json.dumps(result, ensure_ascii=False, indent=2))
     if result.get("status") == "failed":
         raise typer.Exit(1)
@@ -196,7 +207,7 @@ def publish_manifest(
         "--publish-inactive/--no-publish-inactive",
         help="Publish items in paused (inactive) state. Items can be activated later.",
     ),
-    report_dir: Path = typer.Option(Path("cache/reports"), "--report-dir"),  # noqa: B008
+    workspace: Path | None = typer.Option(None, "--workspace"),  # noqa: B008
     seller_config: Path = typer.Option(Path("config/publisher.yaml"), "--config"),  # noqa: B008
 ) -> None:
     """Publish payloads declared in run_manifest.json."""
@@ -204,11 +215,19 @@ def publish_manifest(
     if not seller_config.exists():
         err_console.print(f"[error]Seller config not found: {seller_config}[/error]")
         raise typer.Exit(2)
+    runtime = import_module("mercadolivre_upload.cli.commands.publish_runtime")
+    try:
+        workspace_root = runtime.resolve_workspace_root(workspace=workspace, seller_config=seller_config)
+    except ValueError as exc:
+        err_console.print(f"[error]{exc}[/error]")
+        raise typer.Exit(2) from exc
+    report_dir = runtime.build_attempt_report_dir(workspace_root=workspace_root)
     cmd = import_module("mercadolivre_upload.cli.commands.publish_manifest")
     cmd.publish_manifest(
         manifest_path=manifest_path,
         dry_run=dry_run,
         publish_inactive=publish_inactive,
+        workspace_root=workspace_root,
         report_dir=report_dir,
         seller_config=seller_config,
     )

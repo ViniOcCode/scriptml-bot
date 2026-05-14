@@ -44,6 +44,34 @@ UP_ITEM_REQUIRED_FIELDS: frozenset[str] = frozenset(
     }
 )
 
+UP_SELLING_CONDITION_ALLOWED_FIELDS: frozenset[str] = frozenset(
+    {
+        "user_product_id",
+        "price",
+        "category_id",
+        "currency_id",
+        "buying_mode",
+        "listing_type_id",
+        "shipping",
+        "channels",
+        "tags",
+        "sale_terms",
+        "catalog_listing",
+        "catalog_product_id",
+        "official_store_id",
+    }
+)
+
+UP_SELLING_CONDITION_REQUIRED_FIELDS: frozenset[str] = frozenset(
+    {
+        "price",
+        "category_id",
+        "currency_id",
+        "buying_mode",
+        "listing_type_id",
+    }
+)
+
 # When True, also validates the envelope-level family_name field (legacy check).
 # Set to False to skip the envelope check (e.g. when family_name is injected externally).
 VALIDATE_UP_ENVELOPE: bool = True
@@ -259,10 +287,14 @@ def _validate_user_products_payload(payload: Any, path_name: str) -> None:
     """Validate a local user-products upload envelope payload."""
     family_name: str | None = None
     using_payload_array = False
+    envelope_user_product_id: str | None = None
     if isinstance(payload, list):
         items = payload
         using_payload_array = True
     elif isinstance(payload, dict):
+        raw_user_product_id = payload.get("user_product_id")
+        if isinstance(raw_user_product_id, str) and raw_user_product_id.strip():
+            envelope_user_product_id = raw_user_product_id.strip()
         # New builder artifacts use payload[] directly.
         if isinstance(payload.get("payload"), list):
             items = payload.get("payload")
@@ -284,9 +316,35 @@ def _validate_user_products_payload(payload: Any, path_name: str) -> None:
         raise InvalidPayloadError(f"Campo obrigatório '{missing_field}' ausente ou vazio em {path_name}")
 
     # Per-item required fields (ML API docs) — validated first, always.
+    has_existing_user_product_items = bool(envelope_user_product_id)
     for index, item in enumerate(items, start=1):
         if not isinstance(item, dict) or not item:
             raise InvalidPayloadError(f"Item inválido em payload.items[{index}] de {path_name}")
+        item_user_product_id = item.get("user_product_id")
+        has_existing_user_product_id = (
+            isinstance(item_user_product_id, str) and bool(item_user_product_id.strip())
+        ) or bool(envelope_user_product_id)
+        if has_existing_user_product_id:
+            has_existing_user_product_items = True
+            missing = UP_SELLING_CONDITION_REQUIRED_FIELDS - item.keys()
+            if missing:
+                raise InvalidPayloadError(
+                    "Campos obrigatórios ausentes em "
+                    f"item[{index}] de {path_name}: {sorted(missing)}"
+                )
+            invalid_fields = sorted(
+                field for field in item.keys() if field not in UP_SELLING_CONDITION_ALLOWED_FIELDS
+            )
+            if invalid_fields:
+                logger.warning(
+                    "Ignoring inherited/unsupported user-products selling-condition fields "
+                    "during local validation for %s item[%s]: %s",
+                    path_name,
+                    index,
+                    invalid_fields,
+                )
+            continue
+
         if using_payload_array:
             item_family_name = item.get("family_name")
             if not isinstance(item_family_name, str) or not item_family_name.strip():
@@ -303,7 +361,12 @@ def _validate_user_products_payload(payload: Any, path_name: str) -> None:
             _validate_picture_sources(item_pictures, f"{path_name}[item {index}]")
 
     # Envelope-level check — behind VALIDATE_UP_ENVELOPE feature flag.
-    if VALIDATE_UP_ENVELOPE and isinstance(payload, dict) and "items" in payload:
+    if (
+        VALIDATE_UP_ENVELOPE
+        and isinstance(payload, dict)
+        and "items" in payload
+        and not has_existing_user_product_items
+    ):
         if not isinstance(family_name, str) or not family_name.strip():
             raise InvalidPayloadError(f"Campo obrigatório 'family_name' ausente em {path_name}")
 

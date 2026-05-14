@@ -291,6 +291,30 @@ class MLApiClient:
     def _sanitize_user_product_item_payload(item: dict[str, Any]) -> dict[str, Any]:
         """Strip legacy fields not supported by MLB user-products create contract."""
         payload = dict(item)
+        user_product_id = payload.get("user_product_id")
+        has_existing_user_product_id = isinstance(user_product_id, str) and bool(
+            user_product_id.strip()
+        )
+        if has_existing_user_product_id:
+            for inherited_field in (
+                "available_quantity",
+                "attributes",
+                "pictures",
+                "domain_id",
+                "family_name",
+                "title",
+                "variations",
+                "condition",
+                "user_product",
+                "model",
+                "items",
+                "_meta",
+                "payload",
+            ):
+                payload.pop(inherited_field, None)
+            payload["user_product_id"] = user_product_id.strip()
+            return payload
+
         family_name = payload.get("family_name")
         if not isinstance(family_name, str) or not family_name.strip():
             raise ValueError("user-products payload requires non-empty 'family_name'.")

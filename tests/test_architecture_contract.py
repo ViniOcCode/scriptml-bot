@@ -79,8 +79,8 @@ def test_publish_flow_avoids_dynamic_publisher_getattr_calls() -> None:
 
 def test_application_api_import_boundary_has_single_documented_exception() -> None:
     assert _application_api_imports() == [
-        "application/publish_json_use_case.py",
         "application/publish_payload.py",
+        "application/publish_payload_use_case.py",
         "application/publish_product.py",
     ]
 

@@ -15,7 +15,7 @@ from tests.support.upload_alignment import (
 )
 
 
-def test_publish_blocks_on_critical_validation_warning_by_default() -> None:
+def test_publish_allows_mercado_livre_warning_in_strict_mode() -> None:
     resolver = _FakeCategoryResolver(
         [
             AttributeMeta(id="BRAND", name="Marca", value_type="string", required=False),
@@ -79,13 +79,13 @@ def test_publish_blocks_on_critical_validation_warning_by_default() -> None:
         enable_fiscal_submission=False,
     )
 
-    assert use_case._publish_one(_build_product({}), "MLB123") is False
-    assert publisher.created_items == []
-    assert use_case.failed == 1
-    assert any("critical validation warnings" in error for error in use_case.errors)
-    assert use_case._current_cause_taxonomy[0]["classification"] == "critical_warning"
-    assert use_case._current_validation_decision["action"] == "block"
+    assert use_case._publish_one(_build_product({}), "MLB123") is True
+    assert len(publisher.created_items) == 1
+    assert use_case.failed == 0
+    assert use_case._current_cause_taxonomy[0]["classification"] == "informational_warning"
+    assert use_case._current_validation_decision["action"] == "allow"
     assert use_case._current_validation_decision["mode"] == "strict"
+    assert use_case._current_validation_status == "validation_passed_with_warnings"
 
 
 def test_publish_allows_critical_warning_when_strict_gate_disabled() -> None:
@@ -152,7 +152,7 @@ def test_publish_allows_critical_warning_when_strict_gate_disabled() -> None:
 
     assert use_case._publish_one(_build_product({}), "MLB123") is True
     assert len(publisher.created_items) == 1
-    assert use_case._current_cause_taxonomy[0]["classification"] == "critical_warning"
+    assert use_case._current_cause_taxonomy[0]["classification"] == "informational_warning"
     assert use_case._current_validation_decision["action"] == "allow"
 
 
@@ -220,7 +220,7 @@ def test_publish_allows_critical_warning_in_controlled_mode() -> None:
 
     assert use_case._publish_one(_build_product({}), "MLB123") is True
     assert len(publisher.created_items) == 1
-    assert use_case._current_cause_taxonomy[0]["classification"] == "critical_warning"
+    assert use_case._current_cause_taxonomy[0]["classification"] == "informational_warning"
     assert use_case._current_validation_decision["action"] == "allow"
     assert use_case._current_validation_decision["mode"] == "controlled"
 

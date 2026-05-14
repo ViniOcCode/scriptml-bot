@@ -65,6 +65,8 @@ class _ValidationPublisher:
 
     def validate_item(self, item: dict[str, Any]) -> dict[str, Any]:
         self.validated_items.append(item)
+        if not self.causes:
+            return {}
         return {"cause": self.causes}
 
     def validate_user_product_item(self, item: dict[str, Any]) -> dict[str, Any]:

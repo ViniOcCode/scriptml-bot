@@ -55,7 +55,7 @@ def _write_manifest_report(
     results: list[dict[str, Any]],
 ) -> Path:
     report_dir.mkdir(parents=True, exist_ok=True)
-    report_path = report_dir / f"publish-manifest-summary-{run_id}.json"
+    report_path = report_dir / "report.json"
     failed = [item for item in results if item.get("status") == "failed"]
     skipped = [item for item in results if item.get("status") == "skipped"]
     published = [item for item in results if item.get("status") == "published"]
@@ -82,15 +82,12 @@ def publish_manifest(
     *,
     dry_run: bool = False,
     publish_inactive: bool = False,
+    workspace_root: Path,
     report_dir: Path = Path("cache/reports"),
     seller_config: Path = Path("config/publisher.yaml"),
 ) -> None:
     """Publish one or many payloads declared in run_manifest.json."""
     manifest = load_run_manifest(manifest_path)
-    workspace_root = Path(manifest.workspace_path).expanduser()
-    if not workspace_root.is_absolute():
-        workspace_root = workspace_root.resolve()
-
     if manifest.blocking_issues:
         details = "\n".join(f"- {issue}" for issue in manifest.blocking_issues)
         err_console.print(
@@ -147,9 +144,19 @@ def publish_manifest(
                 dry_run=dry_run,
                 publish_inactive=publish_inactive,
                 seller_config_path=seller_config,
+                workspace_root=workspace_root,
             )
             result["payload_path"] = str(payload_path)
             results.append(result)
+            if result.get("status") == "published":
+                warnings = result.get("warnings", [])
+                if result.get("validation_status") == "validation_passed_with_warnings" or (
+                    isinstance(warnings, list)
+                    and any(isinstance(w, str) and "ML validation warning:" in w for w in warnings)
+                ):
+                    console.print(
+                        "[yellow]Validation passed with warnings; continuing publication.[/yellow]"
+                    )
 
     report_path = _write_manifest_report(
         run_id=manifest.run_id,

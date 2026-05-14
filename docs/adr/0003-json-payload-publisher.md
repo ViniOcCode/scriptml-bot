@@ -40,10 +40,10 @@ use-case, and CLI module — completely separate from the existing Excel pipelin
 - **`mercadolivre_upload/adapters/json_payload_reader.py`** — reads and validates a single
   `payload.json`, strips `_meta` before returning a typed `ReadPayloadResult`, raises
   `InvalidPayloadError` for missing required fields or empty `pictures`.
-- **`mercadolivre_upload/application/publish_json_use_case.py`** — orchestrates
+- **`mercadolivre_upload/application/publish_payload_use_case.py`** — orchestrates
   read → seller-policy override → seller-policy validation → publish → description post.
   Reuses `MLApiClient.create_item()` and `MLApiClient.create_item_description()` (already present).
-- **`mercadolivre_upload/cli/commands/publish_json.py`** — single-payload helper command
+- **`ml-upload publish-payload`** — current single-payload publication command
   implementation used by `publish-payload`.
 - **`mercadolivre_upload/cli/commands/publish_manifest.py`** — manifest-driven command with
   `--dry-run` and `--report-dir`; reads `run_manifest.json` as explicit handoff contract.
@@ -111,7 +111,7 @@ endpoint after the item is created.
 
 ## Implementation Notes
 
-- **IMP-001**: The `import_module` lazy-load pattern (`mercadolivre_upload.cli.commands.publish_json`)
+- **IMP-001**: The legacy JSON command module was removed; use `publish-payload`
   is used in `app.py` consistent with other commands — avoids circular imports and keeps startup
   fast.
 - **IMP-002**: `config/publisher.yaml` is git-ignored; `config/publisher.example.yaml` is versioned as

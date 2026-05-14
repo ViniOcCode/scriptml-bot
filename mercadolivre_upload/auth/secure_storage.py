@@ -3,6 +3,7 @@
 Uses AES-256 encryption with key derived from system keyring or environment variable.
 """
 
+import base64
 import json
 import logging
 import os
@@ -46,26 +47,44 @@ class SecureTokenStorage:
     KEYRING_USERNAME = "encryption-key"
     SALT_FILE = ".salt"
 
-    def __init__(self, token_path: Path | None = None):
+    def __init__(
+        self,
+        token_path: Path | None = None,
+        encryption_key_path: Path | None = None,
+    ):
         """Initialize secure storage.
 
         Args:
             token_path: Path to encrypted token file. Defaults to tokens.json.enc
+            encryption_key_path: Explicit path to Fernet key file.
         """
         self.token_path = token_path or Path("tokens.json.enc")
+        self.encryption_key_path = encryption_key_path
         self._cipher = None
 
     def _get_or_create_key(self) -> bytes:
         """Get or create encryption key.
 
         Priority:
-        1. Environment variable ML_PIPE_ENCRYPTION_KEY
-        2. System keyring
-        3. Generate new key and store in keyring
-
-        Returns:
-            32-byte encryption key
+        1. Explicit encryption_key_path (workspace .ml_fernet_key)
+        2. Environment variable ML_PIPE_ENCRYPTION_KEY
+        3. System keyring
+        4. Generate new key and store in keyring
         """
+        if self.encryption_key_path is not None:
+            key_path = self.encryption_key_path
+            if not key_path.exists():
+                raise SecureStorageError(f"Encryption key file not found: {key_path}")
+            raw = key_path.read_text(encoding="utf-8").strip().encode("utf-8")
+            try:
+                decoded = base64.urlsafe_b64decode(raw)
+            except Exception as exc:  # noqa: BLE001
+                raise SecureStorageError(
+                    f"Invalid encryption key format at {key_path}"
+                ) from exc
+            if len(decoded) != 32:
+                raise SecureStorageError(f"Invalid encryption key length at {key_path}")
+            return raw
         # Priority 1: Environment variable
         env_key = get_pipeline_env("ML_PIPE_ENCRYPTION_KEY")
         if env_key:

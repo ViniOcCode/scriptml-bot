@@ -89,6 +89,8 @@ def reset_execution_state(use_case: Any) -> None:
     use_case._current_cause_taxonomy = []
     use_case._current_validation_decision = {}
     use_case._current_validation_repair = {}
+    use_case._current_validation_status = None
+    use_case._current_validation_report = {}
     use_case._current_image_diagnostics = None
     use_case._current_shipping_policy = None
     use_case._current_flow_artifact = {}
