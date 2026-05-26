@@ -5,65 +5,70 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "schema_version",
     "run_id",
     "created_at",
     "workspace_path",
-    "artifacts",
-    "blocking_issues",
-    "warnings",
+    "status",
+    "publication_candidates",
+    "build_failures",
     "diagnostics"
   ],
   "properties": {
-    "schema_version": {
-      "type": "string"
-    },
-    "run_id": {
-      "type": "string"
-    },
-    "created_at": {
-      "type": "string",
-      "format": "date-time"
-    },
-    "workspace_path": {
-      "type": "string"
-    },
-    "artifacts": {
+    "run_id": { "type": "string" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "workspace_path": { "type": "string" },
+    "status": { "type": "string", "enum": ["success", "partial_success", "failed"] },
+    "publication_candidates": {
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "sku",
-          "status",
-          "payload_paths",
-          "category_id",
-          "category_name",
-          "error"
-        ],
+        "required": ["group_id", "sku_scope", "topology", "build_status", "payloads", "errors"],
         "properties": {
-          "sku": { "type": "string" },
-          "status": {
+          "group_id": { "type": "string" },
+          "family_id": { "type": ["string", "null"] },
+          "sku_scope": { "type": "array", "items": { "type": "string" } },
+          "topology": { "type": ["string", "null"] },
+          "build_status": {
             "type": "string",
-            "enum": ["done", "review_required", "error", "skipped"]
+            "enum": ["success", "partial_success", "failed", "skipped", "not_publishable"]
           },
-          "payload_paths": {
+          "payloads": {
             "type": "array",
-            "items": { "type": "string" }
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["variant", "listing_type_id", "publishable"],
+              "properties": {
+                "variant": { "type": "string" },
+                "payload_path": { "type": ["string", "null"] },
+                "listing_type_id": { "type": "string" },
+                "publishable": { "type": "boolean" },
+                "artifact_source": { "type": ["string", "null"] },
+                "created_at": { "type": ["string", "null"], "format": "date-time" },
+                "block_reason": { "type": ["string", "null"] },
+                "skip_reason": { "type": ["string", "null"] }
+              }
+            }
           },
-          "category_id": { "type": "string" },
-          "category_name": { "type": "string" },
-          "error": {}
+          "errors": { "type": "array" }
         }
       }
     },
-    "blocking_issues": {
+    "build_failures": {
       "type": "array",
-      "items": { "type": "string" }
-    },
-    "warnings": {
-      "type": "array",
-      "items": { "type": "string" }
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "sku": { "type": ["string", "null"] },
+          "group_id": { "type": ["string", "null"] },
+          "family_id": { "type": ["string", "null"] },
+          "stage": { "type": ["string", "null"] },
+          "reason": { "type": ["string", "null"] },
+          "publishable": { "type": "boolean", "const": false }
+        }
+      }
     },
     "diagnostics": {
       "type": "object",

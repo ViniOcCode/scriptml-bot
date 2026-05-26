@@ -6,6 +6,7 @@ import pytest
 import requests
 
 from mercadolivre_upload.api.client import MLApiClient
+from mercadolivre_upload.api.domains import items as item_endpoints
 
 
 def test_validate_item_returns_400_json_payload():
@@ -70,31 +71,33 @@ def test_post_returns_empty_payload_for_non_json_success():
     response.raise_for_status.assert_called_once()
 
 
-def test_validate_user_product_item_sanitizes_payload_before_validation():
+def test_validate_user_product_item_validates_complete_payload_with_items_endpoint():
     client = MLApiClient(http_client=MagicMock())
     payload = {
         "title": "Linha Alpha Model X",
         "model": "user_products",
         "family_name": "Linha Alpha",
-        "variations": [{"id": 1}],
-        "items": [{"price": 10.0}],
-        "user_product": {"selected_model": "Model X", "variations": []},
+        "pictures": [{"id": "123"}],
+        "attributes": [{"id": "SELLER_SKU", "value_name": "SKU-123"}],
+        "available_quantity": 1,
     }
     client.validate_item = MagicMock(return_value={"cause": []})
 
     result = client.validate_user_product_item(payload)
 
     assert result == {"cause": []}
-    client.validate_item.assert_called_once_with({"family_name": "Linha Alpha"})
+    client.validate_item.assert_called_once_with(payload)
 
 
-def test_validate_user_product_item_raises_when_family_name_is_missing():
+def test_validate_user_product_item_does_not_infer_existing_user_product_from_id():
     client = MLApiClient(http_client=MagicMock())
     client.validate_item = MagicMock(return_value={"cause": []})
+    payload = {"user_product_id": "MLBU123", "family_name": "Linha Alpha"}
 
-    with pytest.raises(ValueError, match="requires non-empty 'family_name'"):
-        client.validate_user_product_item({"title": "Linha Alpha Model X"})
-    client.validate_item.assert_not_called()
+    result = client.validate_user_product_item(payload)
+
+    assert result == {"cause": []}
+    client.validate_item.assert_called_once_with(payload)
 
 
 def test_validate_existing_user_product_sales_condition_does_not_require_family_name():
@@ -104,16 +107,12 @@ def test_validate_existing_user_product_sales_condition_does_not_require_family_
     result = client.validate_user_product_item(
         {
             "user_product_id": " MLBU123 ",
+            "target": "existing_user_product_selling_condition",
             "price": 100.0,
             "category_id": "MLB1055",
             "currency_id": "BRL",
             "buying_mode": "buy_it_now",
             "listing_type_id": "gold_special",
-            "available_quantity": 1,
-            "attributes": [{"id": "BRAND", "value_name": "Marca"}],
-            "pictures": [{"id": "123"}],
-            "family_name": "Linha Alpha",
-            "title": "Linha Alpha Model X",
         }
     )
 
@@ -121,31 +120,38 @@ def test_validate_existing_user_product_sales_condition_does_not_require_family_
     client.validate_item.assert_not_called()
 
 
-def test_create_user_product_item_sanitizes_payload_before_create():
+def test_create_user_product_item_posts_complete_payload_to_items():
     client = MLApiClient(http_client=MagicMock())
     payload = {
         "title": "Linha Alpha Model X",
         "model": "user_products",
         "family_name": "Linha Alpha",
-        "variations": [{"id": 1}],
-        "items": [{"price": 10.0}],
-        "user_product": {"selected_model": "Model X", "variations": []},
+        "pictures": [{"id": "123"}],
+        "attributes": [{"id": "SELLER_SKU", "value_name": "SKU-123"}],
+        "available_quantity": 1,
+        "shipping": {"mode": "me2", "free_shipping": True, "local_pick_up": False},
+        "sale_terms": [{"id": "WARRANTY_TYPE", "value_name": "Garantia do vendedor"}],
+        "listing_type_id": "gold_special",
     }
+    client.post = MagicMock(return_value={"id": "MLB1234567890"})
+
+    result = item_endpoints.create_user_product_item(client, payload)
+
+    assert result == {"id": "MLB1234567890"}
+    client.post.assert_called_once_with("/items", json=payload)
+    assert payload["shipping"]["local_pick_up"] is False
+    assert client.last_user_product_sanitization is None
+
+
+def test_create_user_product_item_does_not_infer_existing_user_product_from_id():
+    client = MLApiClient(http_client=MagicMock())
     client.create_item = MagicMock(return_value={"id": "MLB1234567890"})
+    payload = {"user_product_id": "MLBU123", "family_name": "Linha Alpha"}
 
     result = client.create_user_product_item(payload)
 
     assert result == {"id": "MLB1234567890"}
-    client.create_item.assert_called_once_with({"family_name": "Linha Alpha"})
-
-
-def test_create_user_product_item_raises_when_family_name_is_missing():
-    client = MLApiClient(http_client=MagicMock())
-    client.create_item = MagicMock(return_value={"id": "MLB1234567890"})
-
-    with pytest.raises(ValueError, match="requires non-empty 'family_name'"):
-        client.create_user_product_item({"title": "Linha Alpha Model X"})
-    client.create_item.assert_not_called()
+    client.create_item.assert_called_once_with(payload)
 
 
 def test_create_user_product_item_routes_sales_condition_when_user_product_id_present():
@@ -157,6 +163,7 @@ def test_create_user_product_item_routes_sales_condition_when_user_product_id_pr
         "model": "user_products",
         "family_name": "Linha Alpha",
         "user_product_id": "MLBU123",
+        "target": "existing_user_product_selling_condition",
         "price": 100.0,
         "category_id": "MLB1055",
         "currency_id": "BRL",
@@ -167,6 +174,34 @@ def test_create_user_product_item_routes_sales_condition_when_user_product_id_pr
         "pictures": [{"id": "123"}],
         "domain_id": "MLB-CELLPHONES",
         "condition": "new",
+        "seller_custom_field": "SKU-123",
+        "shipping": {"mode": "me2", "free_shipping": True, "local_pick_up": False},
+        "channels": ["marketplace"],
+        "tags": ["immediate_payment"],
+        "sale_terms": [{"id": "WARRANTY_TYPE", "value_name": "Garantia do vendedor"}],
+        "catalog_listing": False,
+        "catalog_product_id": "MLB0001",
+        "official_store_id": 1234,
+    }
+
+    with pytest.raises(ValueError, match="reduced request body"):
+        client.create_user_product_item(payload)
+
+    client.post.assert_not_called()
+
+
+def test_create_user_product_item_routes_explicit_reduced_sales_condition():
+    client = MLApiClient(http_client=MagicMock())
+    client.post = MagicMock(return_value={"id": "MLB1234567890"})
+    payload = {
+        "target": "existing_user_product_selling_condition",
+        "user_product_id": "MLBU123",
+        "price": 100.0,
+        "category_id": "MLB1055",
+        "currency_id": "BRL",
+        "buying_mode": "buy_it_now",
+        "listing_type_id": "gold_special",
+        "shipping": {"mode": "me2", "free_shipping": True, "local_pick_up": False},
     }
 
     result = client.create_user_product_item(payload)
@@ -180,8 +215,46 @@ def test_create_user_product_item_routes_sales_condition_when_user_product_id_pr
             "currency_id": "BRL",
             "buying_mode": "buy_it_now",
             "listing_type_id": "gold_special",
+            "shipping": {"mode": "me2", "free_shipping": True},
         },
     )
+    assert client.last_user_product_sanitization == {
+        "endpoint": "/user-products/{user_product_id}/items",
+        "removed_fields": ["shipping.local_pick_up"],
+    }
+
+
+def test_existing_user_product_selling_condition_requires_user_product_id():
+    client = MLApiClient(http_client=MagicMock())
+    client.post = MagicMock(return_value={"id": "MLB1234567890"})
+
+    with pytest.raises(ValueError, match="requires non-empty 'user_product_id'"):
+        client.create_user_product_item(
+            {
+                "target": "existing_user_product_selling_condition",
+                "price": 100.0,
+                "category_id": "MLB1055",
+                "currency_id": "BRL",
+                "buying_mode": "buy_it_now",
+                "listing_type_id": "gold_special",
+            }
+        )
+
+    client.post.assert_not_called()
+
+
+def test_create_item_clears_previous_user_product_sanitization_metadata():
+    client = MLApiClient(http_client=MagicMock())
+    client.post = MagicMock(return_value={"id": "MLB1234567890"})
+    client.last_user_product_sanitization = {
+        "endpoint": "/user-products/{user_product_id}/items",
+        "removed_fields": ["shipping.local_pick_up"],
+    }
+
+    result = item_endpoints.create_item(client, {"title": "Produto"})
+
+    assert result == {"id": "MLB1234567890"}
+    assert client.last_user_product_sanitization is None
 
 
 def test_get_category_conditional_attributes_from_required_attributes():

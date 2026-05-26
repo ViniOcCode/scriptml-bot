@@ -6,6 +6,43 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from mercadolivre_upload.api.client import MLApiClient
 
+_EXISTING_UP_SELLING_CONDITION_MODE = "existing_user_product_selling_condition"
+_EXISTING_UP_MODE_FIELDS = ("target", "execution_mode")
+_COMPLETE_UP_ITEM_FIELDS = {
+    "family_name",
+    "pictures",
+    "attributes",
+    "available_quantity",
+    "title",
+    "condition",
+    "variations",
+    "user_product",
+    "model",
+    "items",
+    "payload",
+}
+
+
+def _is_existing_user_product_selling_condition_request(item: dict[str, Any]) -> bool:
+    return any(
+        item.get(field) == _EXISTING_UP_SELLING_CONDITION_MODE
+        for field in _EXISTING_UP_MODE_FIELDS
+    )
+
+
+def _require_existing_user_product_selling_condition_request(item: dict[str, Any]) -> None:
+    user_product_id = item.get("user_product_id")
+    if not isinstance(user_product_id, str) or not user_product_id.strip():
+        raise ValueError(
+            "existing_user_product_selling_condition mode requires non-empty 'user_product_id'."
+        )
+    complete_fields = sorted(field for field in _COMPLETE_UP_ITEM_FIELDS if field in item)
+    if complete_fields:
+        raise ValueError(
+            "existing_user_product_selling_condition mode requires a reduced request body; "
+            f"unexpected fields: {complete_fields}"
+        )
+
 
 def validate_item(client: "MLApiClient", item: dict[str, Any]) -> dict[str, Any]:
     """Validate item before publishing."""
@@ -14,11 +51,10 @@ def validate_item(client: "MLApiClient", item: dict[str, Any]) -> dict[str, Any]
 
 def validate_user_product_item(client: "MLApiClient", item: dict[str, Any]) -> dict[str, Any]:
     """Validate user-products payload using current MVP endpoint routing."""
-    payload = client._sanitize_user_product_item_payload(item)
-    user_product_id = payload.pop("user_product_id", None)
-    if isinstance(user_product_id, str) and user_product_id.strip():
+    if _is_existing_user_product_selling_condition_request(item):
+        _require_existing_user_product_selling_condition_request(item)
         return {}
-    return client.validate_item(payload)
+    return client.validate_item(dict(item))
 
 
 def diagnose_picture(
@@ -46,20 +82,29 @@ def diagnose_picture(
 
 def create_item(client: "MLApiClient", item: dict[str, Any]) -> dict[str, Any]:
     """Create/publish an item."""
+    client.last_user_product_sanitization = None
+    client.last_publish_endpoint = "/items"
     return client.post("/items", json=item)
 
 
 def create_user_product_item(client: "MLApiClient", item: dict[str, Any]) -> dict[str, Any]:
     """Create user-products payload with MLB-safe endpoint routing."""
+    if not _is_existing_user_product_selling_condition_request(item):
+        client.last_user_product_sanitization = None
+        return client.create_item(dict(item))
+
+    _require_existing_user_product_selling_condition_request(item)
     payload = client._sanitize_user_product_item_payload(item)
     user_product_id = payload.pop("user_product_id", None)
-    if isinstance(user_product_id, str) and user_product_id.strip():
-        sales_condition_payload = client._build_user_product_sales_condition_payload(payload)
-        return client.post(
-            f"/user-products/{user_product_id.strip()}/items",
-            json=sales_condition_payload,
-        )
-    return client.create_item(payload)
+    sales_condition_payload, sanitization_metadata = (
+        client._build_user_product_sales_condition_payload(payload)
+    )
+    client.last_user_product_sanitization = sanitization_metadata
+    client.last_publish_endpoint = "/user-products/{user_product_id}/items"
+    return client.post(
+        f"/user-products/{user_product_id.strip()}/items",
+        json=sales_condition_payload,
+    )
 
 
 def create_item_description(

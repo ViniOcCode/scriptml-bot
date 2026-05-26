@@ -90,6 +90,8 @@ class MLApiClient:
         self.auth = auth_manager
         self.http = http_client or _build_http_client()
         self.base_url = BASE_URL
+        self.last_user_product_sanitization: dict[str, Any] | None = None
+        self.last_publish_endpoint: str | None = None
 
     def _get_headers(self, content_type: str = "application/json") -> dict[str, str]:
         headers: dict[str, str] = {}
@@ -331,7 +333,7 @@ class MLApiClient:
     @staticmethod
     def _build_user_product_sales_condition_payload(
         item: dict[str, Any],
-    ) -> dict[str, Any]:
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Keep only fields accepted by /user-products/{id}/items."""
         allowed_fields = {
             "price",
@@ -347,7 +349,18 @@ class MLApiClient:
             "catalog_product_id",
             "official_store_id",
         }
-        return {field: value for field, value in item.items() if field in allowed_fields}
+        payload = {field: value for field, value in item.items() if field in allowed_fields}
+        removed_fields: list[str] = []
+        shipping = payload.get("shipping")
+        if isinstance(shipping, dict) and "local_pick_up" in shipping:
+            shipping_payload = dict(shipping)
+            shipping_payload.pop("local_pick_up", None)
+            payload["shipping"] = shipping_payload
+            removed_fields.append("shipping.local_pick_up")
+        return payload, {
+            "endpoint": "/user-products/{user_product_id}/items",
+            "removed_fields": removed_fields,
+        }
 
     def validate_user_product_item(self, item: dict[str, Any]) -> dict[str, Any]:
         """Validate user-products payload using current MVP endpoint routing."""

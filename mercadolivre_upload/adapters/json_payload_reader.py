@@ -326,7 +326,12 @@ def _validate_user_products_payload(payload: Any, path_name: str) -> None:
         ) or bool(envelope_user_product_id)
         if has_existing_user_product_id:
             has_existing_user_product_items = True
-            missing = UP_SELLING_CONDITION_REQUIRED_FIELDS - item.keys()
+            # Publish flow merges envelope/base fields into each item before calling ML.
+            # Validate required selling-condition fields against the effective merged keys.
+            effective_item_keys = set(item.keys())
+            if isinstance(payload, dict):
+                effective_item_keys.update(payload.keys())
+            missing = UP_SELLING_CONDITION_REQUIRED_FIELDS - effective_item_keys
             if missing:
                 raise InvalidPayloadError(
                     "Campos obrigatórios ausentes em "

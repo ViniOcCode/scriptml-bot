@@ -1,6 +1,5 @@
-"""Cross-application handoff contracts."""
+"""Contract validators used by the publisher."""
 
-from .run_manifest import RUN_MANIFEST_SCHEMA_VERSION, RunManifest, load_run_manifest
+from .run_manifest import RunManifest, load_run_manifest
 
-__all__ = ["RUN_MANIFEST_SCHEMA_VERSION", "RunManifest", "load_run_manifest"]
-
+__all__ = ["RunManifest", "load_run_manifest"]

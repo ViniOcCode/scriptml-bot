@@ -17,6 +17,10 @@ console = Console()
 err_console = Console(stderr=True)
 
 
+def _has_text(value: str | None) -> bool:
+    return bool(isinstance(value, str) and value.strip())
+
+
 def _is_within_root(*, path: Path, root: Path) -> bool:
     try:
         path.relative_to(root)
@@ -32,18 +36,162 @@ def _resolve_manifest_payload_path(
     raw_path: str,
 ) -> Path:
     path = Path(raw_path).expanduser()
+    resolved_workspace = workspace_root.expanduser().resolve()
     if path.is_absolute():
-        resolved = path.resolve()
+        candidates = [path.resolve()]
+    elif path.parts and path.parts[0] == resolved_workspace.name:
+        candidates = [(resolved_workspace.parent / path).resolve(), (manifest_path.parent / path).resolve()]
     else:
-        resolved = (manifest_path.parent / path).resolve()
+        candidates = [(manifest_path.parent / path).resolve(), (resolved_workspace / path).resolve()]
 
-    manifest_root = manifest_path.parent.resolve()
-    if not (
-        _is_within_root(path=resolved, root=workspace_root)
-        or _is_within_root(path=resolved, root=manifest_root)
-    ):
-        raise ValueError(f"Payload path escapes allowed roots: {resolved}")
-    return resolved
+    valid_candidates = [candidate for candidate in candidates if _is_within_root(path=candidate, root=resolved_workspace)]
+    if not valid_candidates:
+        raise ValueError(f"Payload path escapes workspace root: {candidates[0]}")
+
+    for candidate in valid_candidates:
+        if candidate.exists():
+            return candidate
+    return valid_candidates[0]
+
+
+def _effective_publish_payload(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    payload = raw.get("payload")
+    if isinstance(payload, list) and payload and isinstance(payload[0], dict):
+        return payload[0]
+    if isinstance(payload, dict):
+        return payload
+    return raw
+
+
+def _read_payload_json_and_listing_type_id(payload_path: Path) -> tuple[Any | None, str | None, str | None]:
+    try:
+        raw = json.loads(payload_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        return None, None, f"Invalid JSON payload: {exc}"
+    except OSError as exc:
+        return None, None, f"Could not read payload file: {exc}"
+
+    effective_payload = _effective_publish_payload(raw)
+    if effective_payload is None:
+        return raw, None, "Effective publish payload could not be resolved"
+    listing_type_id = effective_payload.get("listing_type_id")
+    if isinstance(listing_type_id, str) and listing_type_id.strip():
+        return raw, listing_type_id.strip(), None
+    return raw, None, "Effective publish payload missing listing_type_id"
+
+
+def _selected_payloads(manifest: Any) -> list[Any]:
+    return [
+        payload
+        for candidate in manifest.publication_candidates
+        for payload in candidate.payloads
+        if payload.publishable
+        and _has_text(payload.payload_path)
+        and not _has_text(payload.block_reason)
+        and not _has_text(payload.skip_reason)
+    ]
+
+
+def _build_payload_result_row(
+    *,
+    run_id: str,
+    candidate: Any,
+    payload_variant: Any,
+) -> dict[str, Any]:
+    return {
+        "run_id": run_id,
+        "group_id": candidate.group_id,
+        "family_id": candidate.family_id,
+        "sku_scope": list(candidate.sku_scope),
+        "topology": candidate.topology,
+        "variant": payload_variant.variant,
+        "manifest_listing_type_id": payload_variant.listing_type_id,
+        "actual_payload_listing_type_id": None,
+        "manifest_payload_path": payload_variant.payload_path,
+        "resolved_payload_path": None,
+        "publishable": payload_variant.publishable,
+        "block_reason": payload_variant.block_reason,
+        "skip_reason": payload_variant.skip_reason,
+        "validation_result": None,
+        "publish_result": None,
+        "item_id": None,
+        "item_ids": [],
+        "user_product_id": None,
+        "publish_endpoints": [],
+        "api_warnings": [],
+        "api_errors": [],
+        "fiscal_result": None,
+        "skipped_build_failure": False,
+    }
+
+
+def _build_failure_row(*, run_id: str, failure: Any) -> dict[str, Any]:
+    return {
+        "run_id": run_id,
+        "group_id": getattr(failure, "group_id", None),
+        "family_id": getattr(failure, "family_id", None),
+        "sku_scope": [failure.sku] if getattr(failure, "sku", None) else [],
+        "topology": None,
+        "variant": None,
+        "manifest_listing_type_id": None,
+        "actual_payload_listing_type_id": None,
+        "manifest_payload_path": None,
+        "resolved_payload_path": None,
+        "publishable": False,
+        "block_reason": ":".join(
+            part for part in [getattr(failure, "stage", None), getattr(failure, "reason", None)] if part
+        ) or "build_failure",
+        "skip_reason": "build_failure",
+        "validation_result": {"status": "not_publishable"},
+        "publish_result": "skipped",
+        "item_id": None,
+        "item_ids": [],
+        "user_product_id": None,
+        "publish_endpoints": [],
+        "api_warnings": [],
+        "api_errors": [],
+        "fiscal_result": None,
+        "skipped_build_failure": True,
+    }
+
+
+def _variant_counts(results: list[dict[str, Any]], variant: str) -> dict[str, int]:
+    rows = [row for row in results if row.get("variant") == variant]
+    selected = [row for row in rows if row.get("selected")]
+    return {
+        "selected": len(selected),
+        "published": len([row for row in rows if row.get("publish_result") == "published"]),
+        "published_but_not_grouped": len(
+            [row for row in rows if row.get("publish_result") == "published_but_not_grouped"]
+        ),
+        "failed": len([row for row in rows if row.get("publish_result") == "failed"]),
+        "skipped": len([row for row in rows if row.get("publish_result") == "skipped"]),
+    }
+
+
+def _final_status(results: list[dict[str, Any]], selected_count: int, build_failure_count: int) -> str:
+    selected_rows = [row for row in results if row.get("selected")]
+    published = [row for row in selected_rows if row.get("publish_result") == "published"]
+    published_but_not_grouped = [
+        row
+        for row in selected_rows
+        if row.get("publish_result") == "published_but_not_grouped"
+    ]
+    failed_or_skipped_selected = [
+        row for row in selected_rows if row.get("publish_result") in {"failed", "skipped"}
+    ]
+    skipped_unselected = [
+        row
+        for row in results
+        if not row.get("selected") and row.get("publish_result") == "skipped" and not row.get("skipped_build_failure")
+    ]
+    if selected_count > 0 and not published and not published_but_not_grouped:
+        return "failed"
+    if failed_or_skipped_selected or skipped_unselected or build_failure_count or published_but_not_grouped:
+        return "partial_success"
+    return "success"
 
 
 def _write_manifest_report(
@@ -52,29 +200,43 @@ def _write_manifest_report(
     report_dir: Path,
     manifest_path: Path,
     dry_run: bool,
+    manifest_status: str,
+    build_failures: list[dict[str, Any]],
+    diagnostics: dict[str, str | None],
+    total_candidates: int,
+    total_payload_variants: int,
+    selected_payload_variants: int,
     results: list[dict[str, Any]],
-) -> Path:
+) -> tuple[Path, str]:
     report_dir.mkdir(parents=True, exist_ok=True)
     report_path = report_dir / "report.json"
-    failed = [item for item in results if item.get("status") == "failed"]
-    skipped = [item for item in results if item.get("status") == "skipped"]
-    published = [item for item in results if item.get("status") == "published"]
+    skipped = [item for item in results if item.get("publish_result") == "skipped"]
+    failed = [item for item in results if item.get("publish_result") == "failed"]
+    final_status = _final_status(results, selected_payload_variants, len(build_failures))
     report_payload = {
         "run_id": run_id,
-        "manifest_path": str(manifest_path),
+        "manifest_path": str(manifest_path.resolve()),
+        "manifest_status": manifest_status,
         "published_at": datetime.now(UTC).isoformat(),
         "dry_run": dry_run,
+        "build_failures": build_failures,
+        "diagnostics": diagnostics,
         "summary": {
-            "total": len(results),
-            "failed": len(failed),
-            "published": len(published),
-            "skipped": len(skipped),
-            "published_or_skipped": len(results) - len(failed),
+            "total_candidates": total_candidates,
+            "total_payload_variants": total_payload_variants,
+            "selected_payload_variants": selected_payload_variants,
+            "skipped_payload_variants": len(skipped),
+            "classic": _variant_counts(results, "classic"),
+            "premium": _variant_counts(results, "premium"),
+            "build_failures": len(build_failures),
+            "diagnostics_paths": diagnostics,
+            "failed_payload_variants": len(failed),
+            "final_status": final_status,
         },
         "results": results,
     }
     report_path.write_text(json.dumps(report_payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    return report_path
+    return report_path, final_status
 
 
 def publish_manifest(
@@ -86,58 +248,152 @@ def publish_manifest(
     report_dir: Path = Path("cache/reports"),
     seller_config: Path = Path("config/publisher.yaml"),
 ) -> None:
-    """Publish one or many payloads declared in run_manifest.json."""
+    """Publish payload variants declared in the current run_manifest.json contract."""
+    manifest_path = manifest_path.expanduser().resolve()
     manifest = load_run_manifest(manifest_path)
-    if manifest.blocking_issues:
-        details = "\n".join(f"- {issue}" for issue in manifest.blocking_issues)
-        err_console.print(
-            "[red]Erro:[/red] run_manifest possui blocking_issues e não pode ser publicado:\n"
-            f"{details}"
+    all_payload_variants = [payload for c in manifest.publication_candidates for payload in c.payloads]
+    selected_payloads = _selected_payloads(manifest)
+    selected_classic = [p for p in selected_payloads if p.variant == "classic"]
+    selected_premium = [p for p in selected_payloads if p.variant == "premium"]
+    skipped_or_build_failed_entries = len(all_payload_variants) - len(selected_payloads) + len(manifest.build_failures)
+    report_path = report_dir / "report.json"
+
+    console.print(f"[cyan]Manifest:[/cyan] {manifest_path}")
+    console.print(f"[cyan]Run ID:[/cyan] {manifest.run_id}")
+    console.print(f"[cyan]Manifest status:[/cyan] {manifest.status}")
+    console.print(f"[cyan]Total candidates:[/cyan] {len(manifest.publication_candidates)}")
+    console.print(f"[cyan]Total payload variants:[/cyan] {len(all_payload_variants)}")
+    console.print(f"[cyan]Selected payload variants:[/cyan] {len(selected_payloads)}")
+    console.print(f"[cyan]Skipped/build-failed entries:[/cyan] {skipped_or_build_failed_entries}")
+    console.print(f"[cyan]Selected classic:[/cyan] {len(selected_classic)}")
+    console.print(f"[cyan]Selected premium:[/cyan] {len(selected_premium)}")
+    console.print(f"[cyan]Report path:[/cyan] {report_path}")
+
+    results: list[dict[str, Any]] = [
+        _build_failure_row(run_id=manifest.run_id, failure=failure) for failure in manifest.build_failures
+    ]
+
+    if manifest.status == "failed" and selected_payloads:
+        report_path, final_status = _write_manifest_report(
+            run_id=manifest.run_id,
+            report_dir=report_dir,
+            manifest_path=manifest_path,
+            dry_run=dry_run,
+            manifest_status=manifest.status,
+            build_failures=[failure.model_dump() for failure in manifest.build_failures],
+            diagnostics=manifest.diagnostics,
+            total_candidates=len(manifest.publication_candidates),
+            total_payload_variants=len(all_payload_variants),
+            selected_payload_variants=len(selected_payloads),
+            results=results,
         )
+        err_console.print(
+            "[red]Erro:[/red] run_manifest status='failed' contains publishable payloads; manifest is inconsistent"
+        )
+        console.print(f"[cyan]Final status:[/cyan] {final_status}")
+        console.print(f"[cyan]Report path:[/cyan] {report_path}")
         raise typer.Exit(1)
 
-    results: list[dict[str, Any]] = []
-    for artifact in manifest.artifacts:
-        if artifact.status != "done":
-            results.append(
-                {
-                    "status": "skipped",
-                    "sku": artifact.sku,
-                    "artifact_status": artifact.status,
-                    "errors": [],
-                    "warnings": [f"Artifact skipped due to status={artifact.status}"],
-                }
+    if manifest.status == "failed" and not selected_payloads:
+        for candidate in manifest.publication_candidates:
+            for payload_variant in candidate.payloads:
+                row = _build_payload_result_row(
+                    run_id=manifest.run_id,
+                    candidate=candidate,
+                    payload_variant=payload_variant,
+                )
+                row["selected"] = False
+                row["validation_result"] = {"status": "not_publishable"}
+                row["publish_result"] = "skipped"
+                if not row["block_reason"]:
+                    row["block_reason"] = "manifest_failed"
+                results.append(row)
+        report_path, final_status = _write_manifest_report(
+            run_id=manifest.run_id,
+            report_dir=report_dir,
+            manifest_path=manifest_path,
+            dry_run=dry_run,
+            manifest_status=manifest.status,
+            build_failures=[failure.model_dump() for failure in manifest.build_failures],
+            diagnostics=manifest.diagnostics,
+            total_candidates=len(manifest.publication_candidates),
+            total_payload_variants=len(all_payload_variants),
+            selected_payload_variants=0,
+            results=results,
+        )
+        err_console.print("[red]Erro:[/red] run_manifest status='failed' sem payloads publicáveis")
+        console.print(f"[cyan]Final status:[/cyan] {final_status}")
+        console.print(f"[cyan]Report path:[/cyan] {report_path}")
+        raise typer.Exit(1)
+
+    if not selected_payloads:
+        err_console.print("[red]Erro:[/red] run_manifest sem payloads publicáveis")
+
+    selected_payload_ids = {id(payload) for payload in selected_payloads}
+
+    for candidate in manifest.publication_candidates:
+        for payload_variant in candidate.payloads:
+            result_row = _build_payload_result_row(
+                run_id=manifest.run_id,
+                candidate=candidate,
+                payload_variant=payload_variant,
             )
-            continue
-        for raw_path in artifact.payload_paths:
+            is_selected = id(payload_variant) in selected_payload_ids
+            result_row["selected"] = is_selected
+
+            if not is_selected:
+                result_row["validation_result"] = {"status": "not_publishable"}
+                result_row["publish_result"] = "skipped"
+                if not payload_variant.publishable and not result_row["block_reason"]:
+                    result_row["block_reason"] = "manifest_marked_not_publishable"
+                if not _has_text(payload_variant.payload_path):
+                    result_row["skip_reason"] = result_row["skip_reason"] or "payload_path_missing"
+                results.append(result_row)
+                continue
+
             try:
                 payload_path = _resolve_manifest_payload_path(
                     manifest_path=manifest_path,
                     workspace_root=workspace_root,
-                    raw_path=raw_path,
+                    raw_path=payload_variant.payload_path or "",
                 )
             except ValueError as exc:
-                results.append(
-                    {
-                        "status": "failed",
-                        "sku": artifact.sku,
-                        "payload_path": raw_path,
-                        "errors": [str(exc)],
-                        "warnings": [],
-                    }
-                )
+                result_row["validation_result"] = {"status": "failed"}
+                result_row["publish_result"] = "failed"
+                result_row["api_errors"] = [str(exc)]
+                result_row["block_reason"] = "payload_path_invalid"
+                results.append(result_row)
                 continue
+
+            result_row["resolved_payload_path"] = str(payload_path)
             if not payload_path.exists() or not payload_path.is_file():
-                results.append(
-                    {
-                        "status": "failed",
-                        "sku": artifact.sku,
-                        "payload_path": str(payload_path),
-                        "errors": [f"Payload file not found: {payload_path}"],
-                        "warnings": [],
-                    }
-                )
+                result_row["validation_result"] = {"status": "failed"}
+                result_row["publish_result"] = "failed"
+                result_row["api_errors"] = [f"Payload file not found: {payload_path}"]
+                result_row["block_reason"] = "payload_missing"
+                results.append(result_row)
                 continue
+
+            _, payload_listing_type_id, payload_error = _read_payload_json_and_listing_type_id(payload_path)
+            result_row["actual_payload_listing_type_id"] = payload_listing_type_id
+            if payload_error:
+                result_row["validation_result"] = {"status": "failed"}
+                result_row["publish_result"] = "failed"
+                result_row["api_errors"] = [payload_error]
+                result_row["block_reason"] = "payload_invalid"
+                results.append(result_row)
+                continue
+
+            if payload_listing_type_id != payload_variant.listing_type_id:
+                result_row["validation_result"] = {"status": "not_publishable"}
+                result_row["publish_result"] = "skipped"
+                result_row["block_reason"] = (
+                    "listing_type_id_mismatch: "
+                    f"manifest={payload_variant.listing_type_id} payload={payload_listing_type_id}"
+                )
+                results.append(result_row)
+                continue
+
             result = publish_payload_file(
                 payload_path,
                 report_dir=None,
@@ -146,27 +402,50 @@ def publish_manifest(
                 seller_config_path=seller_config,
                 workspace_root=workspace_root,
             )
-            result["payload_path"] = str(payload_path)
-            results.append(result)
-            if result.get("status") == "published":
-                warnings = result.get("warnings", [])
-                if result.get("validation_status") == "validation_passed_with_warnings" or (
-                    isinstance(warnings, list)
-                    and any(isinstance(w, str) and "ML validation warning:" in w for w in warnings)
-                ):
-                    console.print(
-                        "[yellow]Validation passed with warnings; continuing publication.[/yellow]"
-                    )
+            result_row["validation_result"] = result.get("validation_report") or {
+                "status": result.get("validation_status")
+            }
+            result_row["publish_result"] = result.get("status")
+            result_row["item_id"] = result.get("item_id")
+            result_row["item_ids"] = result.get("item_ids") or []
+            result_row["user_product_id"] = result.get("user_product_id")
+            result_row["publish_endpoints"] = result.get("publish_endpoints") or []
+            result_row["api_errors"] = result.get("errors", [])
+            result_row["api_warnings"] = result.get("warnings", [])
+            result_row["fiscal_result"] = result.get("fiscal_report") or result.get("fiscal_status")
 
-    report_path = _write_manifest_report(
+            if result.get("validation_status") == "validation_passed_with_warnings":
+                console.print("[yellow]Validation passed with warnings; continuing publication.[/yellow]")
+
+            results.append(result_row)
+
+    report_path, final_status = _write_manifest_report(
         run_id=manifest.run_id,
         report_dir=report_dir,
         manifest_path=manifest_path,
         dry_run=dry_run,
+        manifest_status=manifest.status,
+        build_failures=[failure.model_dump() for failure in manifest.build_failures],
+        diagnostics=manifest.diagnostics,
+        total_candidates=len(manifest.publication_candidates),
+        total_payload_variants=len(all_payload_variants),
+        selected_payload_variants=len(selected_payloads),
         results=results,
     )
-    console.print(f"[cyan]Manifest report: {report_path}[/cyan]")
 
-    failures = [item for item in results if item.get("status") == "failed"]
-    if failures:
+    published_classic = len([r for r in results if r.get("variant") == "classic" and r.get("publish_result") == "published"])
+    published_premium = len([r for r in results if r.get("variant") == "premium" and r.get("publish_result") == "published"])
+    failed_or_skipped = len([r for r in results if r.get("publish_result") in {"failed", "skipped"}])
+
+    console.print(f"[cyan]Published classic:[/cyan] {published_classic}")
+    console.print(f"[cyan]Published premium:[/cyan] {published_premium}")
+    console.print(f"[cyan]Failed/skipped count:[/cyan] {failed_or_skipped}")
+    console.print(f"[cyan]Final status:[/cyan] {final_status}")
+    console.print(f"[cyan]Report path:[/cyan] {report_path}")
+
+    if not selected_payloads:
+        raise typer.Exit(1)
+    if dry_run:
+        return
+    if final_status != "success":
         raise typer.Exit(1)
