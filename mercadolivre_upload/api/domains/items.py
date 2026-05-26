@@ -87,6 +87,13 @@ def create_item(client: "MLApiClient", item: dict[str, Any]) -> dict[str, Any]:
     return client.post("/items", json=item)
 
 
+def get_user_product(client: "MLApiClient", user_product_id: str) -> dict[str, Any]:
+    """Fetch user-product metadata (including family_id) after publish."""
+    if not isinstance(user_product_id, str) or not user_product_id.strip():
+        raise ValueError("user_product_id cannot be empty")
+    return client.get(f"/user-products/{user_product_id.strip()}")
+
+
 def create_user_product_item(client: "MLApiClient", item: dict[str, Any]) -> dict[str, Any]:
     """Create user-products payload with MLB-safe endpoint routing."""
     if not _is_existing_user_product_selling_condition_request(item):

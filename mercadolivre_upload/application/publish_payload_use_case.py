@@ -18,13 +18,13 @@ from mercadolivre_upload.adapters.json_payload_reader import (
 )
 from mercadolivre_upload.api.exceptions import MLApiError
 from mercadolivre_upload.application.ports import ItemPublisherPort
-from mercadolivre_upload.application.validators.seller_policy import SellerPolicyValidator
-from mercadolivre_upload.domain.fiscal.data import FiscalData
-from mercadolivre_upload.domain.fiscal.service import FiscalService
 from mercadolivre_upload.application.publish.internals.validation import (
     MercadoLivreValidationResult,
     classify_mercado_livre_validation_response,
 )
+from mercadolivre_upload.application.validators.seller_policy import SellerPolicyValidator
+from mercadolivre_upload.domain.fiscal.data import FiscalData
+from mercadolivre_upload.domain.fiscal.service import FiscalService
 
 logger = logging.getLogger(__name__)
 
@@ -35,10 +35,11 @@ class PublishPayloadResult:
 
     sku: str | None
     path: str
-    status: Literal["published", "skipped", "failed"]
+    status: Literal["published", "published_but_not_grouped", "skipped", "failed"]
     item_id: str | None = None
     item_ids: list[str] = field(default_factory=list)
     user_product_id: str | None = None
+    publish_endpoints: list[str] = field(default_factory=list)
     error: str | None = None
     warnings: list[str] = field(default_factory=list)
     validation_status: str | None = None
@@ -80,10 +81,105 @@ def _expand_publish_payloads(payload: dict[str, Any], upload_mode: str) -> list[
     return expanded
 
 
-def _format_ml_api_error(exc: MLApiError) -> str:
+def _is_existing_user_product_selling_condition_payload(payload: dict[str, Any]) -> bool:
+    return any(
+        payload.get(field) == "existing_user_product_selling_condition"
+        for field in ("target", "execution_mode")
+    )
+
+
+def _publish_endpoint_for_payload(payload: dict[str, Any], upload_mode: str) -> str:
+    if (
+        upload_mode == "user_products"
+        and _is_existing_user_product_selling_condition_payload(payload)
+    ):
+        return "/user-products/{user_product_id}/items"
+    return "/items"
+
+
+def _normalize_grouping_id(raw: object) -> str | None:
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        text = raw.strip()
+    elif isinstance(raw, (int, float)):
+        text = str(raw).strip()
+    else:
+        return None
+    return text or None
+
+
+def _family_id_from_item(item: dict[str, Any]) -> str | None:
+    return _normalize_grouping_id(item.get("family_id"))
+
+
+def _user_product_id_from_item(item: dict[str, Any]) -> str | None:
+    return _normalize_grouping_id(item.get("user_product_id"))
+
+
+def _resolve_family_ids_for_grouping(
+    created_items: list[dict[str, Any]],
+    publisher: ItemPublisherPort,
+) -> list[str | None]:
+    family_ids: list[str | None] = []
+    for item in created_items:
+        if not isinstance(item, dict):
+            family_ids.append(None)
+            continue
+        family_id = _family_id_from_item(item)
+        user_product_id = _user_product_id_from_item(item)
+        if family_id is None and user_product_id:
+            try:
+                up_payload = publisher.get_user_product(user_product_id)
+                if isinstance(up_payload, dict):
+                    family_id = _family_id_from_item(up_payload)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Failed to resolve user product family_id for %s: %s",
+                    user_product_id,
+                    exc,
+                )
+        family_ids.append(family_id)
+    return family_ids
+
+
+def _verify_user_products_grouping(
+    created_items: list[dict[str, Any]],
+    *,
+    publisher: ItemPublisherPort,
+) -> tuple[bool, str | None]:
+    """Return whether multi-item UP publishes share a consistent family_id."""
+
+    if len(created_items) <= 1:
+        return True, None
+
+    family_ids = _resolve_family_ids_for_grouping(created_items, publisher)
+    if any(family_id is None for family_id in family_ids):
+        return False, "missing_family_id_for_multi_item_user_products_publish"
+    if len(set(family_ids)) > 1:
+        return False, "divergent_family_id_across_user_product_items"
+    return True, None
+
+
+def _format_ml_api_error(
+    exc: MLApiError,
+    *,
+    sanitization_metadata: dict[str, Any] | None = None,
+) -> str:
     """Format ML API errors, preserving full response payload when available."""
     blocking = [c for c in exc.causes if c.get("type") == "error"]
     blocking_message = "; ".join(f"[{c.get('code', '?')}] {c.get('message', '')}" for c in blocking)
+    cause_fragments: list[str] = []
+    for cause in blocking:
+        code = cause.get("code")
+        message = cause.get("message")
+        references = cause.get("references")
+        pieces = [f"[{code}]" if code else "[?]"]
+        if isinstance(references, list) and references:
+            pieces.append(f"references={','.join(str(ref) for ref in references)}")
+        if isinstance(message, str) and message.strip():
+            pieces.append(message.strip())
+        cause_fragments.append(" | ".join(pieces))
 
     response_fragment: str | None = None
     response_body: Any | None = exc.response_body
@@ -103,7 +199,26 @@ def _format_ml_api_error(exc: MLApiError) -> str:
         except (TypeError, ValueError):
             response_fragment = str(response_body)
 
-    parts = [part for part in (blocking_message, response_fragment) if part]
+    if isinstance(sanitization_metadata, dict):
+        removed_fields = sanitization_metadata.get("removed_fields")
+        endpoint = sanitization_metadata.get("endpoint")
+        if removed_fields or endpoint:
+            cause_fragments.append(
+                "sanitized="
+                + json.dumps(
+                    {
+                        "endpoint": endpoint,
+                        "removed_fields": removed_fields or [],
+                    },
+                    sort_keys=True,
+                )
+            )
+
+    parts = [
+        part
+        for part in (blocking_message, "; ".join(cause_fragments), response_fragment)
+        if part
+    ]
     return " | ".join(parts) if parts else str(exc)
 
 
@@ -307,15 +422,17 @@ class PublishPayloadUseCase:
         4. Validate seller policy rules
         5. If dry_run → return skipped result
         6. Publish one or more items
-        7. POST /items/{id}/description (when description is present)
-        8. Submit fiscal information workflow (when fiscal.items is present)
+        7. Verify user-products family_id grouping (multi-item UP only)
+        8. POST /items/{id}/description (when description is present)
+        9. Submit fiscal information workflow (when fiscal.items is present)
 
         Args:
             path: Path to the payload.json file.
             dry_run: When True, validates only — does not call the API.
 
         Returns:
-            PublishPayloadResult with status "published", "skipped", or "failed".
+            PublishPayloadResult with status "published", "published_but_not_grouped",
+            "skipped", or "failed".
         """
         # 1. Read and validate schema
         try:
@@ -491,6 +608,8 @@ class PublishPayloadUseCase:
 
         # 6. Publish one or more items.
         created_item_ids: list[str] = []
+        created_items: list[dict[str, Any]] = []
+        publish_endpoints: list[str] = []
         first_item_id: str | None = None
         user_product_id: str | None = None
         description_posted = False
@@ -498,9 +617,17 @@ class PublishPayloadUseCase:
         variation_id_by_sku: dict[str, str] = {}
         for index, publish_payload in enumerate(publish_payloads, start=1):
             payload = dict(publish_payload)
-            if read_result.upload_mode == "user_products":
-                if user_product_id:
+            if (
+                read_result.upload_mode == "user_products"
+                and _is_existing_user_product_selling_condition_payload(payload)
+                and isinstance(user_product_id, str)
+                and user_product_id.strip()
+            ):
+                payload_user_product_id = payload.get("user_product_id")
+                if not (isinstance(payload_user_product_id, str) and payload_user_product_id.strip()):
                     payload["user_product_id"] = user_product_id
+            endpoint_used = _publish_endpoint_for_payload(payload, read_result.upload_mode)
+            if read_result.upload_mode == "user_products":
                 create_item = self._publisher.create_user_product_item
             else:
                 create_item = self._publisher.create_item
@@ -508,7 +635,19 @@ class PublishPayloadUseCase:
             try:
                 item = create_item(payload)
             except MLApiError as exc:
-                causes_str = _prefix_message(_format_ml_api_error(exc), index, total_payloads)
+                sanitization_metadata = getattr(
+                    self._publisher,
+                    "last_user_product_sanitization",
+                    None,
+                )
+                causes_str = _prefix_message(
+                    _format_ml_api_error(
+                        exc,
+                        sanitization_metadata=sanitization_metadata,
+                    ),
+                    index,
+                    total_payloads,
+                )
                 logger.error("ML API rejected %s: %s", path, causes_str)
                 return PublishPayloadResult(
                     sku=read_result.sku,
@@ -517,6 +656,7 @@ class PublishPayloadUseCase:
                     item_id=first_item_id,
                     item_ids=created_item_ids,
                     user_product_id=user_product_id,
+                    publish_endpoints=publish_endpoints,
                     error=causes_str,
                     warnings=warnings,
                 )
@@ -530,12 +670,15 @@ class PublishPayloadUseCase:
                     item_id=first_item_id,
                     item_ids=created_item_ids,
                     user_product_id=user_product_id,
+                    publish_endpoints=publish_endpoints,
                     error=error_message,
                     warnings=warnings,
                 )
 
             item_id = str(item["id"])
             created_item_ids.append(item_id)
+            created_items.append(item)
+            publish_endpoints.append(endpoint_used)
             if first_item_id is None:
                 first_item_id = item_id
             payload_sku = _extract_payload_seller_sku(payload)
@@ -563,27 +706,6 @@ class PublishPayloadUseCase:
                 if isinstance(raw_user_product_id, str) and raw_user_product_id.strip():
                     user_product_id = raw_user_product_id.strip()
 
-            if (
-                read_result.upload_mode == "user_products"
-                and total_payloads > 1
-                and index == 1
-                and user_product_id is None
-            ):
-                error_message = (
-                    "item[1]: first user-products publish did not return user_product_id"
-                )
-                logger.error("Failed to continue UP publish for %s: %s", path, error_message)
-                return PublishPayloadResult(
-                    sku=read_result.sku,
-                    path=str(path),
-                    status="failed",
-                    item_id=first_item_id,
-                    item_ids=created_item_ids,
-                    user_product_id=user_product_id,
-                    error=error_message,
-                    warnings=warnings,
-                )
-
             # 6. Post description separately after the first successful item creation.
             if read_result.description and not description_posted:
                 for attempt in range(2):
@@ -604,6 +726,21 @@ class PublishPayloadUseCase:
                                 exc,
                             )
                 description_posted = True
+
+        publish_status: Literal["published", "published_but_not_grouped"] = "published"
+        if read_result.upload_mode == "user_products":
+            grouped, grouping_reason = _verify_user_products_grouping(
+                created_items,
+                publisher=self._publisher,
+            )
+            if not grouped:
+                publish_status = "published_but_not_grouped"
+                warnings.append(grouping_reason or "user_products_items_not_grouped")
+                logger.warning(
+                    "User products publish succeeded but grouping verification failed for %s: %s",
+                    path,
+                    grouping_reason,
+                )
 
         # 7. Submit fiscal workflow for each fiscal.items entry.
         fiscal_blocking_errors: list[str] = []
@@ -796,6 +933,7 @@ class PublishPayloadUseCase:
                 item_id=first_item_id,
                 item_ids=created_item_ids,
                 user_product_id=user_product_id,
+                publish_endpoints=publish_endpoints,
                 error=fiscal_error_message,
                 warnings=warnings,
                 validation_status=aggregate_validation_status,
@@ -807,10 +945,11 @@ class PublishPayloadUseCase:
         return PublishPayloadResult(
             sku=read_result.sku,
             path=str(path),
-            status="published",
+            status=publish_status,
             item_id=first_item_id,
             item_ids=created_item_ids,
             user_product_id=user_product_id,
+            publish_endpoints=publish_endpoints,
             warnings=warnings,
             validation_status=aggregate_validation_status,
             validation_report=validation_report,

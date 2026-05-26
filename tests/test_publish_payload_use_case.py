@@ -15,6 +15,8 @@ from mercadolivre_upload.adapters.json_payload_reader import (
     JsonPayloadReader,
     ReadPayloadResult,
 )
+from mercadolivre_upload.api.client import MLApiClient
+from mercadolivre_upload.api.exceptions import MLApiError
 from mercadolivre_upload.application.publish_payload_use_case import (
     PublishPayloadUseCase,
 )
@@ -26,6 +28,10 @@ from mercadolivre_upload.application.validators.seller_policy import (
     SellerConfig,
     SellerPolicyValidator,
 )
+
+
+def _grouped_up_response(**fields: Any) -> dict[str, Any]:
+    return {"family_id": "FAM-1", **fields}
 
 
 def _make_seller_config(
@@ -197,6 +203,10 @@ def _make_use_case(
         "id": "MLB987654321",
         "user_product_id": "MLBU123456",
     }
+    publisher.get_user_product.side_effect = lambda user_product_id: {
+        "id": user_product_id,
+        "family_id": "FAM-1",
+    }
     use_case = PublishPayloadUseCase(
         reader=reader,
         policy=policy,
@@ -236,7 +246,9 @@ class TestPublishPayloadUseCase:
         assert "item.title.required" in result.error
         publisher.create_item.assert_not_called()
 
-    def test_publish_continues_when_validation_has_only_warning_causes(self, tmp_path: Path) -> None:
+    def test_publish_continues_when_validation_has_only_warning_causes(
+        self, tmp_path: Path
+    ) -> None:
         use_case, reader, publisher = _make_use_case()
         reader.read.return_value = _make_read_result()
         publisher.validate_item.return_value = {
@@ -287,7 +299,10 @@ class TestPublishPayloadUseCase:
         assert result.status == "published"
         assert result.item_id == "MLB987654321"
         assert result.validation_status == "validation_passed_with_warnings"
-        assert any("item.shipping.mandatory_free_shipping" in warning for warning in result.warnings)
+        assert any(
+            "item.shipping.mandatory_free_shipping" in warning
+            for warning in result.warnings
+        )
         publisher.create_item.assert_called_once()
 
     def test_publish_blocks_when_validation_has_warning_and_error(self, tmp_path: Path) -> None:
@@ -521,8 +536,8 @@ class TestPublishPayloadUseCase:
             ],
         )
         publisher.create_user_product_item.side_effect = [
-            {"id": "MLB1", "user_product_id": "MLBU123"},
-            {"id": "MLB2", "user_product_id": "MLBU123"},
+            _grouped_up_response(id="MLB1", user_product_id="MLBU123"),
+            _grouped_up_response(id="MLB2", user_product_id="MLBU123"),
         ]
 
         result = use_case.execute(tmp_path / "payload.json")
@@ -597,8 +612,8 @@ class TestPublishPayloadUseCase:
             publish_item_skus=["SKU-A", "SKU-B"],
         )
         publisher.create_user_product_item.side_effect = [
-            {"id": "MLB1", "user_product_id": "MLBU123"},
-            {"id": "MLB2", "user_product_id": "MLBU123"},
+            _grouped_up_response(id="MLB1", user_product_id="MLBU123"),
+            _grouped_up_response(id="MLB2", user_product_id="MLBU123"),
         ]
 
         result = use_case.execute(tmp_path / "payload.json")
@@ -792,8 +807,8 @@ class TestPublishPayloadUseCase:
             ],
         )
         publisher.create_user_product_item.side_effect = [
-            {"id": "MLB1", "user_product_id": "MLBU123"},
-            {"id": "MLB2", "user_product_id": "MLBU123"},
+            _grouped_up_response(id="MLB1", user_product_id="MLBU123"),
+            _grouped_up_response(id="MLB2", user_product_id="MLBU123"),
         ]
 
         result = use_case.execute(tmp_path / "payload.json")
@@ -840,8 +855,8 @@ class TestPublishPayloadUseCase:
             ]
         )
         publisher.create_user_product_item.side_effect = [
-            {"id": "MLB1", "user_product_id": "MLBU123"},
-            {"id": "MLB2", "user_product_id": "MLBU123"},
+            {"id": "MLB1", "user_product_id": "MLBU123", "family_id": "FAM-1"},
+            {"id": "MLB2", "user_product_id": "MLBU456", "family_id": "FAM-1"},
         ]
 
         result = use_case.execute(tmp_path / "payload.json")
@@ -857,14 +872,143 @@ class TestPublishPayloadUseCase:
         assert first_payload["family_name"] == "Linha Alpha"
         assert "user_product_id" not in first_payload
         assert second_payload["family_name"] == "Linha Alpha"
-        assert second_payload["user_product_id"] == "MLBU123"
+        assert "user_product_id" not in second_payload
+        assert result.publish_endpoints == ["/items", "/items"]
         publisher.create_item_description.assert_called_once_with("MLB1", "Descrição do produto")
+
+    def test_publish_user_products_api_error_reports_sanitized_shipping_path(
+        self, tmp_path: Path
+    ) -> None:
+        use_case, reader, publisher = _make_use_case()
+        reader.read.return_value = _make_user_products_read_result(
+            items=[
+                {
+                    "category_id": "MLB271599",
+                    "price": 50.0,
+                    "currency_id": "BRL",
+                    "available_quantity": 10,
+                    "buying_mode": "buy_it_now",
+                    "listing_type_id": "gold_special",
+                    "condition": "new",
+                    "shipping": {"mode": "me2", "free_shipping": True, "local_pick_up": False},
+                }
+            ]
+        )
+        publisher.last_user_product_sanitization = {
+            "endpoint": "/user-products/{user_product_id}/items",
+            "removed_fields": ["shipping.local_pick_up"],
+        }
+        publisher.create_user_product_item.side_effect = MLApiError(
+            "bad request",
+            response_body={
+                "message": "Validation error",
+                "cause": [
+                    {
+                        "type": "error",
+                        "code": "item.shipping.invalid_field",
+                        "references": ["item.shipping.local_pick_up"],
+                        "message": "Request body contains invalid fields [local_pick_up]",
+                    }
+                ],
+            },
+        )
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "failed"
+        assert "item.shipping.invalid_field" in (result.error or "")
+        assert "references=item.shipping.local_pick_up" in (result.error or "")
+        assert (
+            'sanitized={"endpoint": "/user-products/{user_product_id}/items", '
+            '"removed_fields": ["shipping.local_pick_up"]}'
+            in (result.error or "")
+        )
 
     def test_publish_user_products_payload_array_sends_separate_requests(
         self, tmp_path: Path
     ) -> None:
         use_case, reader, publisher = _make_use_case()
+        entries = [
+            {
+                "family_name": "Linha Alpha",
+                "category_id": "MLB271599",
+                "price": 50.0,
+                "currency_id": "BRL",
+                "available_quantity": 10,
+                "buying_mode": "buy_it_now",
+                "listing_type_id": "gold_special",
+                "condition": "new",
+                "pictures": [{"source": "https://cdn.ml.com/img-1.jpg"}],
+                "attributes": [{"id": "SELLER_SKU", "value_name": "SKU-A"}],
+                "shipping": {"mode": "me2", "free_shipping": True, "local_pick_up": True},
+                "sale_terms": [{"id": "WARRANTY_TYPE", "value_name": "Garantia do vendedor"}],
+            },
+            {
+                "family_name": "Linha Alpha",
+                "category_id": "MLB271599",
+                "price": 60.0,
+                "currency_id": "BRL",
+                "available_quantity": 5,
+                "buying_mode": "buy_it_now",
+                "listing_type_id": "gold_special",
+                "condition": "new",
+                "pictures": [{"source": "https://cdn.ml.com/img-2.jpg"}],
+                "attributes": [{"id": "SELLER_SKU", "value_name": "SKU-B"}],
+                "shipping": {"mode": "me2", "free_shipping": False, "local_pick_up": True},
+                "sale_terms": [{"id": "WARRANTY_TYPE", "value_name": "Garantia do vendedor"}],
+            },
+        ]
         reader.read.return_value = _make_user_products_payload_array_read_result(
+            entries=entries
+        )
+        publisher.create_user_product_item.side_effect = [
+            _grouped_up_response(id="MLB1", user_product_id="MLBU123"),
+            _grouped_up_response(id="MLB2", user_product_id="MLBU123"),
+        ]
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "published"
+        assert publisher.validate_user_product_item.call_count == 2
+        assert publisher.create_user_product_item.call_count == 2
+        first_validation_payload = publisher.validate_user_product_item.call_args_list[0].args[0]
+        second_validation_payload = publisher.validate_user_product_item.call_args_list[1].args[0]
+        first_payload = publisher.create_user_product_item.call_args_list[0].args[0]
+        second_payload = publisher.create_user_product_item.call_args_list[1].args[0]
+        assert first_validation_payload == first_payload
+        assert second_validation_payload == second_payload
+        assert "items" not in first_payload
+        assert "payload" not in first_payload
+        assert first_payload["family_name"] == "Linha Alpha"
+        assert second_payload["family_name"] == "Linha Alpha"
+        assert "user_product_id" not in second_payload
+        for source, created in zip(entries, [first_payload, second_payload], strict=True):
+            assert created["pictures"] == source["pictures"]
+            assert created["attributes"] == source["attributes"]
+            assert created["available_quantity"] == source["available_quantity"]
+            assert created["shipping"] == source["shipping"]
+            assert created["sale_terms"] == source["sale_terms"]
+            assert created["listing_type_id"] == source["listing_type_id"]
+            assert created["shipping"]["local_pick_up"] is True
+        assert result.publish_endpoints == ["/items", "/items"]
+
+    def test_publish_user_products_payload_array_uses_items_endpoint_with_api_client(
+        self, tmp_path: Path
+    ) -> None:
+        reader = MagicMock(spec=JsonPayloadReader)
+        policy = SellerPolicyValidator(_make_seller_config())
+        publisher = MLApiClient(http_client=MagicMock())
+        publisher.post = MagicMock(
+            side_effect=[
+                {},
+                {},
+                {"id": "MLB1", "user_product_id": "MLBU123", "family_id": "FAM-1"},
+                {"id": "MLB2", "user_product_id": "MLBU123", "family_id": "FAM-1"},
+            ]
+        )
+        use_case = PublishPayloadUseCase(reader=reader, policy=policy, publisher=publisher)
+        reader.read.return_value = _make_user_products_payload_array_read_result(
+            description=None,
             entries=[
                 {
                     "family_name": "Linha Alpha",
@@ -876,6 +1020,9 @@ class TestPublishPayloadUseCase:
                     "listing_type_id": "gold_special",
                     "condition": "new",
                     "pictures": [{"source": "https://cdn.ml.com/img-1.jpg"}],
+                    "attributes": [{"id": "SELLER_SKU", "value_name": "SKU-A"}],
+                    "shipping": {"mode": "me2", "free_shipping": True, "local_pick_up": True},
+                    "sale_terms": [{"id": "WARRANTY_TYPE", "value_name": "Garantia do vendedor"}],
                 },
                 {
                     "family_name": "Linha Alpha",
@@ -887,24 +1034,29 @@ class TestPublishPayloadUseCase:
                     "listing_type_id": "gold_special",
                     "condition": "new",
                     "pictures": [{"source": "https://cdn.ml.com/img-2.jpg"}],
+                    "attributes": [{"id": "SELLER_SKU", "value_name": "SKU-B"}],
+                    "shipping": {"mode": "me2", "free_shipping": False, "local_pick_up": True},
+                    "sale_terms": [{"id": "WARRANTY_TYPE", "value_name": "Garantia do vendedor"}],
                 },
-            ]
+            ],
         )
-        publisher.create_user_product_item.side_effect = [
-            {"id": "MLB1", "user_product_id": "MLBU123"},
-            {"id": "MLB2", "user_product_id": "MLBU123"},
-        ]
 
         result = use_case.execute(tmp_path / "payload.json")
 
         assert result.status == "published"
-        assert publisher.create_user_product_item.call_count == 2
-        first_payload = publisher.create_user_product_item.call_args_list[0].args[0]
-        second_payload = publisher.create_user_product_item.call_args_list[1].args[0]
-        assert "items" not in first_payload
-        assert "payload" not in first_payload
-        assert first_payload["family_name"] == "Linha Alpha"
-        assert second_payload["user_product_id"] == "MLBU123"
+        assert result.publish_endpoints == ["/items", "/items"]
+        assert [call.args[0] for call in publisher.post.call_args_list] == [
+            "/items/validate",
+            "/items/validate",
+            "/items",
+            "/items",
+        ]
+        first_post_body = publisher.post.call_args_list[2].kwargs["json"]
+        second_post_body = publisher.post.call_args_list[3].kwargs["json"]
+        assert first_post_body["family_name"] == "Linha Alpha"
+        assert second_post_body["family_name"] == "Linha Alpha"
+        assert first_post_body["shipping"]["local_pick_up"] is True
+        assert second_post_body["shipping"]["local_pick_up"] is True
 
     def test_publish_user_products_continues_when_validation_has_only_warning(
         self, tmp_path: Path
@@ -953,7 +1105,7 @@ class TestPublishPayloadUseCase:
         assert "item.title.required" in (result.error or "")
         publisher.create_user_product_item.assert_not_called()
 
-    def test_publish_user_products_missing_user_product_id_fails_after_first_item(
+    def test_publish_user_products_multiple_items_does_not_require_first_user_product_id(
         self, tmp_path: Path
     ) -> None:
         use_case, reader, publisher = _make_use_case()
@@ -983,14 +1135,58 @@ class TestPublishPayloadUseCase:
                 },
             ]
         )
-        publisher.create_user_product_item.return_value = {"id": "MLB1"}
+        publisher.create_user_product_item.return_value = _grouped_up_response(id="MLB1")
 
         result = use_case.execute(tmp_path / "payload.json")
 
-        assert result.status == "failed"
+        assert result.status == "published"
         assert result.item_id == "MLB1"
-        assert result.item_ids == ["MLB1"]
-        assert "user_product_id" in (result.error or "")
+        assert result.item_ids == ["MLB1", "MLB1"]
+        assert result.user_product_id is None
+        assert result.publish_endpoints == ["/items", "/items"]
+
+    def test_publish_existing_user_product_mode_reuses_first_user_product_id(
+        self, tmp_path: Path
+    ) -> None:
+        use_case, reader, publisher = _make_use_case()
+        reader.read.return_value = _make_user_products_payload_array_read_result(
+            description=None,
+            entries=[
+                {
+                    "target": "existing_user_product_selling_condition",
+                    "price": 50.0,
+                    "category_id": "MLB271599",
+                    "currency_id": "BRL",
+                    "buying_mode": "buy_it_now",
+                    "listing_type_id": "gold_special",
+                },
+                {
+                    "target": "existing_user_product_selling_condition",
+                    "price": 60.0,
+                    "category_id": "MLB271599",
+                    "currency_id": "BRL",
+                    "buying_mode": "buy_it_now",
+                    "listing_type_id": "gold_special",
+                },
+            ],
+        )
+        publisher.create_user_product_item.side_effect = [
+            _grouped_up_response(id="MLB1", user_product_id="MLBU123"),
+            _grouped_up_response(id="MLB2"),
+        ]
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "published"
+        assert result.user_product_id == "MLBU123"
+        assert result.publish_endpoints == [
+            "/user-products/{user_product_id}/items",
+            "/user-products/{user_product_id}/items",
+        ]
+        first_payload = publisher.create_user_product_item.call_args_list[0].args[0]
+        second_payload = publisher.create_user_product_item.call_args_list[1].args[0]
+        assert "user_product_id" not in first_payload
+        assert second_payload["user_product_id"] == "MLBU123"
 
 
 class TestSellerPolicyVariations:
@@ -1202,3 +1398,211 @@ class TestFiscalWarningGate:
 
         assert result.status == "published"
         assert not any("fiscal" in w.lower() for w in result.warnings)
+
+
+class TestUserProductsGroupingVerification:
+    def test_publish_user_products_reports_not_grouped_when_grouping_ids_absent(
+        self, tmp_path: Path
+    ) -> None:
+        use_case, reader, publisher = _make_use_case()
+        reader.read.return_value = _make_user_products_read_result(
+            items=[
+                {
+                    "category_id": "MLB271599",
+                    "price": 50.0,
+                    "currency_id": "BRL",
+                    "available_quantity": 10,
+                    "buying_mode": "buy_it_now",
+                    "listing_type_id": "gold_special",
+                    "condition": "new",
+                    "pictures": [{"source": "https://cdn.ml.com/img-1.jpg"}],
+                },
+                {
+                    "category_id": "MLB271599",
+                    "price": 60.0,
+                    "currency_id": "BRL",
+                    "available_quantity": 5,
+                    "buying_mode": "buy_it_now",
+                    "listing_type_id": "gold_special",
+                    "condition": "new",
+                    "pictures": [{"source": "https://cdn.ml.com/img-2.jpg"}],
+                },
+            ]
+        )
+        publisher.create_user_product_item.side_effect = [
+            {"id": "MLB1", "user_product_id": "MLBU123"},
+            {"id": "MLB2", "user_product_id": "MLBU456"},
+        ]
+        publisher.get_user_product.side_effect = [
+            {"id": "MLBU123"},
+            {"id": "MLBU456"},
+        ]
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "published_but_not_grouped"
+        assert "missing_family_id_for_multi_item_user_products_publish" in result.warnings
+
+    def test_publish_user_products_reports_not_grouped_when_grouping_ids_diverge(
+        self, tmp_path: Path
+    ) -> None:
+        use_case, reader, publisher = _make_use_case()
+        reader.read.return_value = _make_user_products_read_result(
+            items=[
+                {
+                    "category_id": "MLB271599",
+                    "price": 50.0,
+                    "currency_id": "BRL",
+                    "available_quantity": 10,
+                    "buying_mode": "buy_it_now",
+                    "listing_type_id": "gold_special",
+                    "condition": "new",
+                    "pictures": [{"source": "https://cdn.ml.com/img-1.jpg"}],
+                },
+                {
+                    "category_id": "MLB271599",
+                    "price": 60.0,
+                    "currency_id": "BRL",
+                    "available_quantity": 5,
+                    "buying_mode": "buy_it_now",
+                    "listing_type_id": "gold_special",
+                    "condition": "new",
+                    "pictures": [{"source": "https://cdn.ml.com/img-2.jpg"}],
+                },
+            ]
+        )
+        publisher.create_user_product_item.side_effect = [
+            {"id": "MLB1", "user_product_id": "MLBU123"},
+            {"id": "MLB2", "user_product_id": "MLBU456"},
+        ]
+        publisher.get_user_product.side_effect = lambda user_product_id: {
+            "id": user_product_id,
+            "family_id": "FAM-1" if user_product_id == "MLBU123" else "FAM-2",
+        }
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "published_but_not_grouped"
+        assert "divergent_family_id_across_user_product_items" in result.warnings
+
+    def test_publish_user_products_allows_different_user_product_id_with_consistent_family_id(
+        self, tmp_path: Path
+    ) -> None:
+        use_case, reader, publisher = _make_use_case()
+        reader.read.return_value = _make_user_products_read_result(
+            items=[
+                {
+                    "category_id": "MLB271599",
+                    "price": 50.0,
+                    "currency_id": "BRL",
+                    "available_quantity": 10,
+                    "buying_mode": "buy_it_now",
+                    "listing_type_id": "gold_special",
+                    "condition": "new",
+                    "pictures": [{"source": "https://cdn.ml.com/img-1.jpg"}],
+                },
+                {
+                    "category_id": "MLB271599",
+                    "price": 60.0,
+                    "currency_id": "BRL",
+                    "available_quantity": 5,
+                    "buying_mode": "buy_it_now",
+                    "listing_type_id": "gold_special",
+                    "condition": "new",
+                    "pictures": [{"source": "https://cdn.ml.com/img-2.jpg"}],
+                },
+            ]
+        )
+        publisher.create_user_product_item.side_effect = [
+            {"id": "MLB1", "user_product_id": "MLBU123", "family_id": "FAM-1"},
+            {"id": "MLB2", "user_product_id": "MLBU999", "family_id": "FAM-1"},
+        ]
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "published"
+        assert result.user_product_id == "MLBU123"
+
+    def test_publish_user_products_reports_not_grouped_when_only_one_item_has_family_id(
+        self, tmp_path: Path
+    ) -> None:
+        use_case, reader, publisher = _make_use_case()
+        reader.read.return_value = _make_user_products_read_result(
+            items=[
+                {
+                    "category_id": "MLB271599",
+                    "price": 50.0,
+                    "currency_id": "BRL",
+                    "available_quantity": 10,
+                    "buying_mode": "buy_it_now",
+                    "listing_type_id": "gold_special",
+                    "condition": "new",
+                    "pictures": [{"source": "https://cdn.ml.com/img-1.jpg"}],
+                },
+                {
+                    "category_id": "MLB271599",
+                    "price": 60.0,
+                    "currency_id": "BRL",
+                    "available_quantity": 5,
+                    "buying_mode": "buy_it_now",
+                    "listing_type_id": "gold_special",
+                    "condition": "new",
+                    "pictures": [{"source": "https://cdn.ml.com/img-2.jpg"}],
+                },
+            ]
+        )
+        publisher.create_user_product_item.side_effect = [
+            {"id": "MLB1", "user_product_id": "MLBU123", "family_id": "FAM-1"},
+            {"id": "MLB2", "user_product_id": "MLBU456"},
+        ]
+        publisher.get_user_product.side_effect = lambda user_product_id: {
+            "id": user_product_id,
+            "family_id": "FAM-1" if user_product_id == "MLBU123" else None,
+        }
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "published_but_not_grouped"
+        assert "missing_family_id_for_multi_item_user_products_publish" in result.warnings
+
+    def test_publish_user_products_resolves_family_id_via_get_user_product(
+        self, tmp_path: Path
+    ) -> None:
+        use_case, reader, publisher = _make_use_case()
+        reader.read.return_value = _make_user_products_read_result(
+            items=[
+                {
+                    "category_id": "MLB271599",
+                    "price": 50.0,
+                    "currency_id": "BRL",
+                    "available_quantity": 10,
+                    "buying_mode": "buy_it_now",
+                    "listing_type_id": "gold_special",
+                    "condition": "new",
+                    "pictures": [{"source": "https://cdn.ml.com/img-1.jpg"}],
+                },
+                {
+                    "category_id": "MLB271599",
+                    "price": 60.0,
+                    "currency_id": "BRL",
+                    "available_quantity": 5,
+                    "buying_mode": "buy_it_now",
+                    "listing_type_id": "gold_special",
+                    "condition": "new",
+                    "pictures": [{"source": "https://cdn.ml.com/img-2.jpg"}],
+                },
+            ]
+        )
+        publisher.create_user_product_item.side_effect = [
+            {"id": "MLB1", "user_product_id": "MLBU123"},
+            {"id": "MLB2", "user_product_id": "MLBU456"},
+        ]
+        publisher.get_user_product.side_effect = lambda user_product_id: {
+            "id": user_product_id,
+            "family_id": "FAM-1",
+        }
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "published"
+        assert publisher.get_user_product.call_count == 2

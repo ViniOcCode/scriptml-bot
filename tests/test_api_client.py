@@ -120,6 +120,16 @@ def test_validate_existing_user_product_sales_condition_does_not_require_family_
     client.validate_item.assert_not_called()
 
 
+def test_get_user_product_fetches_metadata():
+    client = MLApiClient(http_client=MagicMock())
+    client.get = MagicMock(return_value={"id": "MLBU123", "family_id": "FAM-1"})
+
+    result = item_endpoints.get_user_product(client, "MLBU123")
+
+    assert result == {"id": "MLBU123", "family_id": "FAM-1"}
+    client.get.assert_called_once_with("/user-products/MLBU123")
+
+
 def test_create_user_product_item_posts_complete_payload_to_items():
     client = MLApiClient(http_client=MagicMock())
     payload = {

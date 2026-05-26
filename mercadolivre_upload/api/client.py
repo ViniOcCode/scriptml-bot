@@ -396,6 +396,10 @@ class MLApiClient:
         """Create user-products payload with MLB-safe endpoint routing."""
         return item_endpoints.create_user_product_item(self, item)
 
+    def get_user_product(self, user_product_id: str) -> dict[str, Any]:
+        """Fetch user-product metadata (including family_id)."""
+        return item_endpoints.get_user_product(self, user_product_id)
+
     def create_item_description(self, item_id: str, plain_text: str) -> dict[str, Any]:
         """Create or update item description."""
         return item_endpoints.create_item_description(

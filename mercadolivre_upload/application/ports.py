@@ -38,6 +38,10 @@ class ItemPublisherPort(Protocol):
         """Create/publish item using user-products route."""
         ...
 
+    def get_user_product(self, user_product_id: str) -> dict[str, Any]:
+        """Fetch user-product metadata (including family_id)."""
+        ...
+
     def get_available_listing_types(self, category_id: str) -> list[dict[str, Any]]:
         """Get listing types available for current user in a category."""
         ...

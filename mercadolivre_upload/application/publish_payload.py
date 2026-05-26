@@ -59,6 +59,7 @@ def _result_to_dict(result: PublishPayloadResult, *, report_path: Path | None = 
         "item_id": result.item_id,
         "item_ids": result.item_ids,
         "user_product_id": result.user_product_id,
+        "publish_endpoints": result.publish_endpoints,
         "errors": errors,
         "warnings": result.warnings,
         "validation_status": result.validation_status,
@@ -93,6 +94,7 @@ def _write_report(results: list[PublishPayloadResult], report_dir: Path) -> Path
     report_path = report_dir / "report.json"
 
     published = [r for r in results if r.status == "published"]
+    published_but_not_grouped = [r for r in results if r.status == "published_but_not_grouped"]
     failed = [r for r in results if r.status == "failed"]
     skipped = [r for r in results if r.status == "skipped"]
     report: dict[str, Any] = {
@@ -101,6 +103,7 @@ def _write_report(results: list[PublishPayloadResult], report_dir: Path) -> Path
         "summary": {
             "total": len(results),
             "published": len(published),
+            "published_but_not_grouped": len(published_but_not_grouped),
             "failed": len(failed),
             "skipped": len(skipped),
         },
@@ -112,6 +115,7 @@ def _write_report(results: list[PublishPayloadResult], report_dir: Path) -> Path
                 "item_id": result.item_id,
                 "item_ids": result.item_ids,
                 "user_product_id": result.user_product_id,
+                "publish_endpoints": result.publish_endpoints,
                 "error": result.error,
                 "warnings": result.warnings,
                 "validation_status": result.validation_status,

@@ -60,6 +60,7 @@ def test_item_publisher_port_covers_publish_flow_surface() -> None:
         "validate_user_product_item",
         "create_item",
         "create_user_product_item",
+        "get_user_product",
         "get_available_listing_types",
         "get_site_listing_types",
         "get_category_sale_terms",

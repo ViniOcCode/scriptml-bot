@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 import typer
 
-from mercadolivre_upload.cli.commands.publish_manifest import publish_manifest
+from mercadolivre_upload.cli.commands.publish_manifest import _final_status, publish_manifest
 
 
 def _payload_document(listing_type_id: str = "gold_special", *, wrapper_list: bool = False) -> dict[str, Any]:
@@ -584,3 +584,9 @@ def test_no_test_depends_on_old_manifest_format(tmp_path: Path) -> None:
 
     with pytest.raises(Exception):
         publish_manifest(manifest_path, workspace_root=tmp_path / "workspace", report_dir=tmp_path / "reports")
+
+
+def test_final_status_marks_published_but_not_grouped_as_partial_success() -> None:
+    results = [{"selected": True, "publish_result": "published_but_not_grouped"}]
+
+    assert _final_status(results, selected_count=1, build_failure_count=0) == "partial_success"
