@@ -15,6 +15,12 @@ from typing import Any
 
 import yaml
 
+from mercadolivre_upload.domain.fiscal.field_policy import (
+    fiscal_cost_for_api_payload,
+    is_fiscal_field_required,
+    load_required_fiscal_fields,
+    normalize_fiscal_cost,
+)
 from mercadolivre_upload.shared.utils.config_loader import FISCAL_CONFIG_PATH, load_yaml_config
 
 logger = logging.getLogger(__name__)
@@ -107,8 +113,10 @@ class FiscalData:
     - title: Product title
     - type: Product type ("single" for individual items)
     - measurement_unit: Unit of measurement (e.g., "UN" for units)
-    - cost: Product cost for tax calculation
     - tax_information: Nested tax information object
+
+    Optional fields (see config/fiscal_config.yaml fiscal_fields):
+    - cost: Custo unitário (optional; omitted on wire when unset)
     """
 
     # Product identification
@@ -122,7 +130,7 @@ class FiscalData:
     measurement_unit: str = ""
 
     # Product cost (for tax calculation)
-    cost: float = 0.0
+    cost: float | None = None
 
     # Tax payer type - required by ML API ("individual" or "company")
     tax_payer_type: str = "company"  # Default to "company"
@@ -252,9 +260,8 @@ class FiscalData:
             except ValueError:
                 self.tax_rule_id = None
 
-        # Ensure cost/weights are numeric and MLB-safe
-        parsed_cost = _parse_float(self.cost)
-        self.cost = parsed_cost if parsed_cost is not None else 0.0
+        # Ensure cost/weights are numeric and MLB-safe (unset cost stays None)
+        self.cost = normalize_fiscal_cost(self.cost)
         self.net_weight = _parse_float(self.net_weight)
         self.gross_weight = _parse_float(self.gross_weight)
 
@@ -268,10 +275,12 @@ class FiscalData:
             "sku": self.sku,
             "title": self.title,
             "type": self.type,
-            "cost": float(self.cost) if self.cost is not None else 0.0,
             "tax_payer_type": self.tax_payer_type,
             "tax_information": {},
         }
+        api_cost = fiscal_cost_for_api_payload(self.cost)
+        if api_cost is not None:
+            payload["cost"] = float(api_cost)
         if self.measurement_unit:
             payload["measurement_unit"] = self.measurement_unit
 
@@ -374,17 +383,7 @@ class FiscalData:
     @property
     def is_valid(self) -> bool:
         """Check if required and conditional fiscal validations pass."""
-        required_fields_ok = bool(
-            self.sku
-            and self.title
-            and self.type
-            and self.cost is not None
-            and self.cost > 0
-            and self.ncm
-            and self.origin_type
-            and self.origin_detail
-        )
-        return required_fields_ok and not self.get_validation_errors()
+        return not self.get_missing_fields() and not self.get_validation_errors()
 
     @property
     def has_complete_tax_info(self) -> bool:
@@ -392,22 +391,23 @@ class FiscalData:
         return bool(self.ncm and self.origin_type and self.origin_detail)
 
     def get_missing_fields(self) -> list[str]:
-        """Get list of missing required fields."""
+        """Get list of missing required fields (optional fields excluded via config)."""
+        required = load_required_fiscal_fields()
         missing: list[str] = []
-        if not self.sku:
-            missing.append("sku")
-        if not self.title:
-            missing.append("title")
-        if not self.type:
-            missing.append("type")
-        if self.cost is None or self.cost <= 0 or math.isnan(self.cost):
-            missing.append("cost")
-        if not self.ncm:
-            missing.append("ncm")
-        if not self.origin_type:
-            missing.append("origin_type")
-        if not self.origin_detail:
-            missing.append("origin_detail")
+        field_presence: dict[str, bool] = {
+            "sku": bool(self.sku),
+            "title": bool(self.title),
+            "type": bool(self.type),
+            "ncm": bool(self.ncm),
+            "origin_type": bool(self.origin_type),
+            "origin_detail": bool(self.origin_detail),
+            "cost": self.cost is not None and self.cost > 0 and not math.isnan(self.cost),
+        }
+        for field_name in sorted(required):
+            if field_name in field_presence and not field_presence[field_name]:
+                missing.append(field_name)
+            elif field_name not in field_presence and is_fiscal_field_required(field_name):
+                missing.append(field_name)
         return missing
 
     def to_dict(self) -> dict[str, Any]:

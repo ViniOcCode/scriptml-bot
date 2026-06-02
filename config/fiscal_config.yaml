@@ -178,9 +178,6 @@ fiscal_defaults:
   # Default measurement unit - "UN" (units), "KG", "LT", etc.
   measurement_unit: "UN"
 
-  # Default cost (0.0 means not set - user must provide cost)
-  cost: 0.0
-
   # Default origin type - "reseller", "manufacturer", "importer"
   origin_type: "reseller"
 

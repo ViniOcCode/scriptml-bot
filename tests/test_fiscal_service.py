@@ -311,7 +311,7 @@ def test_fiscal_data_does_not_mark_optional_nan_fields_as_present():
     assert "ean" not in tax_info
 
 
-def test_fiscal_data_requires_positive_cost():
+def test_fiscal_data_treats_unset_cost_as_optional():
     fiscal_data = FiscalData(
         sku="SKU-123",
         title="Produto Teste",
@@ -323,8 +323,10 @@ def test_fiscal_data_requires_positive_cost():
         origin_detail="2",
     )
 
-    assert fiscal_data.is_valid is False
-    assert "cost" in fiscal_data.get_missing_fields()
+    assert fiscal_data.cost is None
+    assert fiscal_data.is_valid is True
+    assert "cost" not in fiscal_data.get_missing_fields()
+    assert "cost" not in fiscal_data.to_api_payload()
 
 
 def test_fiscal_data_preserves_canonical_origin_type_reseller():

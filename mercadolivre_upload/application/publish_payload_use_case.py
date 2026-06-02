@@ -327,16 +327,12 @@ def _build_fiscal_data(
         or _normalize_optional_text(publish_payload.get("title"))
         or sku
     )
-    cost = fiscal_item.get("cost")
-    if cost is None:
-        cost = publish_payload.get("price")
-
     return FiscalData(
         sku=sku,
         title=title,
         type=str(fiscal_item.get("type") or "").strip(),
         measurement_unit=str(fiscal_item.get("measurement_unit") or "").strip(),
-        cost=cost,
+        cost=fiscal_item.get("cost"),
         tax_payer_type=str(fiscal_item.get("tax_payer_type") or "").strip() or "company",
         ncm=str(tax_info.get("ncm") or "").strip(),
         origin_type=str(tax_info.get("origin_type") or "").strip(),
