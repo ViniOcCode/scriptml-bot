@@ -39,14 +39,24 @@ class TokenManager:
 
         Args:
             token_path: Path to tokens.json. Defaults to 'tokens.json' in current directory
+            workspace_root: Workspace root used for strict publisher token storage.
+            settings_file: Optional settings file used by OAuthHandler.
+            key_path: Optional secure-storage key path.
+            allow_fallback: Whether legacy env/default token paths are allowed.
             oauth_handler: OAuthHandler for token refresh. If None, creates default
         """
         if not allow_fallback and workspace_root is None and token_path is None:
-            raise AuthError("workspace_root or token_path is required when fallback auth is disabled")
+            raise AuthError(
+                "workspace_root or token_path is required when fallback auth is disabled"
+            )
 
         if not allow_fallback and settings_file is None and oauth_handler is None:
-            raise AuthError("settings_file or oauth_handler is required when fallback auth is disabled")
+            raise AuthError(
+                "settings_file or oauth_handler is required when fallback auth is disabled"
+            )
 
+        default_path: str | None
+        encryption_key_path: Path | None
         if workspace_root is not None:
             resolved_workspace = Path(workspace_root).expanduser().resolve()
             default_path = str(resolved_workspace / ".ml_token.enc")
@@ -55,7 +65,9 @@ class TokenManager:
             default_path = token_path
             if allow_fallback:
                 default_path = (
-                    default_path or get_pipeline_env("ML_PIPE_MERCADO_LIVRE_TOKEN_PATH") or "tokens.json"
+                    default_path
+                    or get_pipeline_env("ML_PIPE_MERCADO_LIVRE_TOKEN_PATH")
+                    or "tokens.json"
                 )
             encryption_key_path = key_path
         if default_path is None:
