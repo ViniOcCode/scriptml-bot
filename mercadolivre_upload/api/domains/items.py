@@ -25,8 +25,7 @@ _COMPLETE_UP_ITEM_FIELDS = {
 
 def _is_existing_user_product_selling_condition_request(item: dict[str, Any]) -> bool:
     return any(
-        item.get(field) == _EXISTING_UP_SELLING_CONDITION_MODE
-        for field in _EXISTING_UP_MODE_FIELDS
+        item.get(field) == _EXISTING_UP_SELLING_CONDITION_MODE for field in _EXISTING_UP_MODE_FIELDS
     )
 
 
@@ -92,6 +91,43 @@ def get_user_product(client: "MLApiClient", user_product_id: str) -> dict[str, A
     if not isinstance(user_product_id, str) or not user_product_id.strip():
         raise ValueError("user_product_id cannot be empty")
     return client.get(f"/user-products/{user_product_id.strip()}")
+
+
+def search_user_items(
+    client: "MLApiClient",
+    seller_id: str,
+    *,
+    status: str,
+    limit: int,
+    offset: int | None = None,
+    search_type: str | None = None,
+    scroll_id: str | None = None,
+) -> dict[str, Any]:
+    """Search current seller item IDs by status."""
+    if not isinstance(seller_id, str) or not seller_id.strip():
+        raise ValueError("seller_id cannot be empty")
+    params: dict[str, Any] = {"status": status, "limit": limit}
+    if offset is not None:
+        params["offset"] = offset
+    if search_type:
+        params["search_type"] = search_type
+    if scroll_id:
+        params["scroll_id"] = scroll_id
+    return client.get(
+        f"/users/{seller_id.strip()}/items/search",
+        params=params,
+    )
+
+
+def get_items_batch(client: "MLApiClient", item_ids: list[str]) -> list[Any]:
+    """Fetch item details in a single /items?ids=... request."""
+    normalized_ids = [item_id.strip() for item_id in item_ids if item_id.strip()]
+    if not normalized_ids:
+        return []
+    result = client.get_json("/items", params={"ids": ",".join(normalized_ids)})
+    if isinstance(result, list):
+        return result
+    return []
 
 
 def create_user_product_item(client: "MLApiClient", item: dict[str, Any]) -> dict[str, Any]:

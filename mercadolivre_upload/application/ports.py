@@ -63,6 +63,31 @@ class ItemPublisherPort(Protocol):
         ...
 
 
+class ItemInventoryPort(Protocol):
+    """Port for reading current Mercado Livre item inventory."""
+
+    def get_users_me(self) -> dict[str, Any]:
+        """Get current authenticated seller/user payload."""
+        ...
+
+    def search_user_items(
+        self,
+        seller_id: str,
+        *,
+        status: str,
+        limit: int,
+        offset: int | None = None,
+        search_type: str | None = None,
+        scroll_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Search item IDs for a seller/status page."""
+        ...
+
+    def get_items_batch(self, item_ids: list[str]) -> list[Any]:
+        """Fetch item details using ML's batch items endpoint."""
+        ...
+
+
 class ShippingResolverPort(Protocol):
     """Port for shipping mode resolution."""
 

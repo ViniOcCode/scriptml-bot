@@ -70,6 +70,17 @@ def test_item_publisher_port_covers_publish_flow_surface() -> None:
     assert not missing, f"ItemPublisherPort is missing methods: {missing}"
 
 
+def test_item_inventory_port_covers_reconcile_surface() -> None:
+    methods = _class_method_names(PORTS_FILE, "ItemInventoryPort")
+    required = {
+        "get_users_me",
+        "search_user_items",
+        "get_items_batch",
+    }
+    missing = sorted(required - methods)
+    assert not missing, f"ItemInventoryPort is missing methods: {missing}"
+
+
 def test_publish_flow_avoids_dynamic_publisher_getattr_calls() -> None:
     flow_source = FLOW_FILE.read_text(encoding="utf-8")
     payload_source = PAYLOAD_FILE.read_text(encoding="utf-8")

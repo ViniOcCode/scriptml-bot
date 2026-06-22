@@ -7,6 +7,7 @@ import requests
 
 from mercadolivre_upload.api.client import MLApiClient
 from mercadolivre_upload.api.domains import items as item_endpoints
+from mercadolivre_upload.api.exceptions import MLApiError
 
 
 def test_validate_item_returns_400_json_payload():
@@ -128,6 +129,77 @@ def test_get_user_product_fetches_metadata():
 
     assert result == {"id": "MLBU123", "family_id": "FAM-1"}
     client.get.assert_called_once_with("/user-products/MLBU123")
+
+
+def test_search_user_items_uses_status_pagination_params():
+    client = MLApiClient(http_client=MagicMock())
+    client.get = MagicMock(return_value={"results": ["MLB1"], "paging": {"total": 1}})
+
+    result = client.search_user_items("123", status="active", limit=50, offset=100)
+
+    assert result == {"results": ["MLB1"], "paging": {"total": 1}}
+    client.get.assert_called_once_with(
+        "/users/123/items/search",
+        params={"status": "active", "limit": 50, "offset": 100},
+    )
+
+
+def test_search_user_items_supports_scan_scroll_params():
+    client = MLApiClient(http_client=MagicMock())
+    client.get = MagicMock(return_value={"results": ["MLB1"], "scroll_id": "abc"})
+
+    result = client.search_user_items(
+        "123",
+        status="active",
+        limit=50,
+        search_type="scan",
+        scroll_id="abc",
+    )
+
+    assert result == {"results": ["MLB1"], "scroll_id": "abc"}
+    client.get.assert_called_once_with(
+        "/users/123/items/search",
+        params={
+            "status": "active",
+            "limit": 50,
+            "search_type": "scan",
+            "scroll_id": "abc",
+        },
+    )
+
+
+def test_get_items_batch_accepts_list_json_response():
+    response = MagicMock(spec=requests.Response)
+    response.status_code = 200
+    response.json.return_value = [{"code": 200, "body": {"id": "MLB1"}}]
+
+    http_client = MagicMock()
+    http_client.get.return_value = response
+
+    client = MLApiClient(http_client=http_client)
+    result = client.get_items_batch(["MLB1", "MLB2"])
+
+    assert result == [{"code": 200, "body": {"id": "MLB1"}}]
+    http_client.get.assert_called_once()
+    assert http_client.get.call_args.kwargs["params"] == {"ids": "MLB1,MLB2"}
+    response.raise_for_status.assert_called_once()
+
+
+def test_get_raises_ml_api_error_with_json_body_for_403():
+    response = MagicMock(spec=requests.Response)
+    response.status_code = 403
+    response.json.return_value = {"message": "forbidden", "cause": []}
+
+    http_client = MagicMock()
+    http_client.get.return_value = response
+
+    client = MLApiClient(http_client=http_client)
+
+    with pytest.raises(MLApiError) as exc:
+        client.get("/users/me")
+
+    assert exc.value.response_body == {"message": "forbidden", "cause": []}
+    response.raise_for_status.assert_not_called()
 
 
 def test_create_user_product_item_posts_complete_payload_to_items():

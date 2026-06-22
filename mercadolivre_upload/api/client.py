@@ -107,13 +107,34 @@ class MLApiClient:
         """Headers without Content-Type (for multipart uploads)."""
         return self._get_headers(content_type="")
 
-    def get(self, endpoint: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        """GET request with automatic retry on transient errors."""
+    def _get_json(self, endpoint: str, params: dict[str, Any] | None = None) -> Any:
+        """GET JSON payload with automatic retry on transient errors."""
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
         logger.debug("GET %s", url)
         resp = self.http.get(url, headers=self._get_headers(), params=params)
+
+        if 400 <= resp.status_code < 500:
+            try:
+                body = cast(dict[str, Any], resp.json())
+            except (ValueError, AttributeError):
+                pass
+            else:
+                raise MLApiError(
+                    f"{resp.status_code} Client Error",
+                    response=resp,
+                    response_body=body,
+                )
+
         resp.raise_for_status()
-        return cast(dict[str, Any], resp.json())
+        return resp.json()
+
+    def get(self, endpoint: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        """GET request that expects a JSON object response."""
+        return cast(dict[str, Any], self._get_json(endpoint, params=params))
+
+    def get_json(self, endpoint: str, params: dict[str, Any] | None = None) -> Any:
+        """GET request for endpoints that may return non-object JSON."""
+        return self._get_json(endpoint, params=params)
 
     def post(
         self,
@@ -298,6 +319,7 @@ class MLApiClient:
             user_product_id.strip()
         )
         if has_existing_user_product_id:
+            assert isinstance(user_product_id, str)
             for inherited_field in (
                 "available_quantity",
                 "attributes",
@@ -399,6 +421,31 @@ class MLApiClient:
     def get_user_product(self, user_product_id: str) -> dict[str, Any]:
         """Fetch user-product metadata (including family_id)."""
         return item_endpoints.get_user_product(self, user_product_id)
+
+    def search_user_items(
+        self,
+        seller_id: str,
+        *,
+        status: str,
+        limit: int,
+        offset: int | None = None,
+        search_type: str | None = None,
+        scroll_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Search current seller item IDs by status."""
+        return item_endpoints.search_user_items(
+            self,
+            seller_id,
+            status=status,
+            limit=limit,
+            offset=offset,
+            search_type=search_type,
+            scroll_id=scroll_id,
+        )
+
+    def get_items_batch(self, item_ids: list[str]) -> list[Any]:
+        """Fetch item details through /items?ids=... batch endpoint."""
+        return item_endpoints.get_items_batch(self, item_ids)
 
     def create_item_description(self, item_id: str, plain_text: str) -> dict[str, Any]:
         """Create or update item description."""
