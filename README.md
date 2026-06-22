@@ -135,6 +135,7 @@ ml-upload --help
 | `ml-upload upload` | Publish products |
 | `ml-upload validate` | Validate products without publishing |
 | `ml-upload auth` | Set/refresh token and inspect auth status |
+| `ml-upload reconcile` | Compare generated builder payloads with live ML items |
 | `ml-upload cache clear` | Clear attribute cache |
 | `ml-upload cache status` | Show cache status |
 | `ml-upload doctor` | Run environment health checks |

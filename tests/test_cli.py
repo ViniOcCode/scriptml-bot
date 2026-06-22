@@ -1,5 +1,6 @@
 """Tests for cli.py module."""
 
+import json
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -320,6 +321,96 @@ class TestPublishManifestCommand:
         assert kwargs["dry_run"] is False
         assert kwargs["publish_inactive"] is False
         assert kwargs["seller_config"] == Path("config/publisher.yaml")
+
+
+class TestReconcileCommand:
+    """Tests for reconcile command wiring."""
+
+    @patch("mercadolivre_upload.cli.app.import_module")
+    def test_reconcile_delegates_to_command_module(self, mock_import_module):
+        mock_runtime_module = MagicMock()
+        mock_runtime_module.resolve_workspace_root.return_value = Path("/tmp/workspace")
+        mock_reconcile_module = MagicMock()
+        mock_import_module.side_effect = [mock_runtime_module, mock_reconcile_module]
+
+        with runner.isolated_filesystem():
+            Path("config").mkdir()
+            Path("config/publisher.yaml").write_text("seller: {}\n", encoding="utf-8")
+            result = runner.invoke(
+                app,
+                [
+                    "reconcile",
+                    "--from-manifest",
+                    "--run-id",
+                    "run-1",
+                    "--output",
+                    "json",
+                    "--save-report",
+                ],
+            )
+
+        assert result.exit_code == 0
+        mock_reconcile_module.reconcile.assert_called_once()
+        kwargs = mock_reconcile_module.reconcile.call_args.kwargs
+        assert kwargs["workspace_root"] == Path("/tmp/workspace")
+        assert kwargs["seller_config"] == Path("config/publisher.yaml")
+        assert kwargs["from_manifest"] is True
+        assert kwargs["run_id"] == "run-1"
+        assert kwargs["output"] == "json"
+        assert kwargs["save_report"] is True
+
+    def test_reconcile_json_output_is_machine_parseable(self, capsys):
+        from mercadolivre_upload.application.reconcile import ReconcileReport, ReconcileRow
+        from mercadolivre_upload.cli.commands.reconcile import _print_json
+
+        report = ReconcileReport(
+            generated_at="2026-06-22T00:00:00+00:00",
+            workspace_root="/tmp/workspace",
+            source="artifacts",
+            summary={"total": 1},
+            rows=[
+                ReconcileRow(
+                    status="local_payload_error",
+                    payload_path="/tmp/workspace/groups/" + ("long-path/" * 20),
+                    error_reason="invalid_json: " + ("long message " * 20),
+                )
+            ],
+        )
+
+        _print_json(report)
+
+        parsed = json.loads(capsys.readouterr().out)
+        assert parsed["summary"] == {"total": 1}
+        assert parsed["rows"][0]["status"] == "local_payload_error"
+
+    def test_reconcile_table_folds_long_values_instead_of_truncating(self, capsys):
+        from mercadolivre_upload.application.reconcile import ReconcileReport, ReconcileRow
+        from mercadolivre_upload.cli.commands.reconcile import _print_table
+
+        long_sku = "991-VERY-LONG-SELLER-SKU-WITHOUT-TRUNCATION"
+        report = ReconcileReport(
+            generated_at="2026-06-22T00:00:00+00:00",
+            workspace_root="/tmp/workspace",
+            source="artifacts",
+            summary={"total": 1},
+            rows=[
+                ReconcileRow(
+                    status="ml_without_local_payload",
+                    sku_scope=[long_sku],
+                    listing_type_id="gold_special",
+                    ml_item_id="MLB2794106123",
+                    ml_status="closed",
+                )
+            ],
+        )
+
+        _print_table(report)
+
+        output = capsys.readouterr().out
+        assert "…" not in output
+        assert "991" in output
+        assert "TRUNCATION" in output
+
 
 class TestMain:
     """Tests for main function."""

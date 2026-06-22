@@ -12,7 +12,6 @@ import typer
 from rich.console import Console
 from rich.theme import Theme
 
-from ml_app_settings.loader import load_app_settings
 from mercadolivre_upload.infrastructure.logging import setup_logging as setup_app_logging
 
 # Configure custom theme
@@ -175,7 +174,9 @@ def publish_payload(
         raise typer.Exit(2)
     runtime = import_module("mercadolivre_upload.cli.commands.publish_runtime")
     try:
-        workspace_root = runtime.resolve_workspace_root(workspace=workspace, seller_config=seller_config)
+        workspace_root = runtime.resolve_workspace_root(
+            workspace=workspace, seller_config=seller_config
+        )
     except ValueError as exc:
         err_console.print(f"[error]{exc}[/error]")
         raise typer.Exit(2) from exc
@@ -217,7 +218,9 @@ def publish_manifest(
         raise typer.Exit(2)
     runtime = import_module("mercadolivre_upload.cli.commands.publish_runtime")
     try:
-        workspace_root = runtime.resolve_workspace_root(workspace=workspace, seller_config=seller_config)
+        workspace_root = runtime.resolve_workspace_root(
+            workspace=workspace, seller_config=seller_config
+        )
     except ValueError as exc:
         err_console.print(f"[error]{exc}[/error]")
         raise typer.Exit(2) from exc
@@ -230,6 +233,43 @@ def publish_manifest(
         workspace_root=workspace_root,
         report_dir=report_dir,
         seller_config=seller_config,
+    )
+
+
+@app.command()
+def reconcile(
+    workspace: Path | None = typer.Option(None, "--workspace"),  # noqa: B008
+    seller_config: Path = typer.Option(Path("config/publisher.yaml"), "--config"),  # noqa: B008
+    from_manifest: bool = typer.Option(False, "--from-manifest"),  # noqa: B008
+    manifest: Path | None = typer.Option(None, "--manifest"),  # noqa: B008
+    run_id: str | None = typer.Option(None, "--run-id"),  # noqa: B008
+    all_manifests: bool = typer.Option(False, "--all-manifests"),  # noqa: B008
+    output: str = typer.Option("table", "--output"),  # noqa: B008
+    save_report: bool = typer.Option(False, "--save-report"),  # noqa: B008
+) -> None:
+    """Reconcile generated payloads with live Mercado Livre inventory."""
+    setup_logging()
+    if not seller_config.exists():
+        err_console.print(f"[error]Seller config not found: {seller_config}[/error]")
+        raise typer.Exit(2)
+    runtime = import_module("mercadolivre_upload.cli.commands.publish_runtime")
+    try:
+        workspace_root = runtime.resolve_workspace_root(
+            workspace=workspace, seller_config=seller_config
+        )
+    except ValueError as exc:
+        err_console.print(f"[error]{exc}[/error]")
+        raise typer.Exit(2) from exc
+    cmd = import_module("mercadolivre_upload.cli.commands.reconcile")
+    cmd.reconcile(
+        workspace_root=workspace_root,
+        seller_config=seller_config,
+        from_manifest=from_manifest,
+        manifest=manifest,
+        run_id=run_id,
+        all_manifests=all_manifests,
+        output=output,
+        save_report=save_report,
     )
 
 
