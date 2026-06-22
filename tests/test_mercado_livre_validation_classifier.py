@@ -13,6 +13,13 @@ def test_204_empty_validation_response_passes() -> None:
     assert result.to_report_dict()["status"] == "validation_passed"
 
 
+def test_empty_cause_validation_response_without_error_passes() -> None:
+    result = classify_mercado_livre_validation_response({"cause": []})
+
+    assert result.status == "validation_passed"
+    assert result.should_block is False
+
+
 def test_warning_only_validation_response_continues_and_preserves_details() -> None:
     response = {
         "error": "validation_error",

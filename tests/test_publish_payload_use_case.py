@@ -60,6 +60,7 @@ def _make_seller_config(
 def _make_read_result(
     *,
     description: str | None = "Descrição do produto",
+    description_by_sku: dict[str, str] | None = None,
     sku: str | None = "ABC-001",
     category_id: str = "MLB271599",
     ai_suggested: bool = False,
@@ -82,6 +83,7 @@ def _make_read_result(
     return ReadPayloadResult(
         payload=payload,
         description=description,
+        description_by_sku=description_by_sku or {},
         sku=sku,
         category_id=category_id,
         ai_suggested=ai_suggested,
@@ -93,6 +95,7 @@ def _make_read_result(
 def _make_user_products_read_result(
     *,
     description: str | None = "Descrição do produto",
+    description_by_sku: dict[str, str] | None = None,
     sku: str | None = "ABC-001",
     family_name: str = "Linha Alpha",
     items: list[dict[str, Any]] | None = None,
@@ -119,6 +122,7 @@ def _make_user_products_read_result(
             "items": payload_items,
         },
         description=description,
+        description_by_sku=description_by_sku or {},
         sku=sku,
         category_id="MLB271599",
         ai_suggested=ai_suggested,
@@ -131,6 +135,7 @@ def _make_user_products_read_result(
 def _make_user_products_payload_array_read_result(
     *,
     description: str | None = "Descrição do produto",
+    description_by_sku: dict[str, str] | None = None,
     sku: str | None = "ABC-001",
     entries: list[dict[str, Any]] | None = None,
     ai_suggested: bool = False,
@@ -152,6 +157,7 @@ def _make_user_products_payload_array_read_result(
     return ReadPayloadResult(
         payload={"payload": payload_entries},
         description=description,
+        description_by_sku=description_by_sku or {},
         sku=sku,
         category_id="MLB271599",
         ai_suggested=ai_suggested,
@@ -874,7 +880,10 @@ class TestPublishPayloadUseCase:
         assert second_payload["family_name"] == "Linha Alpha"
         assert "user_product_id" not in second_payload
         assert result.publish_endpoints == ["/items", "/items"]
-        publisher.create_item_description.assert_called_once_with("MLB1", "Descrição do produto")
+        assert [call.args for call in publisher.create_item_description.call_args_list] == [
+            ("MLB1", "Descrição do produto"),
+            ("MLB2", "Descrição do produto"),
+        ]
 
     def test_publish_user_products_api_error_reports_sanitized_shipping_path(
         self, tmp_path: Path
@@ -959,7 +968,12 @@ class TestPublishPayloadUseCase:
             },
         ]
         reader.read.return_value = _make_user_products_payload_array_read_result(
-            entries=entries
+            description="Descrição compartilhada",
+            description_by_sku={
+                "SKU-A": "Descrição SKU A",
+                "SKU-B": "Descrição SKU B",
+            },
+            entries=entries,
         )
         publisher.create_user_product_item.side_effect = [
             _grouped_up_response(id="MLB1", user_product_id="MLBU123"),
@@ -979,6 +993,8 @@ class TestPublishPayloadUseCase:
         assert second_validation_payload == second_payload
         assert "items" not in first_payload
         assert "payload" not in first_payload
+        assert "description_by_sku" not in first_payload
+        assert "description_by_sku" not in second_payload
         assert first_payload["family_name"] == "Linha Alpha"
         assert second_payload["family_name"] == "Linha Alpha"
         assert "user_product_id" not in second_payload
@@ -991,6 +1007,10 @@ class TestPublishPayloadUseCase:
             assert created["listing_type_id"] == source["listing_type_id"]
             assert created["shipping"]["local_pick_up"] is True
         assert result.publish_endpoints == ["/items", "/items"]
+        assert [call.args for call in publisher.create_item_description.call_args_list] == [
+            ("MLB1", "Descrição SKU A"),
+            ("MLB2", "Descrição SKU B"),
+        ]
 
     def test_publish_user_products_payload_array_uses_items_endpoint_with_api_client(
         self, tmp_path: Path

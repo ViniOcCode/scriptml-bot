@@ -42,6 +42,7 @@ class MercadoLivreValidationCause:
     raw: dict[str, Any] = field(default_factory=dict)
 
     def to_report_dict(self) -> dict[str, Any]:
+        """Return JSON-safe cause details for reports."""
         payload: dict[str, Any] = {
             "type": self.type,
             "code": self.code,
@@ -67,17 +68,21 @@ class MercadoLivreValidationResult:
 
     @property
     def all_causes(self) -> list[MercadoLivreValidationCause]:
+        """Return warning and error causes in display order."""
         return [*self.warning_causes, *self.error_causes]
 
     def warning_messages(self) -> list[str]:
+        """Return formatted warning messages."""
         return [format_validation_cause_for_message(cause) for cause in self.warning_causes]
 
     def error_messages(self) -> list[str]:
+        """Return formatted error messages."""
         if self.error_causes:
             return [format_validation_cause_for_message(cause) for cause in self.error_causes]
         return [self.message] if self.message else []
 
     def to_report_dict(self) -> dict[str, Any]:
+        """Return JSON-safe validation result details for reports."""
         payload: dict[str, Any] = {
             "status": self.status,
             "should_block": self.should_block,
@@ -147,7 +152,7 @@ def classify_mercado_livre_validation_response(
             message=str(validation),
         )
 
-    raw_causes, has_cause_shape = _extract_raw_causes(validation)
+    raw_causes, _has_cause_shape = _extract_raw_causes(validation)
     causes = [normalize_validation_cause(cause) for cause in raw_causes]
     warning_causes = [cause for cause in causes if cause.type == "warning"]
     error_causes = [cause for cause in causes if cause.type == "error"]
@@ -184,7 +189,7 @@ def classify_mercado_livre_validation_response(
     message_value = validation.get("message")
     status_value = validation.get("status")
     looks_like_validation_error = bool(error_value or message_value or status_value)
-    if looks_like_validation_error or has_cause_shape:
+    if looks_like_validation_error:
         return MercadoLivreValidationResult(
             status="validation_failed",
             should_block=True,

@@ -105,6 +105,22 @@ class TestJsonPayloadReader:
         result = self.reader.read(path)
         assert result.description == "Descrição vindo da raiz"
 
+    def test_read_description_by_sku_from_meta(self, tmp_path: Path) -> None:
+        payload = _make_valid_payload()
+        payload["_meta"]["description_by_sku"] = {  # type: ignore[index]
+            "SKU-A": "Descricao A",
+            "SKU-B": "Descricao B",
+            "SKU-BLANK": " ",
+        }
+        path = _write_payload(tmp_path, payload)
+
+        result = self.reader.read(path)
+
+        assert result.description_by_sku == {
+            "SKU-A": "Descricao A",
+            "SKU-B": "Descricao B",
+        }
+
     def test_read_fiscal_items_extraidos_da_raiz(self, tmp_path: Path) -> None:
         payload = _make_valid_payload()
         payload.pop("_meta", None)

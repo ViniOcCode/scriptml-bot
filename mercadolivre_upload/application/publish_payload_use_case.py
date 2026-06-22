@@ -63,7 +63,7 @@ def _expand_publish_payloads(payload: dict[str, Any], upload_mode: str) -> list[
     base_payload = {
         key: value
         for key, value in payload.items()
-        if key not in {"items", "payload", "_meta", "fiscal", "description"}
+        if key not in {"items", "payload", "_meta", "fiscal", "description", "description_by_sku"}
     }
     raw_items = payload.get("payload")
     if not isinstance(raw_items, list):
@@ -259,6 +259,23 @@ def _extract_payload_seller_sku(payload: dict[str, Any]) -> str | None:
             if candidate:
                 return candidate
     return None
+
+
+def _description_for_publish_item(
+    *,
+    shared_description: str | None,
+    description_by_sku: dict[str, str],
+    sku: str | None,
+) -> str | None:
+    if sku:
+        direct = description_by_sku.get(sku)
+        if direct:
+            return direct
+        sku_key = sku.casefold()
+        for candidate_sku, description in description_by_sku.items():
+            if candidate_sku.casefold() == sku_key and description:
+                return description
+    return shared_description
 
 
 def _extract_variation_seller_sku(variation: dict[str, Any]) -> str | None:
@@ -702,11 +719,21 @@ class PublishPayloadUseCase:
                 if isinstance(raw_user_product_id, str) and raw_user_product_id.strip():
                     user_product_id = raw_user_product_id.strip()
 
-            # 6. Post description separately after the first successful item creation.
-            if read_result.description and not description_posted:
+            # 6. Post description separately after successful item creation.
+            description_to_post: str | None = None
+            if read_result.upload_mode == "user_products":
+                description_to_post = _description_for_publish_item(
+                    shared_description=read_result.description,
+                    description_by_sku=read_result.description_by_sku,
+                    sku=payload_sku,
+                )
+            elif read_result.description and not description_posted:
+                description_to_post = read_result.description
+
+            if description_to_post:
                 for attempt in range(2):
                     try:
-                        self._publisher.create_item_description(item_id, read_result.description)
+                        self._publisher.create_item_description(item_id, description_to_post)
                         break
                     except Exception as exc:  # noqa: BLE001
                         if attempt == 0:
@@ -721,7 +748,8 @@ class PublishPayloadUseCase:
                                 item_id,
                                 exc,
                             )
-                description_posted = True
+                if read_result.upload_mode != "user_products":
+                    description_posted = True
 
         publish_status: Literal["published", "published_but_not_grouped"] = "published"
         if read_result.upload_mode == "user_products":

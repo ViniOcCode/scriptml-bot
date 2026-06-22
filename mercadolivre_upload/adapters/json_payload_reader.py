@@ -94,6 +94,7 @@ class ReadPayloadResult:
     sku: str | None  # _meta.sku
     category_id: str  # extracted from payload
     ai_suggested: bool  # _meta.category_ai_suggested
+    description_by_sku: dict[str, str] = field(default_factory=dict)
     upload_mode: Literal["legacy_items", "user_products"] = "legacy_items"
     # Spec validation fields extracted from _meta (all optional for backward compat)
     publication_ready: bool | None = None  # _meta.publication.publication_ready; None = absent
@@ -164,6 +165,23 @@ def _extract_root_description(raw: dict[str, Any]) -> str | None:
             normalized = plain_text.strip()
             return normalized or None
     return None
+
+
+def _extract_meta_description_by_sku(meta: dict[str, Any]) -> dict[str, str]:
+    """Extract internal per-SKU description metadata."""
+    raw_descriptions = meta.get("description_by_sku")
+    if not isinstance(raw_descriptions, dict):
+        return {}
+
+    descriptions: dict[str, str] = {}
+    for raw_sku, raw_description in raw_descriptions.items():
+        if not isinstance(raw_sku, str) or not isinstance(raw_description, str):
+            continue
+        sku = raw_sku.strip()
+        description = raw_description.strip()
+        if sku and description:
+            descriptions[sku] = description
+    return descriptions
 
 
 def _extract_root_fiscal_items(raw: dict[str, Any]) -> list[dict[str, Any]]:
@@ -442,6 +460,7 @@ class JsonPayloadReader:
         )
         if description is None:
             description = _extract_root_description(raw)
+        description_by_sku = _extract_meta_description_by_sku(meta)
         sku: str | None = meta.get("sku")
         ai_suggested: bool = bool(meta.get("category_ai_suggested", False))
         publication = meta.get("publication")
@@ -502,6 +521,7 @@ class JsonPayloadReader:
         return ReadPayloadResult(
             payload=payload,
             description=description,
+            description_by_sku=description_by_sku,
             sku=sku,
             category_id=_extract_category_id(payload, upload_mode),
             ai_suggested=ai_suggested,
