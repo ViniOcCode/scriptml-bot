@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+try:
+    from ml_app_settings_core import SecretStoreError, build_secret_store_from_env
+except Exception:  # pragma: no cover - standalone package fallback
+    SecretStoreError = Exception
+    build_secret_store_from_env = None
 
 from mercadolivre_upload.auth.oauth import OAuthHandler
 from mercadolivre_upload.auth.token_manager import TokenManager
@@ -18,8 +25,8 @@ from .exceptions import AuthError
 class PublisherAuthContext:
     settings_file: Path
     workspace_root: Path
-    token_path: Path
-    key_path: Path
+    token_path: str
+    key_path: None
     token_manager: TokenManager
 
 
@@ -35,57 +42,39 @@ def _read_config(settings_file: Path) -> dict[str, Any]:
     return raw
 
 
-def _default_secrets_dir(settings_file: Path) -> Path:
-    if settings_file.parent.name == "config":
-        return settings_file.parent.parent / "secrets"
-    return settings_file.parent / "secrets"
-
-
-def _resolve_secret_file(raw_value: object, *, secrets_dir: Path) -> Path | None:
-    if isinstance(raw_value, dict) and set(raw_value) == {"file"}:
-        candidate = Path(str(raw_value["file"])).expanduser()
-        return candidate if candidate.is_absolute() else secrets_dir / candidate
-    return None
-
-
-def _load_client_credentials(settings_file: Path) -> tuple[str, str, Path]:
+def _load_client_id(settings_file: Path) -> str:
     payload = _read_config(settings_file)
     auth = payload.get("auth")
     auth_payload = auth if isinstance(auth, dict) else {}
 
     raw_client_id = auth_payload.get("ml_app_id", auth_payload.get("ml_client_id"))
     client_id = raw_client_id.strip() if isinstance(raw_client_id, str) else ""
-
-    shared = payload.get("shared")
-    secrets_dir_value = shared.get("secrets_dir") if isinstance(shared, dict) else None
-    if secrets_dir_value:
-        candidate = Path(str(secrets_dir_value)).expanduser()
-        secrets_dir = candidate if candidate.is_absolute() else settings_file.parent / candidate
-    else:
-        secrets_dir = _default_secrets_dir(settings_file)
-
-    secret_file = _resolve_secret_file(auth_payload.get("ml_client_secret"), secrets_dir=secrets_dir)
-    if secret_file is None:
-        secret_file = secrets_dir / "ml_app_secret"
-
-    raw_secret = auth_payload.get("ml_client_secret")
-    client_secret = raw_secret.strip() if isinstance(raw_secret, str) else ""
-    if not client_secret and secret_file.exists():
-        client_secret = secret_file.read_text(encoding="utf-8").strip()
-
-    if not client_id or not client_secret:
-        missing = []
-        if not client_id:
-            missing.append("client_id")
-        if not client_secret:
-            missing.append("client_secret")
+    if not client_id:
         raise AuthError(
-            "Missing Mercado Livre OAuth credentials "
-            f"({', '.join(missing)}) for publisher config {settings_file.resolve()} "
-            f"and secret file {secret_file.resolve()}"
+            f"Missing Mercado Livre OAuth client_id for publisher config {settings_file.resolve()}"
         )
+    return client_id
 
-    return client_id, client_secret, secret_file
+
+def _secret_profile() -> str:
+    return os.getenv("MLBOT_SECRET_PROFILE", "default").strip() or "default"
+
+
+def _vault_store():
+    backend = ""
+    for name in ("MLBOT_SECRET_BACKEND", "ML_PUBLISHER_SECRET_BACKEND", "ML_DASHBOARD_SECRET_BACKEND"):
+        value = os.getenv(name)
+        if value and value.strip():
+            backend = value.strip().lower()
+            break
+    if backend not in {"openbao", "vault"}:
+        raise AuthError("Set MLBOT_SECRET_BACKEND=openbao to use Mercado Livre credentials from OpenBao/Vault")
+    if build_secret_store_from_env is None:
+        raise AuthError("OpenBao/Vault secret store is not available")
+    try:
+        return build_secret_store_from_env()
+    except SecretStoreError as exc:
+        raise AuthError(f"OpenBao/Vault unavailable: {exc}") from exc
 
 
 def build_publisher_auth_context(
@@ -104,26 +93,36 @@ def build_publisher_auth_context(
         raise AuthError("workspace_root is required")
     resolved_workspace = Path(workspace_root).expanduser().resolve()
 
-    client_id, client_secret, _secret_file = _load_client_credentials(resolved_settings)
-    token_path = resolved_workspace / ".ml_token.enc"
-    key_path = resolved_workspace / ".ml_fernet_key"
+    profile = _secret_profile()
+    client_id = _load_client_id(resolved_settings)
+    store = _vault_store()
+    client_secret_path = f"profiles/{profile}/mercadolivre/client_secret"
+    token_secret_path = f"profiles/{profile}/mercadolivre/tokens"
+    try:
+        client_secret = store.get_secret(client_secret_path)
+        token_payload = store.get_secret(token_secret_path)
+    except SecretStoreError as exc:
+        raise AuthError(f"OpenBao/Vault Mercado Livre credentials unavailable: {exc}") from exc
+    if not client_secret:
+        raise AuthError(f"Mercado Livre client_secret not found in OpenBao/Vault: {client_secret_path}")
+    if not token_payload:
+        raise AuthError(f"Mercado Livre tokens not found in OpenBao/Vault: {token_secret_path}")
     oauth_handler = OAuthHandler(
         client_id=client_id,
         client_secret=client_secret,
         settings_file=resolved_settings,
     )
     token_manager = TokenManager(
-        token_path=str(token_path),
-        workspace_root=resolved_workspace,
         settings_file=resolved_settings,
-        key_path=key_path,
-        allow_fallback=not strict,
+        allow_fallback=False,
         oauth_handler=oauth_handler,
+        secret_store=store,
+        token_secret_path=token_secret_path,
     )
     return PublisherAuthContext(
         settings_file=resolved_settings,
         workspace_root=resolved_workspace,
-        token_path=token_path,
-        key_path=key_path,
+        token_path=token_secret_path,
+        key_path=None,
         token_manager=token_manager,
     )

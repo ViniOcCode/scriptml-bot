@@ -1,6 +1,7 @@
 """Token manager for Mercado Livre API authentication."""
 
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,24 @@ from mercadolivre_upload.infrastructure.env import get_pipeline_env, get_pipelin
 from .exceptions import AuthError, TokenExpiredError
 from .oauth import OAuthHandler
 from .secure_storage import SecureStorageError, SecureTokenStorage, migrate_plaintext_tokens
+
+try:
+    from ml_app_settings_core import SecretStoreError, build_secret_store_from_env
+except Exception:  # pragma: no cover - standalone package fallback
+    SecretStoreError = Exception
+    build_secret_store_from_env = None
+
+
+def _vault_secret_store_enabled() -> bool:
+    for name in ("MLBOT_SECRET_BACKEND", "ML_PUBLISHER_SECRET_BACKEND", "ML_DASHBOARD_SECRET_BACKEND"):
+        value = os.getenv(name)
+        if value is not None and value.strip().lower() in {"openbao", "vault"}:
+            return True
+    return False
+
+
+def _vault_profile() -> str:
+    return os.getenv("MLBOT_SECRET_PROFILE", "default").strip() or "default"
 
 
 class TokenManager:
@@ -34,6 +53,8 @@ class TokenManager:
         key_path: Path | None = None,
         allow_fallback: bool = True,
         oauth_handler: OAuthHandler | None = None,
+        secret_store: Any | None = None,
+        token_secret_path: str | None = None,
     ):
         """Initialize the token manager.
 
@@ -45,6 +66,27 @@ class TokenManager:
             allow_fallback: Whether legacy env/default token paths are allowed.
             oauth_handler: OAuthHandler for token refresh. If None, creates default
         """
+        self.oauth_handler = oauth_handler or OAuthHandler(settings_file=settings_file)
+        self._tokens: dict[str, Any] | None = None
+        self._secure_storage: SecureTokenStorage | None = None
+        self._secret_store = None
+        self._token_secret_path: str | None = None
+
+        if secret_store is not None or token_secret_path is not None or (
+            token_path is None and workspace_root is None and _vault_secret_store_enabled()
+        ):
+            if secret_store is None:
+                if build_secret_store_from_env is None:
+                    raise AuthError("OpenBao/Vault secret store is not available")
+                try:
+                    secret_store = build_secret_store_from_env()
+                except SecretStoreError as err:
+                    raise AuthError(f"OpenBao/Vault unavailable: {err}") from err
+            self._secret_store = secret_store
+            self._token_secret_path = token_secret_path or f"profiles/{_vault_profile()}/mercadolivre/tokens"
+            self.token_path = Path(self._token_secret_path)
+            return
+
         if not allow_fallback and workspace_root is None and token_path is None:
             raise AuthError(
                 "workspace_root or token_path is required when fallback auth is disabled"
@@ -73,9 +115,6 @@ class TokenManager:
         if default_path is None:
             raise AuthError("Token path is required")
         self.token_path = Path(default_path)
-        self.oauth_handler = oauth_handler or OAuthHandler(settings_file=settings_file)
-        self._tokens: dict[str, Any] | None = None
-        self._secure_storage: SecureTokenStorage | None = None
 
         use_secure_storage = get_pipeline_flag(
             "ML_PIPE_MERCADO_LIVRE_USE_SECURE_STORAGE",
@@ -125,7 +164,26 @@ class TokenManager:
             json.JSONDecodeError: If token file is invalid JSON
         """
         if self._tokens is None:
-            if self._secure_storage is not None:
+            if self._secret_store is not None:
+                try:
+                    raw = self._secret_store.get_secret(self._token_secret_path or "")
+                except SecretStoreError as err:
+                    raise AuthError(f"OpenBao/Vault token read failed: {err}") from err
+                if not raw:
+                    raise FileNotFoundError(
+                        f"Mercado Livre tokens not found in OpenBao/Vault: {self._token_secret_path}"
+                    )
+                try:
+                    loaded = json.loads(raw)
+                except json.JSONDecodeError as err:
+                    raise AuthError(
+                        f"Invalid Mercado Livre token payload in OpenBao/Vault: {self._token_secret_path}"
+                    ) from err
+                if isinstance(loaded, dict):
+                    self._tokens = self._persistable_tokens(loaded)
+                else:
+                    raise ValueError("Invalid token payload format in OpenBao/Vault")
+            elif self._secure_storage is not None:
                 try:
                     loaded = self._secure_storage.load_tokens()
                 except SecureStorageError as err:
@@ -151,7 +209,15 @@ class TokenManager:
             tokens: Dictionary containing access_token, refresh_token, and expires_at
         """
         persisted_tokens = self._persistable_tokens(tokens)
-        if self._secure_storage is not None:
+        if self._secret_store is not None:
+            try:
+                self._secret_store.set_secret(
+                    self._token_secret_path or "",
+                    json.dumps(persisted_tokens, separators=(",", ":"), ensure_ascii=False),
+                )
+            except SecretStoreError as err:
+                raise AuthError(f"OpenBao/Vault token write failed: {err}") from err
+        elif self._secure_storage is not None:
             try:
                 self._secure_storage.save_tokens(persisted_tokens)
             except SecureStorageError as err:
@@ -333,7 +399,12 @@ class TokenManager:
     def logout(self) -> None:
         """Clear tokens and remove token file."""
         self._tokens = None
-        if self._secure_storage is not None:
+        if self._secret_store is not None:
+            try:
+                self._secret_store.delete_secret(self._token_secret_path or "")
+            except SecretStoreError as err:
+                raise AuthError(f"OpenBao/Vault token delete failed: {err}") from err
+        elif self._secure_storage is not None:
             self._secure_storage.delete_tokens()
         elif self.token_path.exists():
             self.token_path.unlink()

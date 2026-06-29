@@ -8,6 +8,12 @@ from urllib.parse import urlencode
 import requests
 import yaml
 
+try:
+    from ml_app_settings_core import SecretStoreError, build_secret_store_from_env
+except Exception:  # pragma: no cover - standalone package fallback
+    SecretStoreError = Exception
+    build_secret_store_from_env = None
+
 from mercadolivre_upload.infrastructure.env import get_pipeline_env
 from mercadolivre_upload.infrastructure.http import ResilientHTTPClient, RetryPolicy
 
@@ -31,6 +37,7 @@ def _discover_publisher_config_path(settings_file: Path | None = None) -> Path |
 def _load_publisher_auth_defaults(settings_file: Path | None = None) -> tuple[str | None, str | None]:
     client_id: str | None = None
     secret: str | None = None
+    vault_enabled = _vault_secret_store_enabled()
 
     config_path = _discover_publisher_config_path(settings_file)
     if config_path is not None:
@@ -45,16 +52,36 @@ def _load_publisher_auth_defaults(settings_file: Path | None = None) -> tuple[st
                 if isinstance(raw_id, str) and raw_id.strip():
                     client_id = raw_id.strip()
 
+    if vault_enabled:
+        if build_secret_store_from_env is None:
+            raise OAuthError("OpenBao/Vault secret store is not available")
+        try:
+            store = build_secret_store_from_env()
+            profile = os.getenv("MLBOT_SECRET_PROFILE", "default").strip() or "default"
+            secret = store.get_secret(f"profiles/{profile}/mercadolivre/client_secret")
+        except SecretStoreError as exc:
+            raise OAuthError(f"OpenBao/Vault client_secret unavailable: {exc}") from exc
+        return client_id, secret
+
     if config_path is not None and config_path.parent.name == "config":
         secret_path = (config_path.parent.parent / "secrets" / "ml_app_secret").resolve()
     else:
         secret_path = Path("./secrets/ml_app_secret")
-    if secret_path.exists():
+
+    if secret_path.exists() and not secret:
         raw_secret = secret_path.read_text(encoding="utf-8").strip()
         if raw_secret:
             secret = raw_secret
 
     return client_id, secret
+
+
+def _vault_secret_store_enabled() -> bool:
+    for name in ("MLBOT_SECRET_BACKEND", "ML_PUBLISHER_SECRET_BACKEND", "ML_DASHBOARD_SECRET_BACKEND"):
+        value = os.getenv(name)
+        if value is not None and value.strip().lower() in {"openbao", "vault"}:
+            return True
+    return False
 
 
 class OAuthHandler:
@@ -84,18 +111,22 @@ class OAuthHandler:
 
         Args:
             client_id: ML client ID. Defaults to env var.
-            client_secret: ML client secret. Defaults to env var.
+            client_secret: ML client secret. Defaults to env var only outside Vault mode.
             redirect_uri: OAuth redirect URI. Defaults to env var.
             http_client: Optional resilient HTTP client for token requests.
         """
-        default_client_id, default_client_secret = _load_publisher_auth_defaults(settings_file)
+        if client_id is not None and client_secret is not None:
+            default_client_id, default_client_secret = None, None
+        else:
+            default_client_id, default_client_secret = _load_publisher_auth_defaults(settings_file)
+        vault_enabled = _vault_secret_store_enabled()
         self.client_id = (
             client_id or default_client_id or get_pipeline_env("ML_PIPE_MERCADO_LIVRE_CLIENT_ID")
         )
         self.client_secret = (
             client_secret
             or default_client_secret
-            or get_pipeline_env("ML_PIPE_MERCADO_LIVRE_CLIENT_SECRET")
+            or (None if vault_enabled else get_pipeline_env("ML_PIPE_MERCADO_LIVRE_CLIENT_SECRET"))
         )
         self.redirect_uri = redirect_uri or get_pipeline_env(
             "ML_PIPE_MERCADO_LIVRE_REDIRECT_URI",

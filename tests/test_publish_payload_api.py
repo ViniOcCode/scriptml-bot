@@ -18,6 +18,23 @@ from mercadolivre_upload.cli.commands.publish_runtime import resolve_workspace_r
 from mercadolivre_upload.cli import app
 
 
+class _MemorySecretStore:
+    def __init__(self, values: dict[str, str] | None = None) -> None:
+        self.values = dict(values or {})
+
+    def get_secret(self, path: str) -> str | None:
+        return self.values.get(path)
+
+    def set_secret(self, path: str, value: str) -> None:
+        self.values[path] = value
+
+    def delete_secret(self, path: str) -> None:
+        self.values.pop(path, None)
+
+    def status(self) -> dict[str, object]:
+        return {"backend": "memory", "status": "pronto"}
+
+
 def _publisher_config(tmp_path: Path, *, include_credentials: bool = True) -> Path:
     workspace = tmp_path / "workspace"
     secrets = tmp_path / "secrets"
@@ -238,6 +255,22 @@ def test_publish_payload_uses_explicit_config_from_unrelated_cwd(
     monkeypatch.chdir(unrelated)
     monkeypatch.delenv("ML_PIPE_MERCADO_LIVRE_CLIENT_ID", raising=False)
     monkeypatch.delenv("ML_PIPE_MERCADO_LIVRE_CLIENT_SECRET", raising=False)
+    monkeypatch.setenv("MLBOT_SECRET_BACKEND", "openbao")
+    monkeypatch.setattr(
+        "mercadolivre_upload.auth.publisher_context.build_secret_store_from_env",
+        lambda: _MemorySecretStore(
+            {
+                "profiles/default/mercadolivre/client_secret": "secret-from-vault",
+                "profiles/default/mercadolivre/tokens": json.dumps(
+                    {
+                        "access_token": "access-from-vault",
+                        "refresh_token": "refresh-from-vault",
+                        "expires_at": 9_999_999_999,
+                    }
+                ),
+            }
+        ),
+    )
 
     result = publish_payload_api.publish_payload_file(
         payload_path,
@@ -249,8 +282,16 @@ def test_publish_payload_uses_explicit_config_from_unrelated_cwd(
     assert result["status"] == "skipped"
 
 
-def test_missing_client_credentials_names_resolved_config_and_secret_paths(tmp_path: Path) -> None:
-    config = _publisher_config(tmp_path, include_credentials=False)
+def test_missing_client_credentials_names_resolved_config_and_vault_paths(
+    tmp_path: Path, monkeypatch
+) -> None:
+    config = _publisher_config(tmp_path)
+    store = _MemorySecretStore()
+    monkeypatch.setenv("MLBOT_SECRET_BACKEND", "openbao")
+    monkeypatch.setattr(
+        "mercadolivre_upload.auth.publisher_context.build_secret_store_from_env",
+        lambda: store,
+    )
 
     with pytest.raises(AuthError) as exc:
         build_publisher_auth_context(
@@ -260,10 +301,8 @@ def test_missing_client_credentials_names_resolved_config_and_secret_paths(tmp_p
         )
 
     message = str(exc.value)
-    assert "client_id" in message
     assert "client_secret" in message
-    assert str(config.resolve()) in message
-    assert str((tmp_path / "secrets" / "ml_app_secret").resolve()) in message
+    assert "profiles/default/mercadolivre/client_secret" in message
 
 
 def test_missing_workspace_root_hard_fails(tmp_path: Path) -> None:
@@ -277,7 +316,24 @@ def test_missing_workspace_root_hard_fails(tmp_path: Path) -> None:
 def test_publication_auth_ignores_fallback_token_sources(tmp_path: Path, monkeypatch) -> None:
     config = _publisher_config(tmp_path)
     workspace = tmp_path / "workspace"
+    store = _MemorySecretStore(
+        {
+            "profiles/default/mercadolivre/client_secret": "secret-from-vault",
+            "profiles/default/mercadolivre/tokens": json.dumps(
+                {
+                    "access_token": "access-from-vault",
+                    "refresh_token": "refresh-from-vault",
+                    "expires_at": 9_999_999_999,
+                }
+            ),
+        }
+    )
+    monkeypatch.setenv("MLBOT_SECRET_BACKEND", "openbao")
     monkeypatch.setenv("ML_PIPE_MERCADO_LIVRE_TOKEN_PATH", str(tmp_path / "legacy_tokens.json"))
+    monkeypatch.setattr(
+        "mercadolivre_upload.auth.publisher_context.build_secret_store_from_env",
+        lambda: store,
+    )
 
     context = build_publisher_auth_context(
         settings_file=config,
@@ -285,10 +341,34 @@ def test_publication_auth_ignores_fallback_token_sources(tmp_path: Path, monkeyp
         strict=True,
     )
 
-    assert context.token_path == workspace.resolve() / ".ml_token.enc"
-    assert context.key_path == workspace.resolve() / ".ml_fernet_key"
-    assert context.token_manager.token_path == workspace.resolve() / ".ml_token.enc"
+    assert context.token_path == "profiles/default/mercadolivre/tokens"
+    assert context.key_path is None
+    assert str(context.token_manager.token_path) == "profiles/default/mercadolivre/tokens"
+    assert context.token_manager.load_tokens()["access_token"] == "access-from-vault"
     assert not (tmp_path / "legacy_tokens.json").exists()
+
+
+def test_dashboard_publication_flow_does_not_reference_legacy_token_sources() -> None:
+    root = Path(__file__).resolve().parents[3]
+    flow_files = [
+        root / "apps/scriptml-bot/mercadolivre_upload/auth/publisher_context.py",
+        root / "apps/scriptml-bot/mercadolivre_upload/application/publish_payload.py",
+        root / "apps/scriptml-bot/mercadolivre_upload/application/dashboard_api.py",
+        root / "apps/ml-dashboard/ml_dashboard/app.py",
+        root / "apps/ml-dashboard/ml_dashboard/worker.py",
+    ]
+    forbidden = [
+        ".ml_token.enc",
+        ".ml_fernet_key",
+        "ML_PIPE_MERCADO_LIVRE_TOKEN_PATH",
+        "ml_app_secret",
+        "tokens.json",
+    ]
+    offenders = {
+        str(path.relative_to(root)): [marker for marker in forbidden if marker in path.read_text(encoding="utf-8")]
+        for path in flow_files
+    }
+    assert {path: markers for path, markers in offenders.items() if markers} == {}
 
 
 def test_publication_code_does_not_instantiate_plain_token_manager() -> None:

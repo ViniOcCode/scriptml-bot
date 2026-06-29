@@ -28,7 +28,7 @@
 |----------|---------|---------|--------|
 | **Validate** | `ml-upload validate` | Check spreadsheet format, category resolution, attributes before publishing | `validation-summary-<ts>.json` + console report |
 | **Publish** | `ml-upload upload` | Upload images, then publish items to Mercado Livre via API | `upload-summary-<ts>.json` + optional failed-items export |
-| **Auth** | `ml-upload auth` | Set/refresh Mercado Livre OAuth tokens, inspect auth status | Token storage in `tokens.json.enc` |
+| **Auth** | `ml-upload auth` | Set/refresh Mercado Livre OAuth tokens, inspect auth status | OpenBao/Vault in dashboard mode |
 | **Cache** | `ml-upload cache {clear,status}` | Manage cached category metadata and predictions | Cache stats or cleared cache |
 | **Health** | `ml-upload doctor` | Environment diagnostic checks | Diagnostic output |
 
@@ -353,15 +353,15 @@ Located in `config/`:
 ### Environment Variables
 
 **Token & Auth:**
-- `ML_PIPE_MERCADO_LIVRE_CLIENT_ID` – OAuth client ID
-- `ML_PIPE_MERCADO_LIVRE_CLIENT_SECRET` – OAuth client secret
+- `MLBOT_SECRET_BACKEND=openbao` – Enables Vault-only Mercado Livre auth for dashboard/runtime flows
+- `MLBOT_VAULT_ADDR`, `MLBOT_VAULT_MOUNT`, `MLBOT_VAULT_PREFIX`, `MLBOT_VAULT_TOKEN_FILE` – OpenBao/Vault connection
+- `MLBOT_SECRET_PROFILE` – Active profile slug, defaults to `default`
+- `auth.ml_app_id` in `config/publisher.yaml` – OAuth client ID
 - `ML_PIPE_MERCADO_LIVRE_REDIRECT_URI` – Callback URL (optional)
-- `ML_PIPE_MERCADO_LIVRE_TOKEN_PATH` – Custom token file location
-- `ML_PIPE_ENCRYPTION_KEY` – Master encryption key for tokens (from keyring or env)
 
-**Storage Mode:**
-- `ML_PIPE_MERCADO_LIVRE_USE_SECURE_STORAGE` – Default enabled; set `0` to disable
-- `ML_PIPE_MERCADO_LIVRE_AUTO_MIGRATE_TOKENS` – Auto-migrate plaintext tokens to encrypted
+**Vault paths:**
+- `profiles/<profile>/mercadolivre/client_secret`
+- `profiles/<profile>/mercadolivre/tokens`
 
 **Runtime:**
 - `PYTHONPATH`, `DEBUG`, etc. (standard Python vars)
@@ -370,9 +370,9 @@ Located in `config/`:
 
 ## 5. Token & Security Model
 
-### Secure Token Storage (Default)
+### OpenBao/Vault Token Storage (Dashboard Default)
 
-**Location:** `tokens.json.enc` (encrypted file, next to `tokens.json` if migrating)
+**Location:** `profiles/<profile>/mercadolivre/tokens`
 
 **Contents:**
 ```json
@@ -383,26 +383,20 @@ Located in `config/`:
 }
 ```
 
-**Encryption:**
-- Uses `cryptography.Fernet` (symmetric encryption)
-- Key from keyring (system credential store) or `ML_PIPE_ENCRYPTION_KEY` env var
-
 **Lifecycle:**
 1. `get_access_token()` – Reads persisted `access_token`
 2. If expired + `auto_refresh=True` → Use `refresh_token` to get new credentials
-3. Persist updated token + expiry
+3. Persist updated token + expiry back to the same Vault path
 
-**Migration (Automatic):**
-- If plaintext `tokens.json` exists → Encrypt to `tokens.json.enc` + backup original
-- Requires secure mode enabled
+Legacy encrypted token files remain only for standalone CLI migration/testing when
+Vault mode is not enabled. Do not use local token files for dashboard runtime.
 
 ### External Secret Managers (1Password, Vault, etc.)
 
-**No code changes required.** Inject at runtime:
+Dashboard mode uses the shared `SecretStore` abstraction. OpenBao is the local default; other secret managers can be adapted behind the same contract later.
 
 ```bash
-op run --env-file=.env.1password -- \
-  uv run ml-upload validate anuncios/2.xlsx -i anuncios/ -c "quadros decorativos"
+MLBOT_SECRET_BACKEND=openbao uv run ml-upload doctor
 ```
 
 ---

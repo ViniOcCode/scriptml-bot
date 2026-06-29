@@ -11,6 +11,23 @@ from mercadolivre_upload.auth.exceptions import AuthError
 from mercadolivre_upload.auth.token_manager import TokenManager
 
 
+class _MemorySecretStore:
+    def __init__(self, values: dict[str, str] | None = None) -> None:
+        self.values = dict(values or {})
+
+    def get_secret(self, path: str) -> str | None:
+        return self.values.get(path)
+
+    def set_secret(self, path: str, value: str) -> None:
+        self.values[path] = value
+
+    def delete_secret(self, path: str) -> None:
+        self.values.pop(path, None)
+
+    def status(self) -> dict[str, object]:
+        return {"backend": "memory", "status": "pronto"}
+
+
 def _sample_tokens() -> dict[str, object]:
     return {
         "access_token": "access-token",
@@ -88,6 +105,70 @@ def test_save_tokens_drops_non_persisted_fields(tmp_path: Path, monkeypatch) -> 
 
     persisted = json.loads(token_path.read_text(encoding="utf-8"))
     assert persisted == _sample_tokens()
+
+
+def test_vault_mode_loads_and_saves_tokens_without_legacy_files(tmp_path: Path) -> None:
+    token_secret_path = "profiles/default/mercadolivre/tokens"
+    store = _MemorySecretStore({token_secret_path: json.dumps(_sample_tokens())})
+
+    manager = TokenManager(
+        secret_store=store,
+        token_secret_path=token_secret_path,
+        oauth_handler=MagicMock(),
+    )
+    assert manager.load_tokens() == _sample_tokens()
+
+    manager.save_tokens(
+        {
+            "access_token": "new-access",
+            "refresh_token": "new-refresh",
+            "expires_at": 9_999_999_999,
+            "unexpected": "not persisted",
+        }
+    )
+
+    assert json.loads(store.values[token_secret_path]) == {
+        "access_token": "new-access",
+        "refresh_token": "new-refresh",
+        "expires_at": 9_999_999_999,
+    }
+    assert not (tmp_path / ".ml_token.enc").exists()
+
+
+def test_vault_mode_refreshes_and_persists_tokens() -> None:
+    token_secret_path = "profiles/default/mercadolivre/tokens"
+    store = _MemorySecretStore(
+        {
+            token_secret_path: json.dumps(
+                {
+                    "access_token": "expired-access",
+                    "refresh_token": "refresh-token",
+                    "expires_at": 1,
+                }
+            )
+        }
+    )
+    oauth_handler = MagicMock()
+    oauth_handler.refresh_token.return_value = {
+        "access_token": "refreshed-access",
+        "expires_at": 9_999_999_999,
+    }
+    manager = TokenManager(
+        secret_store=store,
+        token_secret_path=token_secret_path,
+        oauth_handler=oauth_handler,
+    )
+
+    tokens = manager.refresh_token()
+
+    oauth_handler.refresh_token.assert_called_once_with("refresh-token")
+    assert tokens["access_token"] == "refreshed-access"
+    assert tokens["refresh_token"] == "refresh-token"
+    assert json.loads(store.values[token_secret_path]) == {
+        "access_token": "refreshed-access",
+        "refresh_token": "refresh-token",
+        "expires_at": 9_999_999_999,
+    }
 
 
 def test_secure_storage_load_failure_is_explicit(tmp_path: Path, monkeypatch) -> None:

@@ -31,61 +31,21 @@ Entrypoint: `ml-upload` -> `mercadolivre_upload.main:main`.
 
 ### 1) Configure authentication
 
-- Secure token storage is enabled by default.
-- Default token path behavior:
-  - if `ML_PIPE_MERCADO_LIVRE_TOKEN_PATH` is unset, runtime uses `tokens.json.enc`
-  - if `ML_PIPE_MERCADO_LIVRE_TOKEN_PATH=tokens.json`, runtime stores encrypted tokens in
-    `tokens.json.enc`
-- Persisted token payload stores only:
-  - `access_token`
-  - `refresh_token`
-  - `expires_at`
-- Plaintext mode is explicit opt-out only:
-  - `ML_PIPE_MERCADO_LIVRE_USE_SECURE_STORAGE=0`
-- Migration behavior:
-  - `ML_PIPE_MERCADO_LIVRE_AUTO_MIGRATE_TOKENS` defaults to enabled in secure mode
-  - existing plaintext `tokens.json` is migrated automatically to `.enc` (backup created as
-    `tokens.json.backup`)
-- Secure mode errors (key setup/decryption/migration) fail explicitly.
+Dashboard-driven publisher runs use OpenBao/Vault only for Mercado Livre secrets.
 
-#### External secret managers (1Password, Vault, etc.)
+- `auth.ml_app_id` stays in `config/publisher.yaml` because it is not secret.
+- `client_secret` must be stored at `profiles/<profile>/mercadolivre/client_secret`.
+- OAuth tokens must be stored at `profiles/<profile>/mercadolivre/tokens`.
+- Set `MLBOT_SECRET_BACKEND=openbao` and the Vault connection envs before running dashboard workers or publisher commands in dashboard mode.
+- If Vault is offline, sealed, missing a token, or missing Mercado Livre secrets, publish/reconcile/sync fails explicitly.
 
-No code changes are required. The app reads sensitive values from the canonical `ML_PIPE_`
-environment namespace, so you can inject them at runtime from your secret manager:
+Legacy encrypted token files still exist only for standalone CLI migration/testing when Vault mode is not enabled. Do not use them for dashboard runtime.
 
-- `ML_PIPE_MERCADO_LIVRE_CLIENT_ID`
-- `ML_PIPE_MERCADO_LIVRE_CLIENT_SECRET`
-- `ML_PIPE_MERCADO_LIVRE_REDIRECT_URI` (if not using the default callback URL)
-- `ML_PIPE_ENCRYPTION_KEY` (recommended for CI/non-interactive environments, required when keyring is
-  unavailable)
-
-Example with 1Password CLI:
-
-```bash
-# .env.1password (secret references, not plaintext)
-ML_PIPE_MERCADO_LIVRE_CLIENT_ID=op://<vault>/<item>/client_id
-ML_PIPE_MERCADO_LIVRE_CLIENT_SECRET=op://<vault>/<item>/client_secret
-ML_PIPE_ENCRYPTION_KEY=op://<vault>/<item>/encryption_key
-ML_PIPE_MERCADO_LIVRE_REDIRECT_URI=op://<vault>/<item>/redirect_uri
-```
-
-```bash
-op run --env-file=.env.1password -- \
-  uv run ml-upload validate anuncios/2.xlsx -i anuncios/ -c "quadros decorativos"
-```
-
-Important behavior to plan for:
-
-- Tokens are still persisted locally in an encrypted file (`tokens.json.enc` by default).
-- `ML_PIPE_ENCRYPTION_KEY` must stay stable to decrypt existing token files.
-- Use `ML_PIPE_MERCADO_LIVRE_TOKEN_PATH` if you want a custom token-file location.
-- Unprefixed `MERCADO_LIVRE_*`, `ML_APP_*`, and `ENCRYPTION_KEY` names are not read by the current CLI.
-
-#### Access/refresh token lifecycle in secure mode
+#### Access/refresh token lifecycle in Vault mode
 
 - `get_access_token()` reads `access_token`.
 - If token is expired and `auto_refresh=True`, the app uses `refresh_token` to request new
-  credentials and persists updated `access_token`/`refresh_token`/`expires_at`.
+  credentials and persists updated `access_token`/`refresh_token`/`expires_at` back to the same Vault path.
 - If `refresh_token` is missing, refresh fails with an explicit auth error.
 
 ### 2) Prepare input files

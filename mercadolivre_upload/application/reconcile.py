@@ -36,6 +36,7 @@ PUBLISHED_ML_STATUSES = {"active", "paused"}
 INVENTORY_ML_STATUSES = ("active", "paused", "closed")
 SEARCH_PAGE_SIZE = 50
 ITEM_BATCH_SIZE = 20
+MAX_SCAN_PAGES_PER_STATUS = 10_000
 
 
 class ReconcileUsageError(ValueError):
@@ -800,7 +801,18 @@ def _fetch_ml_inventory(inventory: ItemInventoryPort) -> list[MercadoLivreItem]:
     seen_ids: set[str] = set()
     for status in INVENTORY_ML_STATUSES:
         scroll_id: str | None = None
+        seen_scroll_ids: set[str] = set()
+        seen_page_signatures: set[tuple[str, ...]] = set()
+        declared_total: int | None = None
+        fetched_for_status = 0
+        page_count = 0
         while True:
+            page_count += 1
+            if page_count > MAX_SCAN_PAGES_PER_STATUS:
+                raise ReconcileOperationalError(
+                    "Mercado Livre inventory scan exceeded "
+                    f"{MAX_SCAN_PAGES_PER_STATUS} page(s) for status={status!r}."
+                )
             response = inventory.search_user_items(
                 seller_id,
                 status=status,
@@ -811,17 +823,44 @@ def _fetch_ml_inventory(inventory: ItemInventoryPort) -> list[MercadoLivreItem]:
             raw_results = response.get("results")
             results = raw_results if isinstance(raw_results, list) else []
             page_ids = [item_id for raw_item_id in results if (item_id := _clean_text(raw_item_id))]
+            if declared_total is None:
+                paging = response.get("paging")
+                raw_total = paging.get("total") if isinstance(paging, dict) else None
+                if isinstance(raw_total, int) and raw_total >= 0:
+                    declared_total = raw_total
+                elif isinstance(raw_total, str) and raw_total.isdigit():
+                    declared_total = int(raw_total)
+            if declared_total is not None:
+                remaining = max(declared_total - fetched_for_status, 0)
+                page_ids = page_ids[:remaining]
+            page_signature = tuple(page_ids)
+            if page_signature and page_signature in seen_page_signatures:
+                raise ReconcileOperationalError(
+                    "Mercado Livre inventory scan returned a repeated page "
+                    f"for status={status!r} and scroll_id={scroll_id!r}."
+                )
+            if page_signature:
+                seen_page_signatures.add(page_signature)
             for item_id in page_ids:
                 if item_id in seen_ids:
                     continue
                 seen_ids.add(item_id)
                 item_ids.append(item_id)
+            fetched_for_status += len(page_ids)
 
             if not page_ids:
+                break
+            if declared_total is not None and fetched_for_status >= declared_total:
                 break
             next_scroll_id = _clean_text(response.get("scroll_id"))
             if not next_scroll_id:
                 break
+            if next_scroll_id == scroll_id or next_scroll_id in seen_scroll_ids:
+                raise ReconcileOperationalError(
+                    "Mercado Livre inventory scan returned a repeated scroll_id "
+                    f"for status={status!r}: {next_scroll_id!r}."
+                )
+            seen_scroll_ids.add(next_scroll_id)
             scroll_id = next_scroll_id
 
     items: list[MercadoLivreItem] = []

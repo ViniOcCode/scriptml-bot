@@ -6,7 +6,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-from mercadolivre_upload.application.reconcile import ReconcileUseCase
+import pytest
+
+from mercadolivre_upload.application.reconcile import ReconcileOperationalError, ReconcileUseCase
 
 
 class FakeInventory:
@@ -36,6 +38,69 @@ class FakeInventory:
             "results": ids[page_offset : page_offset + limit],
             "paging": {"total": len(ids)},
             "scroll_id": str(page_offset + limit) if search_type == "scan" else None,
+        }
+
+    def get_items_batch(self, item_ids: list[str]) -> list[Any]:
+        self.batch_calls.append(item_ids)
+        return [{"code": 200, "body": self.items[item_id]} for item_id in item_ids]
+
+
+class RepeatingScrollInventory:
+    def get_users_me(self) -> dict[str, Any]:
+        return {"id": "seller-1"}
+
+    def search_user_items(
+        self,
+        seller_id: str,
+        *,
+        status: str,
+        limit: int,
+        offset: int | None = None,
+        search_type: str | None = None,
+        scroll_id: str | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "results": ["MLB1"],
+            "paging": {"total": 10},
+            "scroll_id": "same-scroll",
+        }
+
+    def get_items_batch(self, item_ids: list[str]) -> list[Any]:
+        return []
+
+
+class OverflowingScanInventory:
+    def __init__(self) -> None:
+        self.search_calls: list[tuple[str, str | None]] = []
+        self.batch_calls: list[list[str]] = []
+        self.items = {
+            "MLB1": _ml_item("MLB1", "SKU-A", status="active"),
+            "MLB2": _ml_item("MLB2", "SKU-B", status="active"),
+            "MLB3": _ml_item("MLB3", "SKU-C", status="active"),
+            "MLB4": _ml_item("MLB4", "SKU-D", status="active"),
+        }
+
+    def get_users_me(self) -> dict[str, Any]:
+        return {"id": "seller-1"}
+
+    def search_user_items(
+        self,
+        seller_id: str,
+        *,
+        status: str,
+        limit: int,
+        offset: int | None = None,
+        search_type: str | None = None,
+        scroll_id: str | None = None,
+    ) -> dict[str, Any]:
+        assert seller_id == "seller-1"
+        self.search_calls.append((status, scroll_id))
+        if status != "active":
+            return {"results": [], "paging": {"total": 0}, "scroll_id": f"{status}-next"}
+        return {
+            "results": ["MLB1", "MLB2", "MLB3", "MLB4"],
+            "paging": {"total": 3},
+            "scroll_id": f"active-next-{len(self.search_calls)}",
         }
 
     def get_items_batch(self, item_ids: list[str]) -> list[Any]:
@@ -139,6 +204,31 @@ def test_artifact_reconcile_reports_published_unpublished_closed_and_ml_only(
     assert report.summary["ml_without_local_payload"] == 1
     assert report.summary["local_payload_error"] == 0
     assert not any(row.group_id == "INDEX" for row in report.rows)
+
+
+def test_reconcile_fails_on_repeated_ml_scan_cursor(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    _write_payload(workspace, "G1", "SKU-A")
+
+    with pytest.raises(ReconcileOperationalError, match="repeated"):
+        ReconcileUseCase(RepeatingScrollInventory()).execute(workspace_root=workspace)
+
+
+def test_inventory_scan_stops_at_declared_paging_total(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    _write_payload(workspace, "G1", "SKU-C")
+    inventory = OverflowingScanInventory()
+
+    report = ReconcileUseCase(inventory).execute(workspace_root=workspace)
+
+    row = next(row for row in report.rows if row.group_id == "G1")
+    assert row.status == "generated_published"
+    assert row.ml_item_id == "MLB3"
+    assert inventory.search_calls.count(("active", None)) == 1
+    assert not any(status == "active" and scroll_id for status, scroll_id in inventory.search_calls)
+    assert inventory.batch_calls == [["MLB1", "MLB2", "MLB3"]]
 
 
 def test_artifact_reconcile_reports_local_payload_errors(tmp_path: Path) -> None:
