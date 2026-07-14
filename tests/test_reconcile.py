@@ -341,7 +341,6 @@ def _manifest_payload(workspace: Path, payload_path: str) -> dict[str, Any]:
             {
                 "sku": "SKU-BAD",
                 "group_id": "GBAD",
-                "family_id": "FBAD",
                 "stage": "stage70_payload",
                 "reason": "payload_failed",
                 "publishable": False,

@@ -16,10 +16,10 @@ class PublicationPayloadVariant(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     variant: str
-    payload_path: str | None = None
-    listing_type_id: str
+    payload_path: str = ""
+    listing_type_id: str = ""
     publishable: bool
-    artifact_source: str | None = None
+    artifact_source: str = ""
     created_at: datetime | None = None
     block_reason: str | None = None
     skip_reason: str | None = None
@@ -31,25 +31,35 @@ class PublicationCandidate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     group_id: str
-    family_id: str | None = None
+    family_id: str = ""
     sku_scope: list[str] = Field(default_factory=list)
-    topology: str | None = None
+    topology: str = ""
     build_status: Literal["success", "partial_success", "failed", "skipped", "not_publishable"]
     payloads: list[PublicationPayloadVariant] = Field(default_factory=list)
-    errors: list[Any] = Field(default_factory=list)
+    errors: list[dict[str, Any]] = Field(default_factory=list)
+    override_status: Literal["none", "applied", "partially_applied", "rejected", "unsupported"] = (
+        "none"
+    )
+    review_overrides_applied: list[dict[str, Any]] = Field(default_factory=list)
+    override_rejection_reason: str | None = None
 
 
 class BuildFailure(BaseModel):
     """Non-publishable failure emitted by the builder."""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
-    sku: str | None = None
-    group_id: str | None = None
-    family_id: str | None = None
-    stage: str | None = None
-    reason: str | None = None
-    publishable: bool = False
+    sku: str
+    group_id: str
+    stage: str
+    reason: str
+    publishable: Literal[False] = False
+    review_issues: list[dict[str, Any]] = Field(default_factory=list)
+    override_status: Literal["none", "applied", "partially_applied", "rejected", "unsupported"] = (
+        "none"
+    )
+    review_overrides_applied: list[dict[str, Any]] = Field(default_factory=list)
+    override_rejection_reason: str | None = None
 
 
 class RunManifest(BaseModel):
@@ -62,8 +72,9 @@ class RunManifest(BaseModel):
     workspace_path: str
     status: Literal["success", "partial_success", "failed"]
     publication_candidates: list[PublicationCandidate]
-    build_failures: list[BuildFailure]
-    diagnostics: dict[str, str | None]
+    build_failures: list[BuildFailure] = Field(default_factory=list)
+    diagnostics: dict[str, str | None] = Field(default_factory=dict)
+    review_overrides: list[dict[str, Any]] = Field(default_factory=list)
 
 
 def load_run_manifest(path: Path) -> RunManifest:

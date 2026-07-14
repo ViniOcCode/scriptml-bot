@@ -117,7 +117,11 @@ def validate_effective_payload_file(
     )
     client = MLApiClient(auth_context.token_manager)
     payloads = prepared.get("payloads")
-    effective_payloads = payloads if isinstance(payloads, list) and payloads else [prepared["payload"]]
+    effective_payloads = (
+        payloads
+        if isinstance(payloads, list) and payloads
+        else [prepared["payload"]]
+    )
     classifications = []
     reports = []
     for payload in effective_payloads:
@@ -214,12 +218,35 @@ def apply_remote_item_update(
     item_id: str,
     patch: dict[str, Any],
     *,
+    operation: str = "update",
     seller_config_path: Path,
     workspace_root: Path,
     dry_run: bool = False,
 ) -> dict[str, Any]:
     """Apply an allowlisted remote item update for post-publication operations."""
-    allowed = {"status", "price", "available_quantity", "title", "pictures", "attributes"}
+    lifecycle_status = {
+        "pause": "paused",
+        "activate": "active",
+        "finalize": "closed",
+        "delete": "closed",
+    }
+    if operation == "update":
+        if "status" in patch:
+            return {
+                "status": "failed",
+                "errors": ["Status changes require pause, activate, finalize, or delete operation."],
+            }
+        allowed = {"price", "available_quantity", "title", "pictures", "attributes"}
+    elif operation in lifecycle_status:
+        expected_patch = {"status": lifecycle_status[operation]}
+        if patch != expected_patch:
+            return {
+                "status": "failed",
+                "errors": [f"Operation {operation} requires the exact patch {expected_patch}."],
+            }
+        allowed = {"status"}
+    else:
+        return {"status": "failed", "errors": [f"Unsupported remote operation: {operation}"]}
     rejected = sorted(key for key in patch if key not in allowed)
     if rejected:
         return {"status": "failed", "errors": [f"Unsupported remote update fields: {rejected}"]}
@@ -251,8 +278,31 @@ def fetch_remote_item(
     return {"status": "synced", "item_id": item_id, "item": client.get(f"/items/{item_id}")}
 
 
+def fetch_authenticated_seller_identity(
+    *,
+    seller_config_path: Path,
+    workspace_root: Path,
+) -> dict[str, str]:
+    """Return the minimal authenticated seller identity needed by safe operations."""
+    auth_context = build_publisher_auth_context(
+        settings_file=seller_config_path,
+        workspace_root=workspace_root,
+        strict=True,
+    )
+    client = MLApiClient(auth_context.token_manager)
+    seller = client.get("/users/me")
+    if not isinstance(seller, dict):
+        raise RuntimeError("GET /users/me returned an invalid response")
+    seller_id = str(seller.get("id") or "").strip()
+    site_id = str(seller.get("site_id") or "").strip().upper()
+    if not seller_id or not site_id:
+        raise RuntimeError("GET /users/me did not return seller id and site id")
+    return {"status": "authenticated", "seller_id": seller_id, "site_id": site_id}
+
+
 __all__ = [
     "apply_remote_item_update",
+    "fetch_authenticated_seller_identity",
     "fetch_remote_item",
     "prepare_effective_payload_file",
     "publish_effective_payload_file",

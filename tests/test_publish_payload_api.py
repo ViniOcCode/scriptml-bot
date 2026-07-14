@@ -11,11 +11,15 @@ from typer.testing import CliRunner
 
 from mercadolivre_upload.adapters.json_payload_reader import JsonPayloadReader
 from mercadolivre_upload.application import publish_payload as publish_payload_api
+from mercadolivre_upload.application.dashboard_api import (
+    apply_remote_item_update,
+    fetch_authenticated_seller_identity,
+)
 from mercadolivre_upload.application.publish_payload_use_case import PublishPayloadResult
 from mercadolivre_upload.auth.exceptions import AuthError
 from mercadolivre_upload.auth.publisher_context import build_publisher_auth_context
-from mercadolivre_upload.cli.commands.publish_runtime import resolve_workspace_root
 from mercadolivre_upload.cli import app
+from mercadolivre_upload.cli.commands.publish_runtime import resolve_workspace_root
 
 
 class _MemorySecretStore:
@@ -157,7 +161,9 @@ def test_publish_payload_report_keeps_validation_warnings(tmp_path: Path, monkey
         status="published",
         item_id="MLB123",
         warnings=[
-            "ML validation warning: [shipping.lost_me1_by_user] | department=shipping | User has not mode me1 | references=item.shipping.mode"
+            "ML validation warning: [shipping.lost_me1_by_user] | "
+            "department=shipping | User has not mode me1 | "
+            "references=item.shipping.mode"
         ],
         validation_status="validation_passed_with_warnings",
         validation_report={
@@ -192,7 +198,11 @@ def test_publish_payload_report_keeps_validation_warnings(tmp_path: Path, monkey
             }
         ],
     )
-    monkeypatch.setattr(publish_payload_api, "_build_use_case", MagicMock(return_value=mock_use_case))
+    monkeypatch.setattr(
+        publish_payload_api,
+        "_build_use_case",
+        MagicMock(return_value=mock_use_case),
+    )
 
     result = publish_payload_api.publish_payload_file(
         payload_path,
@@ -365,7 +375,11 @@ def test_dashboard_publication_flow_does_not_reference_legacy_token_sources() ->
         "tokens.json",
     ]
     offenders = {
-        str(path.relative_to(root)): [marker for marker in forbidden if marker in path.read_text(encoding="utf-8")]
+        str(path.relative_to(root)): [
+            marker
+            for marker in forbidden
+            if marker in path.read_text(encoding="utf-8")
+        ]
         for path in flow_files
     }
     assert {path: markers for path, markers in offenders.items() if markers} == {}
@@ -395,6 +409,85 @@ def test_cli_help_exposes_current_publication_commands_only() -> None:
     assert "publish-json" not in result.output
 
 
+def test_dashboard_account_identity_returns_only_stable_remote_identifiers(
+    tmp_path: Path,
+) -> None:
+    auth_context = MagicMock()
+    with (
+        patch(
+            "mercadolivre_upload.application.dashboard_api.build_publisher_auth_context",
+            return_value=auth_context,
+        ),
+        patch("mercadolivre_upload.application.dashboard_api.MLApiClient") as client_class,
+    ):
+        client_class.return_value.get.return_value = {
+            "id": 123456789,
+            "site_id": "mlb",
+            "nickname": "must-not-leak",
+            "email": "must-not-leak@example.invalid",
+        }
+        identity = fetch_authenticated_seller_identity(
+            seller_config_path=tmp_path / "publisher.yaml",
+            workspace_root=tmp_path / "workspace",
+        )
+
+    assert identity == {
+        "status": "authenticated",
+        "seller_id": "123456789",
+        "site_id": "MLB",
+    }
+    client_class.return_value.get.assert_called_once_with("/users/me")
+
+
+def test_dashboard_account_identity_rejects_incomplete_provider_response(
+    tmp_path: Path,
+) -> None:
+    with (
+        patch(
+            "mercadolivre_upload.application.dashboard_api.build_publisher_auth_context",
+            return_value=MagicMock(),
+        ),
+        patch("mercadolivre_upload.application.dashboard_api.MLApiClient") as client_class,
+    ):
+        client_class.return_value.get.return_value = {"id": 123456789}
+        with pytest.raises(RuntimeError, match="seller id and site id"):
+            fetch_authenticated_seller_identity(
+                seller_config_path=tmp_path / "publisher.yaml",
+                workspace_root=tmp_path / "workspace",
+            )
+
+
+def test_dashboard_remote_update_requires_explicit_lifecycle_operation_for_status(
+    tmp_path: Path,
+) -> None:
+    blocked = apply_remote_item_update(
+        "MLB123",
+        {"status": "closed"},
+        operation="update",
+        seller_config_path=tmp_path / "publisher.yaml",
+        workspace_root=tmp_path / "workspace",
+        dry_run=True,
+    )
+    finalized = apply_remote_item_update(
+        "MLB123",
+        {"status": "closed"},
+        operation="finalize",
+        seller_config_path=tmp_path / "publisher.yaml",
+        workspace_root=tmp_path / "workspace",
+        dry_run=True,
+    )
+
+    assert blocked == {
+        "status": "failed",
+        "errors": ["Status changes require pause, activate, finalize, or delete operation."],
+    }
+    assert finalized == {
+        "status": "dry_run",
+        "item_id": "MLB123",
+        "patch": {"status": "closed"},
+    }
+
+
 def test_publish_payload_cli_delegates_to_public_api(tmp_path: Path) -> None:
     payload_path = tmp_path / "70_payload.json"
     payload_path.write_text(json.dumps(_minimal_builder_payload()), encoding="utf-8")
@@ -414,7 +507,9 @@ def test_publish_payload_cli_delegates_to_public_api(tmp_path: Path) -> None:
     }
     mock_runtime_module = MagicMock()
     mock_runtime_module.resolve_workspace_root.return_value = tmp_path / "workspace"
-    mock_runtime_module.build_attempt_report_dir.return_value = tmp_path / "workspace" / "cache" / "report" / "20260514-010203"
+    mock_runtime_module.build_attempt_report_dir.return_value = (
+        tmp_path / "workspace" / "cache" / "report" / "20260514-010203"
+    )
 
     with patch(
         "mercadolivre_upload.cli.app.import_module",

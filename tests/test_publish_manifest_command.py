@@ -189,7 +189,15 @@ def test_partial_success_manifest_with_build_failures_still_publishes_selected_p
     manifest_path = _manifest_payload(
         tmp_path,
         status="partial_success",
-        build_failures=[{"sku": "SKU-BAD", "stage": "stage70_payload", "reason": "payload_failed", "publishable": False}],
+        build_failures=[
+            {
+                "sku": "SKU-BAD",
+                "group_id": "10008",
+                "stage": "stage70_payload",
+                "reason": "payload_failed",
+                "publishable": False,
+            }
+        ],
     )
     calls: list[Path] = []
     _patch_publish(monkeypatch, calls)
@@ -464,7 +472,15 @@ def test_cli_output_shows_run_id_counts_skips_and_report_path(tmp_path: Path, mo
     manifest_path = _manifest_payload(
         tmp_path,
         status="partial_success",
-        build_failures=[{"sku": "SKU-BAD", "stage": "stage70_payload", "reason": "payload_failed", "publishable": False}],
+        build_failures=[
+            {
+                "sku": "SKU-BAD",
+                "group_id": "10008",
+                "stage": "stage70_payload",
+                "reason": "payload_failed",
+                "publishable": False,
+            }
+        ],
     )
     calls: list[Path] = []
     _patch_publish(monkeypatch, calls)
