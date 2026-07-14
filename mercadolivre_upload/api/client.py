@@ -180,14 +180,11 @@ class MLApiClient:
             return {}
         try:
             return cast(dict[str, Any], resp.json())
-        except ValueError:
-            logger.warning(
-                "POST %s returned a non-JSON success response (status %s); "
-                "returning empty payload.",
-                endpoint,
-                resp.status_code,
-            )
-            return {}
+        except ValueError as exc:
+            raise MLApiError(
+                f"POST {endpoint} returned non-JSON success response",
+                response=resp,
+            ) from exc
 
     def put(
         self,
@@ -210,14 +207,11 @@ class MLApiClient:
             return {}
         try:
             return cast(dict[str, Any], resp.json())
-        except ValueError:
-            logger.warning(
-                "PUT %s returned a non-JSON success response (status %s); "
-                "returning empty payload.",
-                endpoint,
-                resp.status_code,
-            )
-            return {}
+        except ValueError as exc:
+            raise MLApiError(
+                f"PUT {endpoint} returned non-JSON success response",
+                response=resp,
+            ) from exc
 
     def get_sites(self) -> list[dict[str, Any]]:
         """Get available sites."""

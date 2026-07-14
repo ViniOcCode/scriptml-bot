@@ -119,15 +119,16 @@ class CategoryAdapter(CategoryApiPort):
             # API returns dict with 'required_attributes' key, not a list
             if isinstance(result, dict) and "required_attributes" in result:
                 required = result["required_attributes"]
-                return required if isinstance(required, list) else []
-            # Ensure we return a list
+                if isinstance(required, list):
+                    return cast(list[dict[str, Any]], required)
+                raise TypeError("required_attributes is not a list")
             if not isinstance(result, list):
-                logger.debug(f"Expected list or dict for conditionals, got {type(result)}")
-                return []
-            return result
+                raise TypeError(f"unexpected conditional response {type(result).__name__}")
+            return cast(list[dict[str, Any]], result)
         except RECOVERABLE_API_ERRORS as e:
-            logger.debug(f"Failed to get conditional attributes for {category_id}: {e}")
-            return []
+            message = f"Failed to get conditional attributes for {category_id}: {e}"
+            logger.warning(message)
+            raise CategoryApiUnavailableError(message, operation="conditional_attributes") from e
 
     def predict_category(
         self, title: str, site_id: str = "MLB", limit: int | None = None
@@ -144,8 +145,9 @@ class CategoryAdapter(CategoryApiPort):
         try:
             return self.client.validate_item(item)
         except RECOVERABLE_API_ERRORS as e:
-            logger.error(f"Failed to validate item: {e}")
-            return {"valid": False, "error": str(e)}
+            message = f"Failed to validate item: {e}"
+            logger.error(message)
+            raise CategoryApiUnavailableError(message, operation="validate_item") from e
 
     def create_item(self, item: dict[str, Any]) -> dict[str, Any]:
         """Create/publish an item."""

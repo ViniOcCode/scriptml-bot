@@ -43,15 +43,14 @@ def test_get_category_conditionals_rejects_non_list_required_attributes() -> Non
     client.get_category_conditional_attributes.return_value = {"required_attributes": "invalid"}
     adapter = CategoryAdapter(client)  # type: ignore[arg-type]
 
-    result = adapter.get_category_conditional_attributes("MLB123", {"title": "x"})
-    assert result == []
+    with pytest.raises(CategoryApiUnavailableError):
+        adapter.get_category_conditional_attributes("MLB123", {"title": "x"})
 
 
-def test_validate_item_returns_invalid_payload_on_recoverable_error() -> None:
+def test_validate_item_raises_unavailable_on_recoverable_error() -> None:
     client = MagicMock()
     client.validate_item.side_effect = ValueError("invalid payload")
     adapter = CategoryAdapter(client)  # type: ignore[arg-type]
 
-    result = adapter.validate_item({"title": "x"})
-    assert result["valid"] is False
-    assert "invalid payload" in result["error"]
+    with pytest.raises(CategoryApiUnavailableError, match="invalid payload"):
+        adapter.validate_item({"title": "x"})

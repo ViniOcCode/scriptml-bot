@@ -57,7 +57,7 @@ def test_post_returns_empty_payload_for_204_success():
     response.json.assert_not_called()
 
 
-def test_post_returns_empty_payload_for_non_json_success():
+def test_post_rejects_non_json_success_as_provider_failure():
     response = MagicMock(spec=requests.Response)
     response.status_code = 200
     response.json.side_effect = ValueError("invalid json")
@@ -66,9 +66,8 @@ def test_post_returns_empty_payload_for_non_json_success():
     http_client.post.return_value = response
 
     client = MLApiClient(http_client=http_client)
-    result = client.post("/dummy", json={"ok": True})
-
-    assert result == {}
+    with pytest.raises(MLApiError, match="non-JSON success response"):
+        client.post("/dummy", json={"ok": True})
     response.raise_for_status.assert_called_once()
 
 
