@@ -340,7 +340,6 @@ class TestReconcileCommand:
                 app,
                 [
                     "reconcile",
-                    "--from-manifest",
                     "--run-id",
                     "run-1",
                     "--output",
@@ -356,8 +355,33 @@ class TestReconcileCommand:
         assert kwargs["seller_config"] == Path("config/publisher.yaml")
         assert kwargs["from_manifest"] is True
         assert kwargs["run_id"] == "run-1"
+        assert kwargs["execution_profile"] == "paid"
         assert kwargs["output"] == "json"
         assert kwargs["save_report"] is True
+
+    @patch("mercadolivre_upload.cli.app.import_module")
+    def test_reconcile_accepts_explicit_dev_profile(self, mock_import_module):
+        mock_runtime_module = MagicMock()
+        mock_runtime_module.resolve_workspace_root.return_value = Path("/tmp/workspace")
+        mock_reconcile_module = MagicMock()
+        mock_import_module.side_effect = [mock_runtime_module, mock_reconcile_module]
+
+        with runner.isolated_filesystem():
+            Path("config").mkdir()
+            Path("config/publisher.yaml").write_text("seller: {}\n", encoding="utf-8")
+            result = runner.invoke(
+                app,
+                [
+                    "reconcile",
+                    "--execution-profile",
+                    "dev",
+                    "--from-artifacts",
+                ],
+            )
+
+        assert result.exit_code == 0
+        assert mock_reconcile_module.reconcile.call_args.kwargs["execution_profile"] == "dev"
+        assert mock_reconcile_module.reconcile.call_args.kwargs["from_manifest"] is False
 
     def test_reconcile_json_output_is_machine_parseable(self, capsys):
         from mercadolivre_upload.application.reconcile import ReconcileReport, ReconcileRow

@@ -12,6 +12,8 @@ from typing import Any, Literal
 from mercadolivre_upload.application.ports import ItemInventoryPort
 from mercadolivre_upload.contracts.run_manifest import load_run_manifest
 
+ExecutionProfile = Literal["paid", "dev"]
+
 ReconcileStatus = Literal[
     "generated_published",
     "generated_not_published",
@@ -113,6 +115,8 @@ class ReconcileReport:
     source: str
     summary: dict[str, int]
     rows: list[ReconcileRow]
+    execution_profile: ExecutionProfile = "paid"
+    diagnostics: list[dict[str, str]] = field(default_factory=list)
     report_path: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -121,8 +125,10 @@ class ReconcileReport:
             "generated_at": self.generated_at,
             "workspace_root": self.workspace_root,
             "source": self.source,
+            "execution_profile": self.execution_profile,
             "summary": self.summary,
             "rows": [row.to_dict() for row in self.rows],
+            "diagnostics": self.diagnostics,
             "report_path": self.report_path,
         }
 
@@ -626,9 +632,12 @@ def _manifest_publications(
     *,
     workspace_root: Path,
     manifest_paths: list[Path],
-) -> tuple[list[LocalPublication], list[ReconcileRow]]:
+    execution_profile: ExecutionProfile,
+    skip_profile_mismatches: bool,
+) -> tuple[list[LocalPublication], list[ReconcileRow], list[dict[str, str]]]:
     publications: list[LocalPublication] = []
     rows: list[ReconcileRow] = []
+    diagnostics: list[dict[str, str]] = []
     for manifest_path in manifest_paths:
         try:
             manifest = load_run_manifest(manifest_path)
@@ -639,6 +648,22 @@ def _manifest_publications(
                     payload_path=str(manifest_path),
                     error_reason=f"manifest_invalid: {exc}",
                 )
+            )
+            continue
+
+        if manifest.execution_profile != execution_profile:
+            if not skip_profile_mismatches:
+                raise ReconcileUsageError(
+                    f"Manifest execution_profile={manifest.execution_profile!r} does not match "
+                    f"requested profile {execution_profile!r}: {manifest_path}"
+                )
+            diagnostics.append(
+                {
+                    "code": "manifest_execution_profile_skipped",
+                    "manifest_path": str(manifest_path),
+                    "requested_execution_profile": execution_profile,
+                    "manifest_execution_profile": manifest.execution_profile,
+                }
             )
             continue
 
@@ -759,7 +784,7 @@ def _manifest_publications(
                     rows.append(error_row)
                 if publication is not None:
                     publications.append(publication)
-    return publications, rows
+    return publications, rows, diagnostics
 
 
 def _item_from_batch_entry(entry: Any) -> dict[str, Any] | None:
@@ -1039,6 +1064,7 @@ class ReconcileUseCase:
         self,
         *,
         workspace_root: Path,
+        execution_profile: ExecutionProfile = "paid",
         from_manifest: bool = False,
         manifest_path: Path | None = None,
         run_id: str | None = None,
@@ -1046,9 +1072,16 @@ class ReconcileUseCase:
         save_report: bool = False,
     ) -> ReconcileReport:
         """Run reconciliation and optionally persist a JSON audit report."""
+        if execution_profile not in {"paid", "dev"}:
+            raise ReconcileUsageError("execution_profile must be 'paid' or 'dev'")
         workspace = workspace_root.expanduser().resolve()
         if not workspace.exists() or not workspace.is_dir():
             raise ReconcileUsageError(f"Workspace not found: {workspace}")
+        if execution_profile == "paid" and not from_manifest:
+            raise ReconcileUsageError(
+                "Paid reconcile requires canonical manifest provenance; "
+                "set from_manifest=True and select a manifest, run, or all manifests."
+            )
 
         if from_manifest:
             manifest_paths, source = _select_manifest_paths(
@@ -1057,9 +1090,11 @@ class ReconcileUseCase:
                 run_id=run_id,
                 all_manifests=all_manifests,
             )
-            publications, pre_rows = _manifest_publications(
+            publications, pre_rows, diagnostics = _manifest_publications(
                 workspace_root=workspace,
                 manifest_paths=manifest_paths,
+                execution_profile=execution_profile,
+                skip_profile_mismatches=source == "all_manifests",
             )
         else:
             if manifest_path is not None or run_id or all_manifests:
@@ -1068,6 +1103,7 @@ class ReconcileUseCase:
                 )
             source = "artifacts"
             publications, pre_rows = _artifact_publications(workspace)
+            diagnostics = []
 
         manifest_only_errors = (
             from_manifest
@@ -1087,6 +1123,8 @@ class ReconcileUseCase:
             source=source,
             summary=_build_summary(rows),
             rows=rows,
+            execution_profile=execution_profile,
+            diagnostics=diagnostics,
         )
         if save_report:
             try:
@@ -1097,6 +1135,7 @@ class ReconcileUseCase:
 
 
 __all__ = [
+    "ExecutionProfile",
     "ReconcileOperationalError",
     "ReconcileReport",
     "ReconcileRow",

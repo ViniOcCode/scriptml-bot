@@ -82,7 +82,7 @@ class FiscalApiPort(Protocol):
         """Link a registered fiscal SKU to a published item."""
         ...
 
-    def verify_invoice_readiness(self, item_id: str) -> tuple[bool, dict[str, Any]]:
+    def verify_invoice_readiness(self, item_id: str) -> tuple[bool, dict[str, Any] | None]:
         """Verify if item is ready for invoice generation.
 
         Args:
@@ -553,7 +553,7 @@ class FiscalService:
 
     def verify_invoice_readiness(
         self, item_id: str, sku: str = ""
-    ) -> tuple[bool, dict[str, Any], int]:
+    ) -> tuple[bool, dict[str, Any] | None, int]:
         """Verify if an item is ready for invoice generation.
 
         Args:

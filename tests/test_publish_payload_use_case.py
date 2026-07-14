@@ -6,8 +6,9 @@ from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, Mock
 
+import pytest
 import requests
 
 from mercadolivre_upload.adapters.json_payload_reader import (
@@ -28,6 +29,7 @@ from mercadolivre_upload.application.validators.seller_policy import (
     SellerConfig,
     SellerPolicyValidator,
 )
+from mercadolivre_upload.contracts.publication import PublicationOutcome
 
 
 def _grouped_up_response(**fields: Any) -> dict[str, Any]:
@@ -87,6 +89,7 @@ def _make_read_result(
         sku=sku,
         category_id=category_id,
         ai_suggested=ai_suggested,
+        publication_ready=True,
         fiscal_items=fiscal_items or [],
         publish_item_skus=publish_item_skus or [],
     )
@@ -127,6 +130,7 @@ def _make_user_products_read_result(
         category_id="MLB271599",
         ai_suggested=ai_suggested,
         upload_mode="user_products",
+        publication_ready=True,
         fiscal_items=fiscal_items or [],
         publish_item_skus=publish_item_skus or [],
     )
@@ -162,6 +166,7 @@ def _make_user_products_payload_array_read_result(
         category_id="MLB271599",
         ai_suggested=ai_suggested,
         upload_mode="user_products",
+        publication_ready=True,
     )
 
 
@@ -190,6 +195,7 @@ def _make_read_result_with_variations(
         sku="VAR-001",
         category_id="MLB271599",
         ai_suggested=False,
+        publication_ready=True,
     )
 
 
@@ -230,13 +236,156 @@ class TestPublishPayloadUseCase:
 
         result = use_case.execute(tmp_path / "payload.json")
 
+        assert isinstance(result, PublicationOutcome)
         assert result.status == "published"
+        assert result.side_effect_state == "confirmed"
+        assert result.reconciliation_required is False
         assert result.item_id == "MLB987654321"
         assert result.sku == "ABC-001"
         publisher.create_item.assert_called_once()
         publisher.create_item_description.assert_called_once_with(
             "MLB987654321", "Descrição do produto"
         )
+
+    def test_pause_failure_is_not_reported_as_success(self, tmp_path: Path) -> None:
+        use_case, reader, publisher = _make_use_case(publish_inactive=True)
+        reader.read.return_value = _make_read_result()
+        publisher.update_item.side_effect = RuntimeError("pause rejected")
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "failed"
+        assert result.side_effect_state == "partial"
+        assert result.reconciliation_required is True
+        assert result.item_ids == ["MLB987654321"]
+        assert any(phase.name == "pause" and phase.status == "failed" for phase in result.phases)
+
+    def test_pause_http_503_is_unknown_and_not_retried(self, tmp_path: Path) -> None:
+        use_case, reader, publisher = _make_use_case(publish_inactive=True)
+        reader.read.return_value = _make_read_result()
+        publisher.update_item.side_effect = requests.HTTPError(
+            "503 Service Unavailable",
+            response=Mock(status_code=503),
+        )
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "unknown"
+        assert result.side_effect_state == "partial"
+        assert result.reconciliation_required is True
+        assert publisher.update_item.call_count == 1
+
+    def test_description_timeout_is_unknown_and_is_not_retried(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        use_case, reader, publisher = _make_use_case()
+        reader.read.return_value = _make_read_result()
+        publisher.create_item_description.side_effect = requests.Timeout("timed out")
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "unknown"
+        assert result.side_effect_state == "partial"
+        assert result.reconciliation_required is True
+        assert publisher.create_item_description.call_count == 1
+        assert any(
+            phase.name == "description" and phase.status == "unknown" for phase in result.phases
+        )
+
+    def test_description_connection_error_is_unknown_and_not_retried(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        use_case, reader, publisher = _make_use_case()
+        reader.read.return_value = _make_read_result()
+        publisher.create_item_description.side_effect = requests.ConnectionError(
+            "connection dropped after send"
+        )
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "unknown"
+        assert result.side_effect_state == "partial"
+        assert result.reconciliation_required is True
+        assert publisher.create_item_description.call_count == 1
+
+    def test_item_creation_timeout_requires_reconciliation(self, tmp_path: Path) -> None:
+        use_case, reader, publisher = _make_use_case()
+        reader.read.return_value = _make_read_result(description=None)
+        publisher.create_item.side_effect = requests.Timeout("timed out")
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "unknown"
+        assert result.side_effect_state == "unknown"
+        assert result.reconciliation_required is True
+        assert result.item_ids == []
+        assert publisher.create_item.call_count == 1
+        assert any(
+            phase.name == "item_creation" and phase.status == "unknown" for phase in result.phases
+        )
+
+    @pytest.mark.parametrize(
+        "transport_error",
+        [
+            requests.ConnectionError("connection dropped after send"),
+            requests.HTTPError(
+                "503 Service Unavailable",
+                response=Mock(status_code=503),
+            ),
+        ],
+    )
+    def test_item_creation_ambiguous_transport_failure_requires_reconciliation(
+        self,
+        tmp_path: Path,
+        transport_error: requests.RequestException,
+    ) -> None:
+        use_case, reader, publisher = _make_use_case()
+        reader.read.return_value = _make_read_result(description=None)
+        publisher.create_item.side_effect = transport_error
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "unknown"
+        assert result.side_effect_state == "unknown"
+        assert result.reconciliation_required is True
+        assert publisher.create_item.call_count == 1
+
+    def test_item_creation_http_422_is_a_definitive_failure(self, tmp_path: Path) -> None:
+        use_case, reader, publisher = _make_use_case()
+        reader.read.return_value = _make_read_result(description=None)
+        publisher.create_item.side_effect = requests.HTTPError(
+            "422 Unprocessable Entity",
+            response=Mock(status_code=422),
+        )
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "failed"
+        assert result.side_effect_state == "none"
+        assert result.reconciliation_required is False
+        assert publisher.create_item.call_count == 1
+
+    @pytest.mark.parametrize("status_code", [200, 201])
+    def test_item_creation_non_json_success_requires_reconciliation(
+        self,
+        tmp_path: Path,
+        status_code: int,
+    ) -> None:
+        use_case, reader, publisher = _make_use_case()
+        reader.read.return_value = _make_read_result(description=None)
+        publisher.create_item.side_effect = MLApiError(
+            "POST /items returned non-JSON success response",
+            response=Mock(status_code=status_code),
+        )
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "unknown"
+        assert result.side_effect_state == "unknown"
+        assert result.reconciliation_required is True
+        assert publisher.create_item.call_count == 1
 
     def test_publish_fails_when_api_validation_returns_error(self, tmp_path: Path) -> None:
         use_case, reader, publisher = _make_use_case()
@@ -306,8 +455,7 @@ class TestPublishPayloadUseCase:
         assert result.item_id == "MLB987654321"
         assert result.validation_status == "validation_passed_with_warnings"
         assert any(
-            "item.shipping.mandatory_free_shipping" in warning
-            for warning in result.warnings
+            "item.shipping.mandatory_free_shipping" in warning for warning in result.warnings
         )
         publisher.create_item.assert_called_once()
 
@@ -910,6 +1058,7 @@ class TestPublishPayloadUseCase:
         publisher.create_user_product_item.side_effect = MLApiError(
             "bad request",
             response_body={
+                "status": 400,
                 "message": "Validation error",
                 "cause": [
                     {
@@ -929,8 +1078,7 @@ class TestPublishPayloadUseCase:
         assert "references=item.shipping.local_pick_up" in (result.error or "")
         assert (
             'sanitized={"endpoint": "/user-products/{user_product_id}/items", '
-            '"removed_fields": ["shipping.local_pick_up"]}'
-            in (result.error or "")
+            '"removed_fields": ["shipping.local_pick_up"]}' in (result.error or "")
         )
 
     def test_publish_user_products_payload_array_sends_separate_requests(
@@ -1306,15 +1454,17 @@ class TestPublishInactiveFlag:
         assert result.status == "published"
         publisher.update_item.assert_not_called()
 
-    def test_publish_inactive_update_failure_is_warn_only(self, tmp_path: Path) -> None:
-        """If update_item raises, result is still 'published' — warn-only, not a failure."""
+    def test_publish_inactive_update_failure_requires_reconciliation(self, tmp_path: Path) -> None:
+        """A created item that could not be paused is never complete success."""
         use_case, reader, publisher = _make_use_case(publish_inactive=True)
         reader.read.return_value = _make_read_result()
         publisher.update_item.side_effect = RuntimeError("pause failed")
 
         result = use_case.execute(tmp_path / "payload.json")
 
-        assert result.status == "published"
+        assert result.status == "failed"
+        assert result.side_effect_state == "partial"
+        assert result.reconciliation_required is True
         assert result.item_id == "MLB987654321"
         publisher.update_item.assert_called_once_with("MLB987654321", {"status": "paused"})
 
@@ -1347,15 +1497,16 @@ class TestPublicationReadyGate:
         assert result.status == "published"
         publisher.create_item.assert_called_once()
 
-    def test_publication_ready_none_proceeds_compat(self, tmp_path: Path) -> None:
-        """publication_ready=None (absent) must NOT block — backward compat."""
+    def test_publication_ready_none_is_rejected(self, tmp_path: Path) -> None:
+        """The publisher requires an explicit positive readiness decision."""
         use_case, reader, publisher = _make_use_case()
-        reader.read.return_value = _make_read_result()  # publication_ready defaults to None
+        reader.read.return_value = replace(_make_read_result(), publication_ready=None)
 
         result = use_case.execute(tmp_path / "payload.json")
 
-        assert result.status == "published"
-        publisher.create_item.assert_called_once()
+        assert result.status == "failed"
+        assert "publication_ready" in (result.error or "")
+        publisher.create_item.assert_not_called()
 
 
 class TestLowConfidenceGate:

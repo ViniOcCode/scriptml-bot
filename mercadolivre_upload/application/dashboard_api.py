@@ -6,19 +6,25 @@ import json
 from pathlib import Path
 from typing import Any
 
+import requests
 import typer
 
 from mercadolivre_upload.adapters.json_payload_reader import JsonPayloadReader
 from mercadolivre_upload.api.client import MLApiClient
+from mercadolivre_upload.application.mutation_failure import is_ambiguous_mutation_failure
 from mercadolivre_upload.application.publish.internals.validation import (
     classify_mercado_livre_validation_response,
 )
-from mercadolivre_upload.application.publish_payload import publish_payload_file
+from mercadolivre_upload.application.publish_payload import (
+    publish_payload_outcome,
+    serialize_publication_outcome,
+)
 from mercadolivre_upload.application.validators.seller_policy import (
     SellerPolicyValidator,
     load_seller_config,
 )
 from mercadolivre_upload.auth.publisher_context import build_publisher_auth_context
+from mercadolivre_upload.contracts.publication import PublicationOutcome
 
 
 def _expand_effective_payloads(payload: dict[str, Any], upload_mode: str) -> list[dict[str, Any]]:
@@ -57,7 +63,7 @@ def prepare_effective_payload_file(
     seller_config_path: Path,
 ) -> dict[str, Any]:
     """Read a payload and apply local seller policy checks without remote calls."""
-    reader = JsonPayloadReader()
+    reader = JsonPayloadReader(strict_publisher_contract=True)
     read_result = reader.read(payload_path)
     policy = SellerPolicyValidator(load_seller_config(seller_config_path))
     payloads: list[dict[str, Any]] = []
@@ -118,9 +124,7 @@ def validate_effective_payload_file(
     client = MLApiClient(auth_context.token_manager)
     payloads = prepared.get("payloads")
     effective_payloads = (
-        payloads
-        if isinstance(payloads, list) and payloads
-        else [prepared["payload"]]
+        payloads if isinstance(payloads, list) and payloads else [prepared["payload"]]
     )
     classifications = []
     reports = []
@@ -137,9 +141,7 @@ def validate_effective_payload_file(
     status = (
         "validation_failed"
         if blocking
-        else "validation_passed_with_warnings"
-        if warning
-        else "validation_passed"
+        else "validation_passed_with_warnings" if warning else "validation_passed"
     )
     return {
         **prepared,
@@ -147,6 +149,25 @@ def validate_effective_payload_file(
         "validation_report": reports[0] if len(reports) == 1 else {"items": reports},
         "should_block": bool(blocking),
     }
+
+
+def publish_effective_payload_outcome(
+    payload_path: Path,
+    *,
+    seller_config_path: Path,
+    workspace_root: Path,
+    report_dir: Path | None = None,
+    publish_inactive: bool = False,
+) -> PublicationOutcome:
+    """Publish a dashboard effective payload while preserving the typed outcome."""
+    return publish_payload_outcome(
+        payload_path,
+        report_dir=report_dir,
+        dry_run=False,
+        publish_inactive=publish_inactive,
+        seller_config_path=seller_config_path,
+        workspace_root=workspace_root,
+    )
 
 
 def publish_effective_payload_file(
@@ -157,15 +178,19 @@ def publish_effective_payload_file(
     report_dir: Path | None = None,
     publish_inactive: bool = False,
 ) -> dict[str, Any]:
-    """Publish a dashboard effective payload through the existing public publisher API."""
-    return publish_payload_file(
+    """Serialize an effective-payload outcome for dashboard worker IPC.
+
+    The dashboard worker currently persists this mapping as JSON and sends it
+    across a process queue, so serialization is intentional at this boundary.
+    """
+    outcome = publish_effective_payload_outcome(
         payload_path,
-        report_dir=report_dir,
-        dry_run=False,
-        publish_inactive=publish_inactive,
         seller_config_path=seller_config_path,
         workspace_root=workspace_root,
+        report_dir=report_dir,
+        publish_inactive=publish_inactive,
     )
+    return serialize_publication_outcome(outcome)
 
 
 def publish_manifest_file(
@@ -177,11 +202,12 @@ def publish_manifest_file(
     dry_run: bool = True,
     publish_inactive: bool = False,
 ) -> dict[str, Any]:
-    """Publish or dry-run a run manifest and return the structured report.
+    """Publish or dry-run a manifest and serialize its aggregate report.
 
-    This is the dashboard-safe public facade for the manifest publication flow.
-    The legacy CLI command still owns the implementation today, but callers no
-    longer import CLI modules directly.
+    A manifest can contain multiple ``PublicationOutcome`` values, so this
+    dashboard IPC boundary returns the JSON report rather than pretending the
+    aggregate is a single payload outcome. The CLI command keeps each payload
+    typed until report construction.
     """
     from mercadolivre_upload.cli.commands.publish_manifest import publish_manifest
 
@@ -200,12 +226,14 @@ def publish_manifest_file(
     except typer.Exit as exc:
         cli_exit_code = int(exc.exit_code or 0)
         if not report_path.exists():
-            raise
-    report = (
-        json.loads(report_path.read_text(encoding="utf-8"))
-        if report_path.exists()
-        else {}
-    )
+            return {
+                "status": "failed",
+                "result_code": "publication_unavailable",
+                "errors": ["Este lote não está disponível para publicação."],
+                "report_path": str(report_path),
+                "cli_exit_code": cli_exit_code,
+            }
+    report = json.loads(report_path.read_text(encoding="utf-8")) if report_path.exists() else {}
     if isinstance(report, dict):
         report.setdefault("report_path", str(report_path))
         if cli_exit_code is not None:
@@ -234,7 +262,9 @@ def apply_remote_item_update(
         if "status" in patch:
             return {
                 "status": "failed",
-                "errors": ["Status changes require pause, activate, finalize, or delete operation."],
+                "errors": [
+                    "Status changes require pause, activate, finalize, or delete operation."
+                ],
             }
         allowed = {"price", "available_quantity", "title", "pictures", "attributes"}
     elif operation in lifecycle_status:
@@ -259,7 +289,28 @@ def apply_remote_item_update(
         strict=True,
     )
     client = MLApiClient(auth_context.token_manager)
-    return {"status": "updated", "item_id": item_id, "response": client.update_item(item_id, patch)}
+    try:
+        response = client.update_item(item_id, patch)
+    except requests.RequestException as exc:
+        if not is_ambiguous_mutation_failure(exc):
+            return {
+                "status": "failed",
+                "side_effect_state": "none",
+                "reconciliation_required": False,
+                "item_id": item_id,
+                "errors": ["A atualização foi rejeitada pelo provedor."],
+            }
+        return {
+            "status": "unknown",
+            "side_effect_state": "unknown",
+            "reconciliation_required": True,
+            "item_id": item_id,
+            "errors": [
+                "Não foi possível confirmar a atualização. "
+                "Verifique o anúncio antes de tentar novamente."
+            ],
+        }
+    return {"status": "updated", "item_id": item_id, "response": response}
 
 
 def fetch_remote_item(
@@ -306,6 +357,7 @@ __all__ = [
     "fetch_remote_item",
     "prepare_effective_payload_file",
     "publish_effective_payload_file",
+    "publish_effective_payload_outcome",
     "publish_manifest_file",
     "validate_effective_payload_file",
 ]

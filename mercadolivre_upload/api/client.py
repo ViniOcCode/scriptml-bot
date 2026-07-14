@@ -16,6 +16,7 @@ from mercadolivre_upload.api.exceptions import MLApiError
 from mercadolivre_upload.auth import TokenManager
 from mercadolivre_upload.infrastructure.http import (
     NON_IDEMPOTENT,
+    SAFE_RETRY,
     ResilientHTTPClient,
     RetryPolicy,
     TokenBucketLimiter,
@@ -111,7 +112,12 @@ class MLApiClient:
         """GET JSON payload with automatic retry on transient errors."""
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
         logger.debug("GET %s", url)
-        resp = self.http.get(url, headers=self._get_headers(), params=params)
+        resp = self.http.get(
+            url,
+            headers=self._get_headers(),
+            params=params,
+            policy=SAFE_RETRY,
+        )
 
         if 400 <= resp.status_code < 500:
             try:

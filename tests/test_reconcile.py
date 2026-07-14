@@ -8,7 +8,11 @@ from typing import Any
 
 import pytest
 
-from mercadolivre_upload.application.reconcile import ReconcileOperationalError, ReconcileUseCase
+from mercadolivre_upload.application.reconcile import (
+    ReconcileOperationalError,
+    ReconcileUsageError,
+    ReconcileUseCase,
+)
 
 
 class FakeInventory:
@@ -196,7 +200,10 @@ def test_artifact_reconcile_reports_published_unpublished_closed_and_ml_only(
         ]
     )
 
-    report = ReconcileUseCase(inventory).execute(workspace_root=workspace)
+    report = ReconcileUseCase(inventory).execute(
+        workspace_root=workspace,
+        execution_profile="dev",
+    )
 
     assert report.summary["generated_published"] == 1
     assert report.summary["generated_not_published"] == 1
@@ -206,13 +213,44 @@ def test_artifact_reconcile_reports_published_unpublished_closed_and_ml_only(
     assert not any(row.group_id == "INDEX" for row in report.rows)
 
 
+def test_paid_reconcile_without_manifest_rejects_before_local_or_remote_scan(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    _write_payload(workspace, "G1", "SKU-A")
+    inventory = FakeInventory([_ml_item("MLB1", "SKU-A")])
+
+    def unexpected_artifact_scan(_workspace_root: Path) -> tuple[list[Any], list[Any]]:
+        raise AssertionError("artifact scan must not run for paid reconcile")
+
+    monkeypatch.setattr(
+        "mercadolivre_upload.application.reconcile._artifact_publications",
+        unexpected_artifact_scan,
+    )
+
+    with pytest.raises(ReconcileUsageError, match="canonical manifest provenance"):
+        ReconcileUseCase(inventory).execute(
+            workspace_root=workspace,
+            execution_profile="paid",
+            from_manifest=False,
+        )
+
+    assert inventory.search_calls == []
+    assert inventory.batch_calls == []
+
+
 def test_reconcile_fails_on_repeated_ml_scan_cursor(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     _write_payload(workspace, "G1", "SKU-A")
 
     with pytest.raises(ReconcileOperationalError, match="repeated"):
-        ReconcileUseCase(RepeatingScrollInventory()).execute(workspace_root=workspace)
+        ReconcileUseCase(RepeatingScrollInventory()).execute(
+            workspace_root=workspace,
+            execution_profile="dev",
+        )
 
 
 def test_inventory_scan_stops_at_declared_paging_total(tmp_path: Path) -> None:
@@ -221,7 +259,10 @@ def test_inventory_scan_stops_at_declared_paging_total(tmp_path: Path) -> None:
     _write_payload(workspace, "G1", "SKU-C")
     inventory = OverflowingScanInventory()
 
-    report = ReconcileUseCase(inventory).execute(workspace_root=workspace)
+    report = ReconcileUseCase(inventory).execute(
+        workspace_root=workspace,
+        execution_profile="dev",
+    )
 
     row = next(row for row in report.rows if row.group_id == "G1")
     assert row.status == "generated_published"
@@ -252,7 +293,10 @@ def test_artifact_reconcile_reports_local_payload_errors(tmp_path: Path) -> None
     )
     _write_payload(workspace, "NOTREADY", "SKU-3", publication_ready=False)
 
-    report = ReconcileUseCase(FakeInventory([])).execute(workspace_root=workspace)
+    report = ReconcileUseCase(FakeInventory([])).execute(
+        workspace_root=workspace,
+        execution_profile="dev",
+    )
 
     reasons = {row.error_reason for row in report.rows}
     assert report.summary["local_payload_error"] == 3
@@ -281,7 +325,10 @@ def test_reconcile_matches_variation_seller_sku_from_ml(tmp_path: Path) -> None:
         ]
     )
 
-    report = ReconcileUseCase(inventory).execute(workspace_root=workspace)
+    report = ReconcileUseCase(inventory).execute(
+        workspace_root=workspace,
+        execution_profile="dev",
+    )
 
     row = next(row for row in report.rows if row.group_id == "G1")
     assert row.status == "generated_published"
@@ -294,7 +341,10 @@ def test_listing_type_mismatch_does_not_count_as_published(tmp_path: Path) -> No
     _write_payload(workspace, "G1", "SKU-A", "gold_special")
     inventory = FakeInventory([_ml_item("MLB1", "SKU-A", "gold_pro", status="active")])
 
-    report = ReconcileUseCase(inventory).execute(workspace_root=workspace)
+    report = ReconcileUseCase(inventory).execute(
+        workspace_root=workspace,
+        execution_profile="dev",
+    )
 
     local_row = next(row for row in report.rows if row.group_id == "G1")
     assert local_row.status == "generated_not_published"
@@ -307,6 +357,7 @@ def _manifest_payload(workspace: Path, payload_path: str) -> dict[str, Any]:
         "run_id": "run-1",
         "created_at": "2026-05-12T22:00:00Z",
         "workspace_path": str(workspace),
+        "execution_profile": "paid",
         "status": "partial_success",
         "publication_candidates": [
             {
@@ -348,6 +399,124 @@ def _manifest_payload(workspace: Path, payload_path: str) -> dict[str, Any]:
         ],
         "diagnostics": {},
     }
+
+
+def _single_profile_manifest(
+    *,
+    workspace: Path,
+    payload_path: Path,
+    run_id: str,
+    execution_profile: str,
+) -> dict[str, Any]:
+    publishable = execution_profile == "paid"
+    return {
+        "run_id": run_id,
+        "created_at": "2026-07-14T12:00:00Z",
+        "workspace_path": str(workspace),
+        "execution_profile": execution_profile,
+        "status": "success",
+        "publication_candidates": [
+            {
+                "group_id": "SHARED-GROUP",
+                "family_id": "SHARED-FAMILY",
+                "sku_scope": ["SKU-SHARED"],
+                "topology": "family_variations",
+                "build_status": "success" if publishable else "not_publishable",
+                "payloads": [
+                    {
+                        "variant": "classic",
+                        "payload_path": str(payload_path),
+                        "listing_type_id": "gold_special",
+                        "publishable": publishable,
+                        "block_reason": None if publishable else "development_profile",
+                    }
+                ],
+                "errors": [],
+            }
+        ],
+        "build_failures": [],
+        "diagnostics": {},
+    }
+
+
+def test_all_manifests_paid_profile_never_loads_same_identity_from_dev(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    paid_payload = _write_payload(workspace, "paid-source", "SKU-SHARED")
+    dev_payload = _write_payload(workspace, "dev-source", "SKU-SHARED")
+    for run_id, execution_profile, payload_path in (
+        ("paid-run", "paid", paid_payload),
+        ("dev-run", "dev", dev_payload),
+    ):
+        manifest_path = workspace / "runs" / run_id / "run_manifest.json"
+        manifest_path.parent.mkdir(parents=True)
+        manifest_path.write_text(
+            json.dumps(
+                _single_profile_manifest(
+                    workspace=workspace,
+                    payload_path=payload_path,
+                    run_id=run_id,
+                    execution_profile=execution_profile,
+                )
+            ),
+            encoding="utf-8",
+        )
+
+    report = ReconcileUseCase(FakeInventory([_ml_item("MLB-SHARED", "SKU-SHARED")])).execute(
+        workspace_root=workspace,
+        execution_profile="paid",
+        from_manifest=True,
+        all_manifests=True,
+    )
+
+    shared_rows = [row for row in report.rows if row.group_id == "SHARED-GROUP"]
+    assert len(shared_rows) == 1
+    assert shared_rows[0].status == "generated_published"
+    assert shared_rows[0].payload_path == str(paid_payload)
+    assert all(row.payload_path != str(dev_payload) for row in report.rows)
+    assert report.execution_profile == "paid"
+    assert report.diagnostics == [
+        {
+            "code": "manifest_execution_profile_skipped",
+            "manifest_path": str(workspace / "runs" / "dev-run" / "run_manifest.json"),
+            "requested_execution_profile": "paid",
+            "manifest_execution_profile": "dev",
+        }
+    ]
+
+
+def test_explicit_manifest_rejects_profile_mismatch_before_inventory_scan(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    dev_payload = _write_payload(workspace, "dev-source", "SKU-SHARED")
+    manifest_path = workspace / "runs" / "dev-run" / "run_manifest.json"
+    manifest_path.parent.mkdir(parents=True)
+    manifest_path.write_text(
+        json.dumps(
+            _single_profile_manifest(
+                workspace=workspace,
+                payload_path=dev_payload,
+                run_id="dev-run",
+                execution_profile="dev",
+            )
+        ),
+        encoding="utf-8",
+    )
+    inventory = FakeInventory([_ml_item("MLB-SHARED", "SKU-SHARED")])
+
+    with pytest.raises(ReconcileUsageError, match="does not match requested profile"):
+        ReconcileUseCase(inventory).execute(
+            workspace_root=workspace,
+            execution_profile="paid",
+            from_manifest=True,
+            manifest_path=manifest_path,
+        )
+
+    assert inventory.search_calls == []
 
 
 def test_manifest_reconcile_keeps_variants_and_partial_errors(tmp_path: Path) -> None:
@@ -400,6 +569,7 @@ def test_save_report_writes_publication_audit(tmp_path: Path) -> None:
 
     report = ReconcileUseCase(FakeInventory([])).execute(
         workspace_root=workspace,
+        execution_profile="dev",
         save_report=True,
     )
 
@@ -418,7 +588,10 @@ def test_inventory_uses_scan_pagination_past_offset_limit(tmp_path: Path) -> Non
         [_ml_item(f"MLB{i}", f"SKU-{i}", status="active") for i in range(1051)]
     )
 
-    report = ReconcileUseCase(inventory).execute(workspace_root=workspace)
+    report = ReconcileUseCase(inventory).execute(
+        workspace_root=workspace,
+        execution_profile="dev",
+    )
 
     row = next(row for row in report.rows if row.group_id == "G1")
     assert row.status == "generated_published"

@@ -3,6 +3,8 @@
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from mercadolivre_upload.infrastructure.http import NON_IDEMPOTENT, SAFE_RETRY
+
 if TYPE_CHECKING:
     from mercadolivre_upload.api.client import MLApiClient
 
@@ -45,7 +47,7 @@ def _require_existing_user_product_selling_condition_request(item: dict[str, Any
 
 def validate_item(client: "MLApiClient", item: dict[str, Any]) -> dict[str, Any]:
     """Validate item before publishing."""
-    return client.post("/items/validate", json=item)
+    return client.post("/items/validate", json=item, policy=SAFE_RETRY)
 
 
 def validate_user_product_item(client: "MLApiClient", item: dict[str, Any]) -> dict[str, Any]:
@@ -159,9 +161,13 @@ def create_item_description(
 ) -> dict[str, Any]:
     """Create or update item description."""
     validate_item_id_fn(item_id)
-    return client.post(f"/items/{item_id}/description", json={"plain_text": plain_text})
+    return client.post(
+        f"/items/{item_id}/description",
+        json={"plain_text": plain_text},
+        policy=NON_IDEMPOTENT,
+    )
 
 
 def update_item(client: "MLApiClient", item_id: str, data: dict[str, Any]) -> dict[str, Any]:
     """Update an existing item via PUT (e.g. change status to paused/active)."""
-    return client.put(f"/items/{item_id}", json=data)
+    return client.put(f"/items/{item_id}", json=data, policy=NON_IDEMPOTENT)

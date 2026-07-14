@@ -8,6 +8,7 @@ import requests
 from mercadolivre_upload.api.client import MLApiClient
 from mercadolivre_upload.api.domains import items as item_endpoints
 from mercadolivre_upload.api.exceptions import MLApiError
+from mercadolivre_upload.infrastructure.http import NON_IDEMPOTENT, SAFE_RETRY
 
 
 def test_validate_item_returns_400_json_payload():
@@ -23,6 +24,18 @@ def test_validate_item_returns_400_json_payload():
 
     assert result == {"cause": [{"code": "item.invalid"}]}
     response.raise_for_status.assert_not_called()
+
+
+def test_validation_uses_explicit_safe_retry_policy():
+    response = MagicMock(spec=requests.Response)
+    response.status_code = 200
+    response.json.return_value = {}
+    http_client = MagicMock()
+    http_client.post.return_value = response
+
+    MLApiClient(http_client=http_client).validate_item({"title": "Produto teste"})
+
+    assert http_client.post.call_args.kwargs["policy"] == SAFE_RETRY
 
 
 def test_validate_item_raises_for_non_json_400_response():
@@ -562,6 +575,19 @@ def test_update_item_calls_put_with_item_endpoint_and_data():
     _args, kwargs = http_client.put.call_args
     assert "items/MLB1234" in _args[0]
     assert kwargs["json"] == {"status": "paused"}
+    assert kwargs["policy"] == NON_IDEMPOTENT
+
+
+def test_description_mutation_uses_zero_retry_policy():
+    response = MagicMock(spec=requests.Response)
+    response.status_code = 200
+    response.json.return_value = {}
+    http_client = MagicMock()
+    http_client.post.return_value = response
+
+    MLApiClient(http_client=http_client).create_item_description("MLB1234", "Descrição")
+
+    assert http_client.post.call_args.kwargs["policy"] == NON_IDEMPOTENT
 
 
 def test_create_item_400_raises_ml_api_error_with_body():

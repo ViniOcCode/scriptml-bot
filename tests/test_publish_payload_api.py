@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
+import requests
+import typer
 from typer.testing import CliRunner
 
 from mercadolivre_upload.adapters.json_payload_reader import JsonPayloadReader
@@ -14,12 +16,15 @@ from mercadolivre_upload.application import publish_payload as publish_payload_a
 from mercadolivre_upload.application.dashboard_api import (
     apply_remote_item_update,
     fetch_authenticated_seller_identity,
+    publish_effective_payload_outcome,
+    publish_manifest_file,
 )
-from mercadolivre_upload.application.publish_payload_use_case import PublishPayloadResult
+from mercadolivre_upload.application.publish_payload import PublisherRuntime
 from mercadolivre_upload.auth.exceptions import AuthError
 from mercadolivre_upload.auth.publisher_context import build_publisher_auth_context
 from mercadolivre_upload.cli import app
 from mercadolivre_upload.cli.commands.publish_runtime import resolve_workspace_root
+from mercadolivre_upload.contracts.publication import PublicationOutcome
 
 
 class _MemorySecretStore:
@@ -84,9 +89,13 @@ def _minimal_builder_payload() -> dict[str, object]:
             "attributes": [{"id": "SELLER_SKU", "value_name": "ABC-001"}],
         },
         "description": "Descricao do produto",
+        "fiscal": {"items": []},
         "_meta": {
             "sku": "ABC-001",
-            "publication": {"publication_ready": True},
+            "publication": {
+                "seller_model": "items",
+                "publication_ready": True,
+            },
             "traceability": {"publish_item_skus": ["ABC-001"]},
         },
     }
@@ -106,6 +115,29 @@ def test_invalid_payload_file_returns_clear_error(tmp_path: Path) -> None:
     assert "Invalid JSON payload" in result["errors"][0]
 
 
+def test_publish_payload_rejects_legacy_root_shape_before_auth(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    canonical = _minimal_builder_payload()
+    legacy = dict(canonical["payload"])
+    legacy["_meta"] = canonical["_meta"]
+    payload_path = tmp_path / "legacy.json"
+    payload_path.write_text(json.dumps(legacy), encoding="utf-8")
+    runtime_builder = MagicMock()
+    monkeypatch.setattr(PublisherRuntime, "build", runtime_builder)
+
+    result = publish_payload_api.publish_payload_file(
+        payload_path,
+        seller_config_path=tmp_path / "publisher.yaml",
+        workspace_root=tmp_path / "workspace",
+    )
+
+    assert result["status"] == "failed"
+    assert "envelope" in result["errors"][0]
+    runtime_builder.assert_not_called()
+
+
 def test_minimal_valid_builder_payload_normalizes(tmp_path: Path) -> None:
     payload_path = tmp_path / "70_payload.json"
     payload_path.write_text(json.dumps(_minimal_builder_payload()), encoding="utf-8")
@@ -118,15 +150,46 @@ def test_minimal_valid_builder_payload_normalizes(tmp_path: Path) -> None:
     assert result.description == "Descricao do produto"
 
 
+def test_publisher_runtime_reuses_prepared_payload_within_one_invocation(
+    tmp_path: Path,
+) -> None:
+    payload_path = tmp_path / "70_payload.json"
+    payload_path.write_text(json.dumps(_minimal_builder_payload()), encoding="utf-8")
+    reader = JsonPayloadReader()
+    reader.read = MagicMock(wraps=reader.read)  # type: ignore[method-assign]
+    use_case = MagicMock()
+    use_case.execute.return_value = PublicationOutcome(
+        sku="ABC-001",
+        path=str(payload_path),
+        status="published",
+        side_effect_state="confirmed",
+        item_id="MLB123",
+        item_ids=["MLB123"],
+    )
+    runtime = PublisherRuntime(reader=reader, use_case=use_case)
+
+    first = runtime.publish(payload_path)
+    second = runtime.publish(payload_path)
+
+    assert first.status == second.status == "published"
+    assert reader.read.call_count == 1
+    prepared_payloads = [
+        call.kwargs["prepared_payload"] for call in use_case.execute.call_args_list
+    ]
+    assert prepared_payloads[0] is prepared_payloads[1]
+
+
 def test_publish_payload_file_uses_mocked_use_case(tmp_path: Path, monkeypatch) -> None:
     payload_path = tmp_path / "70_payload.json"
     payload_path.write_text(json.dumps(_minimal_builder_payload()), encoding="utf-8")
     mock_use_case = MagicMock()
-    mock_use_case.execute.return_value = PublishPayloadResult(
+    mock_use_case.execute.return_value = PublicationOutcome(
         sku="ABC-001",
         path=str(payload_path),
         status="published",
+        side_effect_state="confirmed",
         item_id="MLB123",
+        item_ids=["MLB123"],
     )
     build_use_case = MagicMock(return_value=mock_use_case)
     monkeypatch.setattr(publish_payload_api, "_build_use_case", build_use_case)
@@ -144,22 +207,90 @@ def test_publish_payload_file_uses_mocked_use_case(tmp_path: Path, monkeypatch) 
         publish_inactive=True,
         seller_config_path=tmp_path / "publisher.yaml",
         workspace_root=tmp_path / "workspace",
+        reader=ANY,
     )
-    mock_use_case.execute.assert_called_once_with(payload_path, dry_run=False)
+    mock_use_case.execute.assert_called_once_with(
+        payload_path,
+        dry_run=False,
+        prepared_payload=ANY,
+    )
     assert result["status"] == "published"
     assert result["item_id"] == "MLB123"
     assert result["errors"] == []
     assert Path(result["report_path"]).exists()
 
+
+def test_publish_payload_outcome_keeps_typed_contract_until_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload_path = tmp_path / "70_payload.json"
+    payload_path.write_text(json.dumps(_minimal_builder_payload()), encoding="utf-8")
+    mock_use_case = MagicMock()
+    mock_use_case.execute.return_value = PublicationOutcome(
+        sku="ABC-001",
+        path=str(payload_path),
+        status="published",
+        side_effect_state="confirmed",
+        item_id="MLB123",
+        item_ids=["MLB123"],
+    )
+    monkeypatch.setattr(
+        publish_payload_api,
+        "_build_use_case",
+        MagicMock(return_value=mock_use_case),
+    )
+
+    outcome = publish_payload_api.publish_payload_outcome(
+        payload_path,
+        report_dir=tmp_path / "reports",
+        seller_config_path=tmp_path / "publisher.yaml",
+        workspace_root=tmp_path / "workspace",
+    )
+
+    assert isinstance(outcome, PublicationOutcome)
+    assert outcome.status == "published"
+    assert outcome.report_path == str(tmp_path / "reports" / "report.json")
+
+
+def test_dashboard_effective_payload_has_typed_internal_entrypoint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected = PublicationOutcome(
+        sku="ABC-001",
+        path=str(tmp_path / "payload.json"),
+        status="published",
+        side_effect_state="confirmed",
+        item_id="MLB123",
+        item_ids=["MLB123"],
+    )
+    typed_publish = MagicMock(return_value=expected)
+    monkeypatch.setattr(
+        "mercadolivre_upload.application.dashboard_api.publish_payload_outcome",
+        typed_publish,
+    )
+
+    outcome = publish_effective_payload_outcome(
+        tmp_path / "payload.json",
+        seller_config_path=tmp_path / "publisher.yaml",
+        workspace_root=tmp_path / "workspace",
+    )
+
+    assert outcome is expected
+
+
 def test_publish_payload_report_keeps_validation_warnings(tmp_path: Path, monkeypatch) -> None:
     payload_path = tmp_path / "70_payload.json"
     payload_path.write_text(json.dumps(_minimal_builder_payload()), encoding="utf-8")
     mock_use_case = MagicMock()
-    mock_use_case.execute.return_value = PublishPayloadResult(
+    mock_use_case.execute.return_value = PublicationOutcome(
         sku="ABC-001",
         path=str(payload_path),
         status="published",
+        side_effect_state="confirmed",
         item_id="MLB123",
+        item_ids=["MLB123"],
         warnings=[
             "ML validation warning: [shipping.lost_me1_by_user] | "
             "department=shipping | User has not mode me1 | "
@@ -376,9 +507,7 @@ def test_dashboard_publication_flow_does_not_reference_legacy_token_sources() ->
     ]
     offenders = {
         str(path.relative_to(root)): [
-            marker
-            for marker in forbidden
-            if marker in path.read_text(encoding="utf-8")
+            marker for marker in forbidden if marker in path.read_text(encoding="utf-8")
         ]
         for path in flow_files
     }
@@ -486,6 +615,93 @@ def test_dashboard_remote_update_requires_explicit_lifecycle_operation_for_statu
         "item_id": "MLB123",
         "patch": {"status": "closed"},
     }
+
+
+def test_dashboard_manifest_exit_without_report_returns_client_safe_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _exit_without_report(**_kwargs: object) -> None:
+        raise typer.Exit(1)
+
+    monkeypatch.setattr(
+        "mercadolivre_upload.cli.commands.publish_manifest.publish_manifest",
+        _exit_without_report,
+    )
+
+    result = publish_manifest_file(
+        tmp_path / "run_manifest.json",
+        seller_config_path=tmp_path / "publisher.yaml",
+        workspace_root=tmp_path / "workspace",
+        report_dir=tmp_path / "reports",
+    )
+
+    assert result == {
+        "status": "failed",
+        "result_code": "publication_unavailable",
+        "errors": ["Este lote não está disponível para publicação."],
+        "report_path": str(tmp_path / "reports" / "report.json"),
+        "cli_exit_code": 1,
+    }
+
+
+def test_dashboard_remote_update_timeout_requires_reconciliation(tmp_path: Path) -> None:
+    with (
+        patch(
+            "mercadolivre_upload.application.dashboard_api.build_publisher_auth_context",
+            return_value=MagicMock(),
+        ),
+        patch("mercadolivre_upload.application.dashboard_api.MLApiClient") as client_class,
+    ):
+        client_class.return_value.update_item.side_effect = requests.Timeout("timed out")
+
+        outcome = apply_remote_item_update(
+            "MLB123",
+            {"status": "paused"},
+            operation="pause",
+            seller_config_path=tmp_path / "publisher.yaml",
+            workspace_root=tmp_path / "workspace",
+        )
+
+    assert outcome == {
+        "status": "unknown",
+        "side_effect_state": "unknown",
+        "reconciliation_required": True,
+        "item_id": "MLB123",
+        "errors": [
+            "Não foi possível confirmar a atualização. "
+            "Verifique o anúncio antes de tentar novamente."
+        ],
+    }
+    client_class.return_value.update_item.assert_called_once_with("MLB123", {"status": "paused"})
+
+
+def test_dashboard_remote_update_connection_error_requires_reconciliation(
+    tmp_path: Path,
+) -> None:
+    with (
+        patch(
+            "mercadolivre_upload.application.dashboard_api.build_publisher_auth_context",
+            return_value=MagicMock(),
+        ),
+        patch("mercadolivre_upload.application.dashboard_api.MLApiClient") as client_class,
+    ):
+        client_class.return_value.update_item.side_effect = requests.ConnectionError(
+            "connection dropped after send"
+        )
+
+        outcome = apply_remote_item_update(
+            "MLB123",
+            {"status": "paused"},
+            operation="pause",
+            seller_config_path=tmp_path / "publisher.yaml",
+            workspace_root=tmp_path / "workspace",
+        )
+
+    assert outcome["status"] == "unknown"
+    assert outcome["side_effect_state"] == "unknown"
+    assert outcome["reconciliation_required"] is True
+    client_class.return_value.update_item.assert_called_once_with("MLB123", {"status": "paused"})
 
 
 def test_publish_payload_cli_delegates_to_public_api(tmp_path: Path) -> None:

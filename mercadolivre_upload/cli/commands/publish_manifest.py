@@ -5,12 +5,20 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import typer
 from rich.console import Console
 
-from mercadolivre_upload.application.publish_payload import publish_payload_file
+from mercadolivre_upload.adapters.json_payload_reader import (
+    InvalidPayloadError,
+    JsonPayloadReader,
+    ReadPayloadResult,
+)
+from mercadolivre_upload.application.publish_payload import (
+    PublisherRuntime,
+    publish_payload_outcome,
+)
 from mercadolivre_upload.contracts.run_manifest import load_run_manifest
 
 console = Console()
@@ -40,11 +48,21 @@ def _resolve_manifest_payload_path(
     if path.is_absolute():
         candidates = [path.resolve()]
     elif path.parts and path.parts[0] == resolved_workspace.name:
-        candidates = [(resolved_workspace.parent / path).resolve(), (manifest_path.parent / path).resolve()]
+        candidates = [
+            (resolved_workspace.parent / path).resolve(),
+            (manifest_path.parent / path).resolve(),
+        ]
     else:
-        candidates = [(manifest_path.parent / path).resolve(), (resolved_workspace / path).resolve()]
+        candidates = [
+            (manifest_path.parent / path).resolve(),
+            (resolved_workspace / path).resolve(),
+        ]
 
-    valid_candidates = [candidate for candidate in candidates if _is_within_root(path=candidate, root=resolved_workspace)]
+    valid_candidates = [
+        candidate
+        for candidate in candidates
+        if _is_within_root(path=candidate, root=resolved_workspace)
+    ]
     if not valid_candidates:
         raise ValueError(f"Payload path escapes workspace root: {candidates[0]}")
 
@@ -54,32 +72,27 @@ def _resolve_manifest_payload_path(
     return valid_candidates[0]
 
 
-def _effective_publish_payload(raw: Any) -> dict[str, Any] | None:
-    if not isinstance(raw, dict):
-        return None
-    payload = raw.get("payload")
-    if isinstance(payload, list) and payload and isinstance(payload[0], dict):
-        return payload[0]
-    if isinstance(payload, dict):
-        return payload
-    return raw
+def _prepared_listing_type_id(prepared: ReadPayloadResult) -> tuple[str | None, str | None]:
+    """Return the one listing type used by every concrete publish item."""
+    if prepared.upload_mode == "user_products":
+        raw_items = prepared.payload.get("payload")
+        if not isinstance(raw_items, list):
+            raw_items = prepared.payload.get("items")
+        publish_items = raw_items if isinstance(raw_items, list) else []
+    else:
+        publish_items = [prepared.payload]
 
-
-def _read_payload_json_and_listing_type_id(payload_path: Path) -> tuple[Any | None, str | None, str | None]:
-    try:
-        raw = json.loads(payload_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        return None, None, f"Invalid JSON payload: {exc}"
-    except OSError as exc:
-        return None, None, f"Could not read payload file: {exc}"
-
-    effective_payload = _effective_publish_payload(raw)
-    if effective_payload is None:
-        return raw, None, "Effective publish payload could not be resolved"
-    listing_type_id = effective_payload.get("listing_type_id")
-    if isinstance(listing_type_id, str) and listing_type_id.strip():
-        return raw, listing_type_id.strip(), None
-    return raw, None, "Effective publish payload missing listing_type_id"
+    listing_type_ids = {
+        value.strip()
+        for item in publish_items
+        if isinstance(item, dict)
+        if isinstance((value := item.get("listing_type_id")), str) and value.strip()
+    }
+    if not publish_items or not listing_type_ids:
+        return None, "Effective publish payload missing listing_type_id"
+    if len(listing_type_ids) != 1:
+        return None, "Effective publish payload contains divergent listing_type_id values"
+    return next(iter(listing_type_ids)), None
 
 
 def _selected_payloads(manifest: Any) -> list[Any]:
@@ -116,6 +129,9 @@ def _build_payload_result_row(
         "skip_reason": payload_variant.skip_reason,
         "validation_result": None,
         "publish_result": None,
+        "side_effect_state": "none",
+        "phases": [],
+        "reconciliation_required": False,
         "item_id": None,
         "item_ids": [],
         "user_product_id": None,
@@ -141,11 +157,17 @@ def _build_failure_row(*, run_id: str, failure: Any) -> dict[str, Any]:
         "resolved_payload_path": None,
         "publishable": False,
         "block_reason": ":".join(
-            part for part in [getattr(failure, "stage", None), getattr(failure, "reason", None)] if part
-        ) or "build_failure",
+            part
+            for part in [getattr(failure, "stage", None), getattr(failure, "reason", None)]
+            if part
+        )
+        or "build_failure",
         "skip_reason": "build_failure",
         "validation_result": {"status": "not_publishable"},
         "publish_result": "skipped",
+        "side_effect_state": "none",
+        "phases": [],
+        "reconciliation_required": False,
         "item_id": None,
         "item_ids": [],
         "user_product_id": None,
@@ -168,28 +190,38 @@ def _variant_counts(results: list[dict[str, Any]], variant: str) -> dict[str, in
         ),
         "failed": len([row for row in rows if row.get("publish_result") == "failed"]),
         "skipped": len([row for row in rows if row.get("publish_result") == "skipped"]),
+        "unknown": len([row for row in rows if row.get("publish_result") == "unknown"]),
     }
 
 
-def _final_status(results: list[dict[str, Any]], selected_count: int, build_failure_count: int) -> str:
+def _final_status(
+    results: list[dict[str, Any]], selected_count: int, build_failure_count: int
+) -> str:
     selected_rows = [row for row in results if row.get("selected")]
     published = [row for row in selected_rows if row.get("publish_result") == "published"]
     published_but_not_grouped = [
-        row
-        for row in selected_rows
-        if row.get("publish_result") == "published_but_not_grouped"
+        row for row in selected_rows if row.get("publish_result") == "published_but_not_grouped"
     ]
     failed_or_skipped_selected = [
-        row for row in selected_rows if row.get("publish_result") in {"failed", "skipped"}
+        row
+        for row in selected_rows
+        if row.get("publish_result") in {"failed", "skipped", "unknown"}
     ]
     skipped_unselected = [
         row
         for row in results
-        if not row.get("selected") and row.get("publish_result") == "skipped" and not row.get("skipped_build_failure")
+        if not row.get("selected")
+        and row.get("publish_result") == "skipped"
+        and not row.get("skipped_build_failure")
     ]
     if selected_count > 0 and not published and not published_but_not_grouped:
         return "failed"
-    if failed_or_skipped_selected or skipped_unselected or build_failure_count or published_but_not_grouped:
+    if (
+        failed_or_skipped_selected
+        or skipped_unselected
+        or build_failure_count
+        or published_but_not_grouped
+    ):
         return "partial_success"
     return "success"
 
@@ -235,7 +267,9 @@ def _write_manifest_report(
         },
         "results": results,
     }
-    report_path.write_text(json.dumps(report_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    report_path.write_text(
+        json.dumps(report_payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     return report_path, final_status
 
 
@@ -251,11 +285,20 @@ def publish_manifest(
     """Publish payload variants declared in the current run_manifest.json contract."""
     manifest_path = manifest_path.expanduser().resolve()
     manifest = load_run_manifest(manifest_path)
-    all_payload_variants = [payload for c in manifest.publication_candidates for payload in c.payloads]
+    if manifest.execution_profile != "paid":
+        err_console.print(
+            "[red]Erro:[/red] somente manifestos execution_profile='paid' podem ser publicados"
+        )
+        raise typer.Exit(1)
+    all_payload_variants = [
+        payload for c in manifest.publication_candidates for payload in c.payloads
+    ]
     selected_payloads = _selected_payloads(manifest)
     selected_classic = [p for p in selected_payloads if p.variant == "classic"]
     selected_premium = [p for p in selected_payloads if p.variant == "premium"]
-    skipped_or_build_failed_entries = len(all_payload_variants) - len(selected_payloads) + len(manifest.build_failures)
+    skipped_or_build_failed_entries = (
+        len(all_payload_variants) - len(selected_payloads) + len(manifest.build_failures)
+    )
     report_path = report_dir / "report.json"
 
     console.print(f"[cyan]Manifest:[/cyan] {manifest_path}")
@@ -270,7 +313,8 @@ def publish_manifest(
     console.print(f"[cyan]Report path:[/cyan] {report_path}")
 
     results: list[dict[str, Any]] = [
-        _build_failure_row(run_id=manifest.run_id, failure=failure) for failure in manifest.build_failures
+        _build_failure_row(run_id=manifest.run_id, failure=failure)
+        for failure in manifest.build_failures
     ]
 
     if manifest.status == "failed" and selected_payloads:
@@ -288,7 +332,8 @@ def publish_manifest(
             results=results,
         )
         err_console.print(
-            "[red]Erro:[/red] run_manifest status='failed' contains publishable payloads; manifest is inconsistent"
+            "[red]Erro:[/red] run_manifest status='failed' contains publishable "
+            "payloads; manifest is inconsistent"
         )
         console.print(f"[cyan]Final status:[/cyan] {final_status}")
         console.print(f"[cyan]Report path:[/cyan] {report_path}")
@@ -330,6 +375,8 @@ def publish_manifest(
         err_console.print("[red]Erro:[/red] run_manifest sem payloads publicáveis")
 
     selected_payload_ids = {id(payload) for payload in selected_payloads}
+    payload_reader = JsonPayloadReader(strict_publisher_contract=True)
+    runtime: PublisherRuntime | None = None
 
     for candidate in manifest.publication_candidates:
         for payload_variant in candidate.payloads:
@@ -374,7 +421,22 @@ def publish_manifest(
                 results.append(result_row)
                 continue
 
-            _, payload_listing_type_id, payload_error = _read_payload_json_and_listing_type_id(payload_path)
+            prepared_payload: ReadPayloadResult | None = None
+            payload_listing_type_id: str | None = None
+            payload_error: str | None = None
+            try:
+                prepared_payload = payload_reader.read(payload_path)
+            except json.JSONDecodeError as exc:
+                payload_listing_type_id = None
+                payload_error = f"Invalid JSON payload: {exc}"
+            except InvalidPayloadError as exc:
+                payload_listing_type_id = None
+                payload_error = str(exc)
+            except OSError as exc:
+                payload_listing_type_id = None
+                payload_error = f"Could not read payload file: {exc}"
+            else:
+                payload_listing_type_id, payload_error = _prepared_listing_type_id(prepared_payload)
             result_row["actual_payload_listing_type_id"] = payload_listing_type_id
             if payload_error:
                 result_row["validation_result"] = {"status": "failed"}
@@ -394,28 +456,42 @@ def publish_manifest(
                 results.append(result_row)
                 continue
 
-            result = publish_payload_file(
+            if runtime is None:
+                runtime = PublisherRuntime.build(
+                    publish_inactive=publish_inactive,
+                    seller_config_path=seller_config,
+                    workspace_root=workspace_root,
+                    reader=payload_reader,
+                )
+            runtime.remember(payload_path, cast(ReadPayloadResult, prepared_payload))
+            outcome = publish_payload_outcome(
                 payload_path,
                 report_dir=None,
                 dry_run=dry_run,
                 publish_inactive=publish_inactive,
                 seller_config_path=seller_config,
                 workspace_root=workspace_root,
+                runtime=runtime,
             )
-            result_row["validation_result"] = result.get("validation_report") or {
-                "status": result.get("validation_status")
+            result_row["validation_result"] = outcome.validation_report or {
+                "status": outcome.validation_status
             }
-            result_row["publish_result"] = result.get("status")
-            result_row["item_id"] = result.get("item_id")
-            result_row["item_ids"] = result.get("item_ids") or []
-            result_row["user_product_id"] = result.get("user_product_id")
-            result_row["publish_endpoints"] = result.get("publish_endpoints") or []
-            result_row["api_errors"] = result.get("errors", [])
-            result_row["api_warnings"] = result.get("warnings", [])
-            result_row["fiscal_result"] = result.get("fiscal_report") or result.get("fiscal_status")
+            result_row["publish_result"] = outcome.status
+            result_row["side_effect_state"] = outcome.side_effect_state
+            result_row["phases"] = [phase.model_dump(mode="json") for phase in outcome.phases]
+            result_row["reconciliation_required"] = outcome.reconciliation_required
+            result_row["item_id"] = outcome.item_id
+            result_row["item_ids"] = outcome.item_ids
+            result_row["user_product_id"] = outcome.user_product_id
+            result_row["publish_endpoints"] = outcome.publish_endpoints
+            result_row["api_errors"] = [outcome.error] if outcome.error else []
+            result_row["api_warnings"] = outcome.warnings
+            result_row["fiscal_result"] = outcome.fiscal_report or outcome.fiscal_status
 
-            if result.get("validation_status") == "validation_passed_with_warnings":
-                console.print("[yellow]Validation passed with warnings; continuing publication.[/yellow]")
+            if outcome.validation_status == "validation_passed_with_warnings":
+                console.print(
+                    "[yellow]Validation passed with warnings; continuing publication.[/yellow]"
+                )
 
             results.append(result_row)
 
@@ -433,9 +509,23 @@ def publish_manifest(
         results=results,
     )
 
-    published_classic = len([r for r in results if r.get("variant") == "classic" and r.get("publish_result") == "published"])
-    published_premium = len([r for r in results if r.get("variant") == "premium" and r.get("publish_result") == "published"])
-    failed_or_skipped = len([r for r in results if r.get("publish_result") in {"failed", "skipped"}])
+    published_classic = len(
+        [
+            r
+            for r in results
+            if r.get("variant") == "classic" and r.get("publish_result") == "published"
+        ]
+    )
+    published_premium = len(
+        [
+            r
+            for r in results
+            if r.get("variant") == "premium" and r.get("publish_result") == "published"
+        ]
+    )
+    failed_or_skipped = len(
+        [r for r in results if r.get("publish_result") in {"failed", "skipped", "unknown"}]
+    )
 
     console.print(f"[cyan]Published classic:[/cyan] {published_classic}")
     console.print(f"[cyan]Published premium:[/cyan] {published_premium}")

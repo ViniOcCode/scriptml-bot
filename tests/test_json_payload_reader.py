@@ -199,8 +199,8 @@ class TestJsonPayloadReader:
         result = JsonPayloadReader().read(path)
         assert isinstance(result, ReadPayloadResult)
 
-    def test_variation_payload_currency_id_injetado_como_brl(self, tmp_path: Path) -> None:
-        """currency_id is injected as 'BRL' when absent (ml-builder omits it)."""
+    def test_variation_payload_sem_currency_id_is_rejected(self, tmp_path: Path) -> None:
+        """The publisher never invents a marketplace currency."""
         payload = _make_valid_payload()
         del payload["price"]
         del payload["available_quantity"]
@@ -209,8 +209,8 @@ class TestJsonPayloadReader:
             {"price": 59.90, "available_quantity": 5, "attribute_combinations": []}
         ]
         path = _write_payload(tmp_path, payload)
-        result = JsonPayloadReader().read(path)
-        assert result.payload["currency_id"] == "BRL"
+        with pytest.raises(InvalidPayloadError, match="currency_id"):
+            JsonPayloadReader().read(path)
 
     def test_payload_sem_variation_ainda_exige_price_root(self, tmp_path: Path) -> None:
         """Non-variation payloads must still have price at root."""
@@ -425,6 +425,22 @@ class TestJsonPayloadReader:
         path = _write_payload(tmp_path, payload)
         result = self.reader.read(path)
         assert result.publication_ready is True
+
+    def test_read_rejects_string_publication_ready(self, tmp_path: Path) -> None:
+        payload = _make_valid_payload()
+        payload["_meta"]["publication"] = {"publication_ready": "false"}  # type: ignore[index]
+        path = _write_payload(tmp_path, payload)
+
+        with pytest.raises(InvalidPayloadError, match="publication_ready"):
+            JsonPayloadReader().read(path)
+
+    def test_read_rejects_non_object_meta(self, tmp_path: Path) -> None:
+        payload = _make_valid_payload()
+        payload["_meta"] = "invalid"
+        path = _write_payload(tmp_path, payload)
+
+        with pytest.raises(InvalidPayloadError, match="_meta"):
+            JsonPayloadReader().read(path)
 
     def test_read_category_confidence_extracted(self, tmp_path: Path) -> None:
         payload = _make_valid_payload()

@@ -112,9 +112,10 @@ def wait_for_invoice_readiness(
     sku: str,
     max_retries: int,
     wait_delay: float,
-    verify_invoice_operation: Callable[[], tuple[bool, dict[str, Any]]],
+    verify_invoice_operation: Callable[[], tuple[bool, dict[str, Any] | None]],
     execute_with_retry: Callable[
-        [Callable[[], tuple[bool, dict[str, Any]]]], tuple[tuple[bool, dict[str, Any]], int]
+        [Callable[[], tuple[bool, dict[str, Any] | None]]],
+        tuple[tuple[bool, dict[str, Any] | None], int],
     ],
     retryable_status_codes: set[int],
     status_code_extractor: Callable[[Exception], int],

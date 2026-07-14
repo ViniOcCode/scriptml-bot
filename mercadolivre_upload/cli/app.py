@@ -193,7 +193,7 @@ def publish_payload(
     if result.get("validation_status") == "validation_passed_with_warnings":
         console.print("[yellow]Validation passed with warnings; continuing publication.[/yellow]")
     console.print(json.dumps(result, ensure_ascii=False, indent=2))
-    if result.get("status") == "failed":
+    if result.get("status") in {"failed", "unknown", "published_but_not_grouped"}:
         raise typer.Exit(1)
 
 
@@ -240,10 +240,19 @@ def publish_manifest(
 def reconcile(
     workspace: Path | None = typer.Option(None, "--workspace"),  # noqa: B008
     seller_config: Path = typer.Option(Path("config/publisher.yaml"), "--config"),  # noqa: B008
-    from_manifest: bool = typer.Option(False, "--from-manifest"),  # noqa: B008
+    from_manifest: bool = typer.Option(
+        True,
+        "--from-manifest/--from-artifacts",
+        help="Use run manifests; artifact scan is available only with --execution-profile dev.",
+    ),  # noqa: B008
     manifest: Path | None = typer.Option(None, "--manifest"),  # noqa: B008
     run_id: str | None = typer.Option(None, "--run-id"),  # noqa: B008
     all_manifests: bool = typer.Option(False, "--all-manifests"),  # noqa: B008
+    execution_profile: str = typer.Option(
+        "paid",
+        "--execution-profile",
+        help="Reconcile paid production manifests or explicit dev artifacts/manifests.",
+    ),  # noqa: B008
     output: str = typer.Option("table", "--output"),  # noqa: B008
     save_report: bool = typer.Option(False, "--save-report"),  # noqa: B008
 ) -> None:
@@ -268,6 +277,7 @@ def reconcile(
         manifest=manifest,
         run_id=run_id,
         all_manifests=all_manifests,
+        execution_profile=execution_profile,
         output=output,
         save_report=save_report,
     )

@@ -76,8 +76,6 @@ UP_SELLING_CONDITION_REQUIRED_FIELDS: frozenset[str] = frozenset(
 # Set to False to skip the envelope check (e.g. when family_name is injected externally).
 VALIDATE_UP_ENVELOPE: bool = True
 
-# currency_id is always required by ML API at root; default to BRL when builder omits it
-_DEFAULT_CURRENCY_ID = "BRL"
 _SUPPORTED_UPLOAD_MODES: frozenset[str] = frozenset({"legacy_items", "user_products"})
 
 
@@ -283,11 +281,7 @@ def _validate_picture_sources(pictures: list[Any], path_name: str) -> None:
 
 def _validate_legacy_payload(payload: dict[str, Any], path_name: str) -> None:
     """Validate a direct /items payload."""
-    # Inject currency_id default when missing (ml-builder omits it for variation items)
     has_variations = bool(payload.get("variations"))
-    if "currency_id" not in payload:
-        logger.warning("currency_id missing in %s; defaulting to BRL", path_name)
-        payload["currency_id"] = _DEFAULT_CURRENCY_ID
 
     # price and available_quantity are only required at root when no variations present
     excluded = _VARIATION_LEVEL_FIELDS if has_variations else set()
@@ -303,6 +297,7 @@ def _validate_legacy_payload(payload: dict[str, Any], path_name: str) -> None:
 
 def _validate_user_products_payload(payload: Any, path_name: str) -> None:
     """Validate a local user-products upload envelope payload."""
+    items: Any = None
     family_name: str | None = None
     using_payload_array = False
     envelope_user_product_id: str | None = None
@@ -326,12 +321,11 @@ def _validate_user_products_payload(payload: Any, path_name: str) -> None:
             family_name_value = payload.get("family_name")
             if isinstance(family_name_value, str):
                 family_name = family_name_value
-    else:
-        items = None
-
     if not isinstance(items, list) or not items:
         missing_field = "payload" if using_payload_array else "items"
-        raise InvalidPayloadError(f"Campo obrigatório '{missing_field}' ausente ou vazio em {path_name}")
+        raise InvalidPayloadError(
+            f"Campo obrigatório '{missing_field}' ausente ou vazio em {path_name}"
+        )
 
     # Per-item required fields (ML API docs) — validated first, always.
     has_existing_user_product_items = bool(envelope_user_product_id)
@@ -356,7 +350,7 @@ def _validate_user_products_payload(payload: Any, path_name: str) -> None:
                     f"item[{index}] de {path_name}: {sorted(missing)}"
                 )
             invalid_fields = sorted(
-                field for field in item.keys() if field not in UP_SELLING_CONDITION_ALLOWED_FIELDS
+                field for field in item if field not in UP_SELLING_CONDITION_ALLOWED_FIELDS
             )
             if invalid_fields:
                 logger.warning(
@@ -389,9 +383,9 @@ def _validate_user_products_payload(payload: Any, path_name: str) -> None:
         and isinstance(payload, dict)
         and "items" in payload
         and not has_existing_user_product_items
+        and (not isinstance(family_name, str) or not family_name.strip())
     ):
-        if not isinstance(family_name, str) or not family_name.strip():
-            raise InvalidPayloadError(f"Campo obrigatório 'family_name' ausente em {path_name}")
+        raise InvalidPayloadError(f"Campo obrigatório 'family_name' ausente em {path_name}")
 
 
 def _extract_category_id(payload: dict[str, Any], upload_mode: str) -> str:
@@ -423,12 +417,84 @@ def _extract_category_id(payload: dict[str, Any], upload_mode: str) -> str:
     return ""
 
 
+def _validate_publisher_envelope(raw: dict[str, Any], path_name: str) -> None:
+    """Validate the public builder-to-publisher payload envelope."""
+    required_root_fields = {"payload", "description", "fiscal", "_meta"}
+    missing = required_root_fields - raw.keys()
+    extra = raw.keys() - required_root_fields
+    if missing or extra:
+        details: list[str] = []
+        if missing:
+            details.append(f"missing={sorted(missing)}")
+        if extra:
+            details.append(f"extra={sorted(extra)}")
+        raise InvalidPayloadError(
+            f"Invalid publisher envelope in {path_name}: {', '.join(details)}"
+        )
+
+    if not isinstance(raw.get("description"), str):
+        raise InvalidPayloadError(
+            f"Invalid publisher envelope in {path_name}: description must be a string"
+        )
+    fiscal = raw.get("fiscal")
+    if not isinstance(fiscal, dict) or not isinstance(fiscal.get("items"), list):
+        raise InvalidPayloadError(
+            f"Invalid publisher envelope in {path_name}: fiscal.items must be a list"
+        )
+    meta = raw.get("_meta")
+    if not isinstance(meta, dict):
+        raise InvalidPayloadError(
+            f"Invalid publisher envelope in {path_name}: _meta must be an object"
+        )
+    publication = meta.get("publication")
+    if not isinstance(publication, dict):
+        raise InvalidPayloadError(
+            f"Invalid publisher envelope in {path_name}: _meta.publication must be an object"
+        )
+    if publication.get("publication_ready") is not True:
+        raise InvalidPayloadError(
+            "Invalid publisher envelope in "
+            f"{path_name}: _meta.publication.publication_ready must be true"
+        )
+    seller_model = publication.get("seller_model")
+    payload = raw.get("payload")
+    if seller_model == "items" and not isinstance(payload, dict):
+        raise InvalidPayloadError(
+            f"Invalid publisher envelope in {path_name}: items model requires object payload"
+        )
+    if seller_model == "user_products" and not isinstance(payload, list):
+        raise InvalidPayloadError(
+            f"Invalid publisher envelope in {path_name}: user_products model requires list payload"
+        )
+    if seller_model not in {"items", "user_products"}:
+        raise InvalidPayloadError(
+            f"Invalid publisher envelope in {path_name}: unsupported seller_model"
+        )
+    traceability = meta.get("traceability")
+    publish_item_skus = (
+        traceability.get("publish_item_skus") if isinstance(traceability, dict) else None
+    )
+    if (
+        not isinstance(publish_item_skus, list)
+        or not publish_item_skus
+        or any(not isinstance(sku, str) or not sku.strip() for sku in publish_item_skus)
+    ):
+        raise InvalidPayloadError(
+            "Invalid publisher envelope in "
+            f"{path_name}: _meta.traceability.publish_item_skus must be a non-empty string list"
+        )
+
+
 class JsonPayloadReader:
     """Reads and validates payload.json files produced by ml-builder.
 
     Extracts _meta before stripping so description_plain_text is preserved
     for the separate POST /items/{id}/description call.
     """
+
+    def __init__(self, *, strict_publisher_contract: bool = False) -> None:
+        """Initialize the reader with an optional strict publisher boundary."""
+        self._strict_publisher_contract = strict_publisher_contract
 
     def read(self, path: Path) -> ReadPayloadResult:
         """Read and validate a single payload.json.
@@ -447,11 +513,13 @@ class JsonPayloadReader:
         raw: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(raw, dict):
             raise InvalidPayloadError(f"Payload inválido em {path.name}: raiz JSON deve ser objeto")
+        if self._strict_publisher_contract:
+            _validate_publisher_envelope(raw, path.name)
 
         # Extract _meta BEFORE removing it — description_plain_text is needed later
         meta: dict[str, Any] = raw.get("_meta", {})
         if not isinstance(meta, dict):
-            meta = {}
+            raise InvalidPayloadError(f"'_meta' deve ser objeto em {path.name}")
         description_raw = meta.get("description_plain_text")
         description: str | None = (
             description_raw.strip()
@@ -462,16 +530,30 @@ class JsonPayloadReader:
             description = _extract_root_description(raw)
         description_by_sku = _extract_meta_description_by_sku(meta)
         sku: str | None = meta.get("sku")
-        ai_suggested: bool = bool(meta.get("category_ai_suggested", False))
+        ai_suggested_raw = meta.get("category_ai_suggested", False)
+        if not isinstance(ai_suggested_raw, bool):
+            raise InvalidPayloadError(
+                f"'_meta.category_ai_suggested' deve ser booleano em {path.name}"
+            )
+        ai_suggested = ai_suggested_raw
         publication = meta.get("publication")
         if not isinstance(publication, dict):
             publication = {}
 
         publication_ready_raw = meta.get("publication_ready", publication.get("publication_ready"))
-        publication_ready: bool | None = (
-            bool(publication_ready_raw) if publication_ready_raw is not None else None
-        )
-        blocking_reasons: list[str] = list(meta.get("blocking_reasons") or [])
+        if publication_ready_raw is not None and not isinstance(publication_ready_raw, bool):
+            raise InvalidPayloadError(
+                f"'_meta.publication.publication_ready' deve ser booleano em {path.name}"
+            )
+        publication_ready = publication_ready_raw
+        blocking_reasons_raw = meta.get("blocking_reasons", [])
+        if not isinstance(blocking_reasons_raw, list) or any(
+            not isinstance(reason, str) for reason in blocking_reasons_raw
+        ):
+            raise InvalidPayloadError(
+                f"'_meta.blocking_reasons' deve ser lista de strings em {path.name}"
+            )
+        blocking_reasons = list(blocking_reasons_raw)
         category_meta = meta.get("category")
         if not isinstance(category_meta, dict):
             category_meta = {}
@@ -482,9 +564,11 @@ class JsonPayloadReader:
             else None
         )
         reviewed_fiscal_raw = meta.get("reviewed_fiscal", publication.get("reviewed_fiscal"))
-        reviewed_fiscal: bool | None = (
-            bool(reviewed_fiscal_raw) if reviewed_fiscal_raw is not None else None
-        )
+        if reviewed_fiscal_raw is not None and not isinstance(reviewed_fiscal_raw, bool):
+            raise InvalidPayloadError(
+                f"'_meta.publication.reviewed_fiscal' deve ser booleano em {path.name}"
+            )
+        reviewed_fiscal = reviewed_fiscal_raw
         fiscal_items = _extract_root_fiscal_items(raw)
         publish_item_skus = _extract_traceability_publish_item_skus(meta)
 

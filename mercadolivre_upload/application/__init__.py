@@ -9,6 +9,7 @@ from .dashboard_api import (
     fetch_remote_item,
     prepare_effective_payload_file,
     publish_effective_payload_file,
+    publish_effective_payload_outcome,
     validate_effective_payload_file,
 )
 from .ports import ImageUploaderPort, ItemPublisherPort, ShippingResolverPort
@@ -24,5 +25,6 @@ __all__ = [
     "fetch_remote_item",
     "prepare_effective_payload_file",
     "publish_effective_payload_file",
+    "publish_effective_payload_outcome",
     "validate_effective_payload_file",
 ]

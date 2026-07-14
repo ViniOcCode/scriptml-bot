@@ -13,6 +13,7 @@ from rich.table import Table
 from mercadolivre_upload.api.client import MLApiClient
 from mercadolivre_upload.api.exceptions import MLApiError
 from mercadolivre_upload.application.reconcile import (
+    ExecutionProfile,
     ReconcileOperationalError,
     ReconcileReport,
     ReconcileUsageError,
@@ -78,14 +79,20 @@ def reconcile(
     *,
     workspace_root: Path,
     seller_config: Path,
-    from_manifest: bool = False,
+    from_manifest: bool = True,
     manifest: Path | None = None,
     run_id: str | None = None,
     all_manifests: bool = False,
+    execution_profile: str = "paid",
     output: str = "table",
     save_report: bool = False,
 ) -> None:
     """Run generated-vs-published reconciliation."""
+    normalized_profile = execution_profile.strip().lower()
+    if normalized_profile not in {"paid", "dev"}:
+        err_console.print("[red]Erro:[/red] --execution-profile must be paid or dev")
+        raise typer.Exit(2)
+    selected_profile: ExecutionProfile = "dev" if normalized_profile == "dev" else "paid"
     output_format = output.strip().lower()
     if output_format not in {"table", "json"}:
         err_console.print("[red]Erro:[/red] --output must be table or json")
@@ -100,6 +107,7 @@ def reconcile(
         use_case = ReconcileUseCase(MLApiClient(auth_context.token_manager))
         report = use_case.execute(
             workspace_root=workspace_root,
+            execution_profile=selected_profile,
             from_manifest=from_manifest,
             manifest_path=manifest,
             run_id=run_id,

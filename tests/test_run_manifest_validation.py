@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from mercadolivre_upload.contracts.run_manifest import load_run_manifest
+from mercadolivre_upload.contracts.run_manifest import RunManifest, load_run_manifest
 
 
 def _current_manifest(tmp_path: Path) -> dict[str, object]:
@@ -16,6 +16,7 @@ def _current_manifest(tmp_path: Path) -> dict[str, object]:
         "run_id": "run-1",
         "created_at": "2026-05-12T22:00:00Z",
         "workspace_path": "workspace",
+        "execution_profile": "paid",
         "status": "success",
         "publication_candidates": [
             {
@@ -47,6 +48,14 @@ def _current_manifest(tmp_path: Path) -> dict[str, object]:
     }
 
 
+def test_versioned_run_manifest_schema_matches_canonical_pydantic_model() -> None:
+    schema_path = (
+        Path(__file__).parents[1] / "mercadolivre_upload" / "contracts" / "run_manifest.schema.json"
+    )
+
+    assert json.loads(schema_path.read_text(encoding="utf-8")) == RunManifest.model_json_schema()
+
+
 def test_load_run_manifest_accepts_current_contract(tmp_path: Path) -> None:
     manifest_path = tmp_path / "run_manifest.json"
     manifest_path.write_text(json.dumps(_current_manifest(tmp_path)), encoding="utf-8")
@@ -54,7 +63,10 @@ def test_load_run_manifest_accepts_current_contract(tmp_path: Path) -> None:
     manifest = load_run_manifest(manifest_path)
 
     assert manifest.run_id == "run-1"
-    assert manifest.publication_candidates[0].payloads[0].payload_path == "workspace/payload_classic.json"
+    assert (
+        manifest.publication_candidates[0].payloads[0].payload_path
+        == "workspace/payload_classic.json"
+    )
 
 
 def test_load_run_manifest_rejects_legacy_v1_shape(tmp_path: Path) -> None:
@@ -90,6 +102,43 @@ def test_load_run_manifest_rejects_missing_fields(tmp_path: Path) -> None:
     manifest_path.write_text(json.dumps({"run_id": "run-1"}), encoding="utf-8")
 
     with pytest.raises(ValidationError):
+        load_run_manifest(manifest_path)
+
+
+def test_load_run_manifest_requires_execution_profile(tmp_path: Path) -> None:
+    manifest = _current_manifest(tmp_path)
+    manifest.pop("execution_profile")
+    manifest_path = tmp_path / "run_manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(ValidationError):
+        load_run_manifest(manifest_path)
+
+
+def test_load_run_manifest_accepts_dev_profile_as_non_publishable_contract_state(
+    tmp_path: Path,
+) -> None:
+    manifest = _current_manifest(tmp_path)
+    manifest["execution_profile"] = "dev"
+    manifest["publication_candidates"][0]["payloads"][0]["publishable"] = False  # type: ignore[index]
+    manifest["publication_candidates"][0]["payloads"][0][  # type: ignore[index]
+        "block_reason"
+    ] = "execution_profile_not_publishable"
+    manifest_path = tmp_path / "run_manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    loaded = load_run_manifest(manifest_path)
+
+    assert loaded.execution_profile == "dev"
+
+
+def test_load_run_manifest_rejects_publishable_dev_payload(tmp_path: Path) -> None:
+    manifest = _current_manifest(tmp_path)
+    manifest["execution_profile"] = "dev"
+    manifest_path = tmp_path / "run_manifest.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(ValidationError, match="dev manifest payloads must not be publishable"):
         load_run_manifest(manifest_path)
 
 

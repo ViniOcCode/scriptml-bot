@@ -8,44 +8,29 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
+
+import requests
 
 from mercadolivre_upload.adapters.json_payload_reader import (
     InvalidPayloadError,
     JsonPayloadReader,
+    ReadPayloadResult,
 )
 from mercadolivre_upload.api.exceptions import MLApiError
+from mercadolivre_upload.application.mutation_failure import is_ambiguous_mutation_failure
 from mercadolivre_upload.application.ports import ItemPublisherPort
 from mercadolivre_upload.application.publish.internals.validation import (
     MercadoLivreValidationResult,
     classify_mercado_livre_validation_response,
 )
 from mercadolivre_upload.application.validators.seller_policy import SellerPolicyValidator
+from mercadolivre_upload.contracts.publication import PublicationOutcome, PublicationPhase
 from mercadolivre_upload.domain.fiscal.data import FiscalData
 from mercadolivre_upload.domain.fiscal.service import FiscalService
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class PublishPayloadResult:
-    """Result of publishing a single payload.json."""
-
-    sku: str | None
-    path: str
-    status: Literal["published", "published_but_not_grouped", "skipped", "failed"]
-    item_id: str | None = None
-    item_ids: list[str] = field(default_factory=list)
-    user_product_id: str | None = None
-    publish_endpoints: list[str] = field(default_factory=list)
-    error: str | None = None
-    warnings: list[str] = field(default_factory=list)
-    validation_status: str | None = None
-    validation_report: dict[str, Any] | None = None
-    fiscal_status: str | None = None
-    fiscal_report: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _prefix_message(message: str, index: int, total: int) -> str:
@@ -89,9 +74,8 @@ def _is_existing_user_product_selling_condition_payload(payload: dict[str, Any])
 
 
 def _publish_endpoint_for_payload(payload: dict[str, Any], upload_mode: str) -> str:
-    if (
-        upload_mode == "user_products"
-        and _is_existing_user_product_selling_condition_payload(payload)
+    if upload_mode == "user_products" and _is_existing_user_product_selling_condition_payload(
+        payload
     ):
         return "/user-products/{user_product_id}/items"
     return "/items"
@@ -149,7 +133,6 @@ def _verify_user_products_grouping(
     publisher: ItemPublisherPort,
 ) -> tuple[bool, str | None]:
     """Return whether multi-item UP publishes share a consistent family_id."""
-
     if len(created_items) <= 1:
         return True, None
 
@@ -215,9 +198,7 @@ def _format_ml_api_error(
             )
 
     parts = [
-        part
-        for part in (blocking_message, "; ".join(cause_fragments), response_fragment)
-        if part
+        part for part in (blocking_message, "; ".join(cause_fragments), response_fragment) if part
     ]
     return " | ".join(parts) if parts else str(exc)
 
@@ -425,7 +406,13 @@ class PublishPayloadUseCase:
         self._fiscal_service = fiscal_service
         self._publish_inactive = publish_inactive
 
-    def execute(self, path: Path, *, dry_run: bool = False) -> PublishPayloadResult:
+    def execute(
+        self,
+        path: Path,
+        *,
+        dry_run: bool = False,
+        prepared_payload: ReadPayloadResult | None = None,
+    ) -> PublicationOutcome:
         """Publish a single payload.json.
 
         Pipeline:
@@ -442,40 +429,59 @@ class PublishPayloadUseCase:
         Args:
             path: Path to the payload.json file.
             dry_run: When True, validates only — does not call the API.
+            prepared_payload: Payload already validated by the shared publisher runtime.
 
         Returns:
-            PublishPayloadResult with status "published", "published_but_not_grouped",
+            PublicationOutcome with status "published", "published_but_not_grouped",
             "skipped", or "failed".
         """
         # 1. Read and validate schema
         try:
-            read_result = self._reader.read(path)
-        except InvalidPayloadError as exc:
-            logger.warning("Invalid payload %s: %s", path, exc)
-            return PublishPayloadResult(
+            read_result = prepared_payload or self._reader.read(path)
+        except (InvalidPayloadError, json.JSONDecodeError, OSError) as exc:
+            if isinstance(exc, json.JSONDecodeError):
+                message = f"Invalid JSON payload: {exc}"
+            elif isinstance(exc, OSError):
+                message = f"Could not read payload file: {exc}"
+            else:
+                message = str(exc)
+            logger.warning("Invalid payload %s: %s", path, message)
+            return PublicationOutcome(
                 sku=None,
                 path=str(path),
                 status="failed",
-                error=str(exc),
+                error=message,
+                phases=[
+                    PublicationPhase(
+                        name="payload_validation",
+                        status="failed",
+                        detail=message,
+                    )
+                ],
             )
 
-        # 1b. Publication readiness gate — block publish when explicitly marked not ready
-        if read_result.publication_ready is False:
+        phases = [PublicationPhase(name="payload_validation", status="succeeded")]
+
+        # 1b. Publication readiness is mandatory for publisher-owned entry points.
+        if read_result.publication_ready is not True:
             reasons = (
                 "; ".join(read_result.blocking_reasons)
                 if read_result.blocking_reasons
-                else "sem detalhes"
+                else "_meta.publication.publication_ready deve ser true"
             )
-            logger.warning("Publish blocked by publication_ready=False for %s: %s", path, reasons)
-            return PublishPayloadResult(
+            logger.warning("Publish blocked by publication readiness for %s: %s", path, reasons)
+            return PublicationOutcome(
                 sku=read_result.sku,
                 path=str(path),
                 status="failed",
                 error=f"Publicação bloqueada: {reasons}",
-            )
-        elif read_result.publication_ready is None:
-            logger.debug(
-                "publication_ready absent in _meta for %s — proceeding (backward compat)", path
+                phases=[
+                    PublicationPhase(
+                        name="payload_validation",
+                        status="failed",
+                        detail=reasons,
+                    )
+                ],
             )
 
         # 2. Expand one file into one or more publish payloads.
@@ -498,8 +504,7 @@ class PublishPayloadUseCase:
                 "Fiscal não revisado (_meta.reviewed_fiscal=false): publicando com aviso"
             )
             logger.warning(
-                "Fiscal not reviewed for %s but publication_ready=True — "
-                "publishing with warning",
+                "Fiscal not reviewed for %s but publication_ready=True — publishing with warning",
                 path,
             )
         errors: list[str] = []
@@ -525,21 +530,32 @@ class PublishPayloadUseCase:
         if errors:
             error_message = "; ".join(errors)
             logger.warning("Policy errors for %s: %s", path, error_message)
-            return PublishPayloadResult(
+            return PublicationOutcome(
                 sku=read_result.sku,
                 path=str(path),
                 status="failed",
                 error=error_message,
                 warnings=warnings,
+                phases=[
+                    *phases,
+                    PublicationPhase(
+                        name="policy_validation",
+                        status="failed",
+                        detail=error_message,
+                    ),
+                ],
             )
+
+        phases.append(PublicationPhase(name="policy_validation", status="succeeded"))
 
         # 4. Dry run — skip actual publish
         if dry_run:
-            return PublishPayloadResult(
+            return PublicationOutcome(
                 sku=read_result.sku,
                 path=str(path),
                 status="skipped",
                 warnings=warnings,
+                phases=phases,
             )
 
         # 4b. Auto-apply attribute suggestions into each publish payload
@@ -561,22 +577,38 @@ class PublishPayloadUseCase:
             except MLApiError as exc:
                 validation_error = _prefix_message(_format_ml_api_error(exc), index, total_payloads)
                 logger.error("ML API validation rejected %s: %s", path, validation_error)
-                return PublishPayloadResult(
+                return PublicationOutcome(
                     sku=read_result.sku,
                     path=str(path),
                     status="failed",
                     error=validation_error,
                     warnings=warnings,
+                    phases=[
+                        *phases,
+                        PublicationPhase(
+                            name="remote_validation",
+                            status="failed",
+                            detail=validation_error,
+                        ),
+                    ],
                 )
             except Exception as exc:  # noqa: BLE001
                 validation_error = _prefix_message(str(exc), index, total_payloads)
                 logger.error("ML API validation failed for %s: %s", path, validation_error)
-                return PublishPayloadResult(
+                return PublicationOutcome(
                     sku=read_result.sku,
                     path=str(path),
                     status="failed",
                     error=validation_error,
                     warnings=warnings,
+                    phases=[
+                        *phases,
+                        PublicationPhase(
+                            name="remote_validation",
+                            status="failed",
+                            detail=validation_error,
+                        ),
+                    ],
                 )
 
             validation_result: MercadoLivreValidationResult = (
@@ -609,7 +641,7 @@ class PublishPayloadUseCase:
                 validation_response = _format_validation_response(validation)
                 validation_error = f"{validation_error} | response={validation_response}"
                 logger.error("ML API validation errors for %s: %s", path, validation_error)
-                return PublishPayloadResult(
+                return PublicationOutcome(
                     sku=read_result.sku,
                     path=str(path),
                     status="failed",
@@ -617,7 +649,17 @@ class PublishPayloadUseCase:
                     warnings=warnings,
                     validation_status=validation_result.status,
                     validation_report=validation_report,
+                    phases=[
+                        *phases,
+                        PublicationPhase(
+                            name="remote_validation",
+                            status="failed",
+                            detail=validation_error,
+                        ),
+                    ],
                 )
+
+        phases.append(PublicationPhase(name="remote_validation", status="succeeded"))
 
         # 6. Publish one or more items.
         created_item_ids: list[str] = []
@@ -637,7 +679,9 @@ class PublishPayloadUseCase:
                 and user_product_id.strip()
             ):
                 payload_user_product_id = payload.get("user_product_id")
-                if not (isinstance(payload_user_product_id, str) and payload_user_product_id.strip()):
+                if not (
+                    isinstance(payload_user_product_id, str) and payload_user_product_id.strip()
+                ):
                     payload["user_product_id"] = user_product_id
             endpoint_used = _publish_endpoint_for_payload(payload, read_result.upload_mode)
             if read_result.upload_mode == "user_products":
@@ -647,36 +691,58 @@ class PublishPayloadUseCase:
 
             try:
                 item = create_item(payload)
-            except MLApiError as exc:
-                sanitization_metadata = getattr(
-                    self._publisher,
-                    "last_user_product_sanitization",
-                    None,
-                )
-                causes_str = _prefix_message(
-                    _format_ml_api_error(
+            except requests.RequestException as exc:
+                if isinstance(exc, MLApiError):
+                    sanitization_metadata = getattr(
+                        self._publisher,
+                        "last_user_product_sanitization",
+                        None,
+                    )
+                    formatted_error = _format_ml_api_error(
                         exc,
                         sanitization_metadata=sanitization_metadata,
-                    ),
-                    index,
-                    total_payloads,
+                    )
+                else:
+                    formatted_error = str(exc)
+                error_message = _prefix_message(formatted_error, index, total_payloads)
+                ambiguous = is_ambiguous_mutation_failure(exc)
+                has_confirmed_side_effects = bool(created_item_ids)
+                logger.error(
+                    "Item creation %s for %s: %s",
+                    "has uncertain remote state" if ambiguous else "was rejected",
+                    path,
+                    error_message,
                 )
-                logger.error("ML API rejected %s: %s", path, causes_str)
-                return PublishPayloadResult(
+                return PublicationOutcome(
                     sku=read_result.sku,
                     path=str(path),
-                    status="failed",
+                    status="unknown" if ambiguous else "failed",
+                    side_effect_state=(
+                        "partial"
+                        if has_confirmed_side_effects
+                        else "unknown" if ambiguous else "none"
+                    ),
                     item_id=first_item_id,
                     item_ids=created_item_ids,
                     user_product_id=user_product_id,
                     publish_endpoints=publish_endpoints,
-                    error=causes_str,
+                    error=error_message,
                     warnings=warnings,
+                    reconciliation_required=ambiguous or has_confirmed_side_effects,
+                    phases=[
+                        *phases,
+                        PublicationPhase(
+                            name="item_creation",
+                            status="unknown" if ambiguous else "failed",
+                            detail=error_message,
+                        ),
+                    ],
                 )
             except Exception as exc:  # noqa: BLE001
                 error_message = _prefix_message(str(exc), index, total_payloads)
                 logger.error("Failed to publish %s: %s", path, error_message)
-                return PublishPayloadResult(
+                has_confirmed_side_effects = bool(created_item_ids)
+                return PublicationOutcome(
                     sku=read_result.sku,
                     path=str(path),
                     status="failed",
@@ -686,6 +752,16 @@ class PublishPayloadUseCase:
                     publish_endpoints=publish_endpoints,
                     error=error_message,
                     warnings=warnings,
+                    side_effect_state="partial" if has_confirmed_side_effects else "none",
+                    reconciliation_required=has_confirmed_side_effects,
+                    phases=[
+                        *phases,
+                        PublicationPhase(
+                            name="item_creation",
+                            status="failed",
+                            detail=error_message,
+                        ),
+                    ],
                 )
 
             item_id = str(item["id"])
@@ -694,6 +770,13 @@ class PublishPayloadUseCase:
             publish_endpoints.append(endpoint_used)
             if first_item_id is None:
                 first_item_id = item_id
+            phases.append(
+                PublicationPhase(
+                    name="item_creation",
+                    status="succeeded",
+                    item_id=item_id,
+                )
+            )
             payload_sku = _extract_payload_seller_sku(payload)
             if not payload_sku and index <= len(read_result.publish_item_skus):
                 payload_sku = _normalize_optional_text(read_result.publish_item_skus[index - 1])
@@ -702,22 +785,76 @@ class PublishPayloadUseCase:
             if read_result.upload_mode != "user_products" and not variation_id_by_sku:
                 variation_id_by_sku = _extract_variation_ids_by_sku(item)
 
-            if self._publish_inactive:
-                try:
-                    self._publisher.update_item(item_id, {"status": "paused"})
-                    logger.info("Paused item %s after publish (publish_inactive=True)", item_id)
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning(
-                        "Failed to pause item %s after publish: %s — "
-                        "item was published but status was NOT set to paused.",
-                        item_id,
-                        exc,
-                    )
-
             if user_product_id is None:
                 raw_user_product_id = item.get("user_product_id")
                 if isinstance(raw_user_product_id, str) and raw_user_product_id.strip():
                     user_product_id = raw_user_product_id.strip()
+
+            if self._publish_inactive:
+                try:
+                    self._publisher.update_item(item_id, {"status": "paused"})
+                    logger.info("Paused item %s after publish (publish_inactive=True)", item_id)
+                    phases.append(
+                        PublicationPhase(
+                            name="pause",
+                            status="succeeded",
+                            item_id=item_id,
+                        )
+                    )
+                except requests.RequestException as exc:
+                    ambiguous = is_ambiguous_mutation_failure(exc)
+                    logger.error(
+                        "Pause %s for item %s: %s",
+                        "has uncertain remote state" if ambiguous else "was rejected",
+                        item_id,
+                        exc,
+                    )
+                    return PublicationOutcome(
+                        sku=read_result.sku,
+                        path=str(path),
+                        status="unknown" if ambiguous else "failed",
+                        side_effect_state="partial",
+                        item_id=first_item_id,
+                        item_ids=created_item_ids,
+                        user_product_id=user_product_id,
+                        publish_endpoints=publish_endpoints,
+                        error=str(exc),
+                        warnings=warnings,
+                        reconciliation_required=True,
+                        phases=[
+                            *phases,
+                            PublicationPhase(
+                                name="pause",
+                                status="unknown" if ambiguous else "failed",
+                                item_id=item_id,
+                                detail=str(exc),
+                            ),
+                        ],
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.error("Failed to pause item %s after publish: %s", item_id, exc)
+                    return PublicationOutcome(
+                        sku=read_result.sku,
+                        path=str(path),
+                        status="failed",
+                        side_effect_state="partial",
+                        item_id=first_item_id,
+                        item_ids=created_item_ids,
+                        user_product_id=user_product_id,
+                        publish_endpoints=publish_endpoints,
+                        error=str(exc),
+                        warnings=warnings,
+                        reconciliation_required=True,
+                        phases=[
+                            *phases,
+                            PublicationPhase(
+                                name="pause",
+                                status="failed",
+                                item_id=item_id,
+                                detail=str(exc),
+                            ),
+                        ],
+                    )
 
             # 6. Post description separately after successful item creation.
             description_to_post: str | None = None
@@ -731,23 +868,69 @@ class PublishPayloadUseCase:
                 description_to_post = read_result.description
 
             if description_to_post:
-                for attempt in range(2):
-                    try:
-                        self._publisher.create_item_description(item_id, description_to_post)
-                        break
-                    except Exception as exc:  # noqa: BLE001
-                        if attempt == 0:
-                            logger.warning(
-                                "Description POST failed for %s (attempt 1), retrying: %s",
-                                item_id,
-                                exc,
-                            )
-                        else:
-                            logger.warning(
-                                "Description POST failed for %s after retry: %s",
-                                item_id,
-                                exc,
-                            )
+                try:
+                    self._publisher.create_item_description(item_id, description_to_post)
+                    phases.append(
+                        PublicationPhase(
+                            name="description",
+                            status="succeeded",
+                            item_id=item_id,
+                        )
+                    )
+                except requests.RequestException as exc:
+                    ambiguous = is_ambiguous_mutation_failure(exc)
+                    logger.error(
+                        "Description mutation %s for %s: %s",
+                        "has uncertain remote state" if ambiguous else "was rejected",
+                        item_id,
+                        exc,
+                    )
+                    return PublicationOutcome(
+                        sku=read_result.sku,
+                        path=str(path),
+                        status="unknown" if ambiguous else "failed",
+                        side_effect_state="partial",
+                        item_id=first_item_id,
+                        item_ids=created_item_ids,
+                        user_product_id=user_product_id,
+                        publish_endpoints=publish_endpoints,
+                        error=str(exc),
+                        warnings=warnings,
+                        reconciliation_required=True,
+                        phases=[
+                            *phases,
+                            PublicationPhase(
+                                name="description",
+                                status="unknown" if ambiguous else "failed",
+                                item_id=item_id,
+                                detail=str(exc),
+                            ),
+                        ],
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.error("Description POST failed for %s: %s", item_id, exc)
+                    return PublicationOutcome(
+                        sku=read_result.sku,
+                        path=str(path),
+                        status="failed",
+                        side_effect_state="partial",
+                        item_id=first_item_id,
+                        item_ids=created_item_ids,
+                        user_product_id=user_product_id,
+                        publish_endpoints=publish_endpoints,
+                        error=str(exc),
+                        warnings=warnings,
+                        reconciliation_required=True,
+                        phases=[
+                            *phases,
+                            PublicationPhase(
+                                name="description",
+                                status="failed",
+                                item_id=item_id,
+                                detail=str(exc),
+                            ),
+                        ],
+                    )
                 if read_result.upload_mode != "user_products":
                     description_posted = True
 
@@ -760,15 +943,25 @@ class PublishPayloadUseCase:
             if not grouped:
                 publish_status = "published_but_not_grouped"
                 warnings.append(grouping_reason or "user_products_items_not_grouped")
+                phases.append(
+                    PublicationPhase(
+                        name="grouping",
+                        status="failed",
+                        detail=grouping_reason,
+                    )
+                )
                 logger.warning(
                     "User products publish succeeded but grouping verification failed for %s: %s",
                     path,
                     grouping_reason,
                 )
+            else:
+                phases.append(PublicationPhase(name="grouping", status="succeeded"))
 
         # 7. Submit fiscal workflow for each fiscal.items entry.
         fiscal_blocking_errors: list[str] = []
         fiscal_report: list[dict[str, Any]] = []
+        fiscal_unknown = False
         if read_result.fiscal_items:
             if self._fiscal_service is None:
                 fiscal_blocking_errors.append(
@@ -778,10 +971,9 @@ class PublishPayloadUseCase:
             else:
                 fallback_payload = publish_payloads[0] if publish_payloads else {}
                 for fiscal_index, fiscal_item in enumerate(read_result.fiscal_items, start=1):
-                    tax_info_raw = (
-                        fiscal_item.get("tax_information")
-                        if isinstance(fiscal_item.get("tax_information"), dict)
-                        else {}
+                    tax_info_candidate = fiscal_item.get("tax_information")
+                    tax_info_raw: dict[str, Any] = (
+                        tax_info_candidate if isinstance(tax_info_candidate, dict) else {}
                     )
                     fiscal_sku = _normalize_optional_text(fiscal_item.get("sku"))
                     target_item_id = first_item_id
@@ -811,9 +1003,7 @@ class PublishPayloadUseCase:
                                     "raw_origin_detail": tax_info_raw.get("origin_detail"),
                                     "normalized_origin_detail": None,
                                     "missing_fields": [],
-                                    "validation_errors": [
-                                        "sku não mapeado para item publicado"
-                                    ],
+                                    "validation_errors": ["sku não mapeado para item publicado"],
                                     "api_response": None,
                                     "published_item_exists": False,
                                     "final_fiscal_status": "failed",
@@ -919,6 +1109,41 @@ class PublishPayloadUseCase:
                         if not fiscal_result.success:
                             message = fiscal_result.error_message or "falha no envio fiscal"
                             fiscal_blocking_errors.append(f"fiscal[{fiscal_index}]: {message}")
+                    except requests.RequestException as exc:
+                        ambiguous = is_ambiguous_mutation_failure(exc)
+                        fiscal_unknown = fiscal_unknown or ambiguous
+                        logger.error(
+                            "Fiscal submission %s for %s (fiscal index %s): %s",
+                            "has uncertain remote state" if ambiguous else "was rejected",
+                            target_item_id,
+                            fiscal_index,
+                            exc,
+                        )
+                        fiscal_blocking_errors.append(
+                            f"fiscal[{fiscal_index}]: "
+                            + (
+                                f"resultado remoto desconhecido ({exc})"
+                                if ambiguous
+                                else f"envio rejeitado ({exc})"
+                            )
+                        )
+                        fiscal_report.append(
+                            {
+                                "index": fiscal_index,
+                                "item_id": target_item_id,
+                                "sku": fiscal_sku,
+                                "ncm": tax_info_raw.get("ncm"),
+                                "raw_origin_type": tax_info_raw.get("origin_type"),
+                                "normalized_origin_type": None,
+                                "raw_origin_detail": tax_info_raw.get("origin_detail"),
+                                "normalized_origin_detail": None,
+                                "missing_fields": [],
+                                "validation_errors": [str(exc)],
+                                "api_response": None,
+                                "published_item_exists": True,
+                                "final_fiscal_status": "unknown" if ambiguous else "failed",
+                            }
+                        )
                     except Exception as exc:  # noqa: BLE001
                         logger.warning(
                             "Failed fiscal submission for %s (fiscal index %s): %s",
@@ -950,10 +1175,11 @@ class PublishPayloadUseCase:
         if fiscal_blocking_errors:
             fiscal_error_message = "; ".join(fiscal_blocking_errors)
             logger.error("Fiscal submission failed for %s: %s", path, fiscal_error_message)
-            return PublishPayloadResult(
+            return PublicationOutcome(
                 sku=read_result.sku,
                 path=str(path),
-                status="failed",
+                status="unknown" if fiscal_unknown else "failed",
+                side_effect_state="partial",
                 item_id=first_item_id,
                 item_ids=created_item_ids,
                 user_product_id=user_product_id,
@@ -964,12 +1190,27 @@ class PublishPayloadUseCase:
                 validation_report=validation_report,
                 fiscal_status="failed",
                 fiscal_report=fiscal_report,
+                reconciliation_required=True,
+                phases=[
+                    *phases,
+                    PublicationPhase(
+                        name="fiscal",
+                        status="unknown" if fiscal_unknown else "failed",
+                        detail=fiscal_error_message,
+                    ),
+                ],
             )
 
-        return PublishPayloadResult(
+        if read_result.fiscal_items:
+            phases.append(PublicationPhase(name="fiscal", status="succeeded"))
+
+        requires_reconciliation = publish_status == "published_but_not_grouped"
+
+        return PublicationOutcome(
             sku=read_result.sku,
             path=str(path),
             status=publish_status,
+            side_effect_state="partial" if requires_reconciliation else "confirmed",
             item_id=first_item_id,
             item_ids=created_item_ids,
             user_product_id=user_product_id,
@@ -979,4 +1220,6 @@ class PublishPayloadUseCase:
             validation_report=validation_report,
             fiscal_status="submitted" if read_result.fiscal_items else None,
             fiscal_report=fiscal_report,
+            reconciliation_required=requires_reconciliation,
+            phases=phases,
         )

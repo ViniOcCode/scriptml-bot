@@ -1,78 +1,323 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://vinioccode.github.io/mlbot/schemas/run_manifest.schema.json",
-  "title": "RunManifest",
-  "type": "object",
+  "$defs": {
+    "BuildFailure": {
+      "additionalProperties": false,
+      "description": "Build failure entry for non-publishable groups/SKUs.",
+      "properties": {
+        "group_id": {
+          "title": "Group Id",
+          "type": "string"
+        },
+        "override_rejection_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Override Rejection Reason"
+        },
+        "override_status": {
+          "default": "none",
+          "enum": [
+            "none",
+            "applied",
+            "partially_applied",
+            "rejected",
+            "unsupported"
+          ],
+          "title": "Override Status",
+          "type": "string"
+        },
+        "publishable": {
+          "const": false,
+          "default": false,
+          "title": "Publishable",
+          "type": "boolean"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "review_issues": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Review Issues",
+          "type": "array"
+        },
+        "review_overrides_applied": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Review Overrides Applied",
+          "type": "array"
+        },
+        "sku": {
+          "title": "Sku",
+          "type": "string"
+        },
+        "stage": {
+          "title": "Stage",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sku",
+        "group_id",
+        "stage",
+        "reason"
+      ],
+      "title": "BuildFailure",
+      "type": "object"
+    },
+    "CandidatePayloadVariant": {
+      "additionalProperties": false,
+      "description": "One concrete payload variant for a publication candidate.",
+      "properties": {
+        "artifact_source": {
+          "default": "",
+          "title": "Artifact Source",
+          "type": "string"
+        },
+        "block_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Block Reason"
+        },
+        "created_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Created At"
+        },
+        "listing_type_id": {
+          "default": "",
+          "title": "Listing Type Id",
+          "type": "string"
+        },
+        "payload_path": {
+          "default": "",
+          "title": "Payload Path",
+          "type": "string"
+        },
+        "publishable": {
+          "title": "Publishable",
+          "type": "boolean"
+        },
+        "skip_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Skip Reason"
+        },
+        "variant": {
+          "title": "Variant",
+          "type": "string"
+        }
+      },
+      "required": [
+        "variant",
+        "publishable"
+      ],
+      "title": "CandidatePayloadVariant",
+      "type": "object"
+    },
+    "PublicationCandidate": {
+      "additionalProperties": false,
+      "description": "One publishable unit candidate (group-level or per-SKU for independent topology).",
+      "properties": {
+        "build_status": {
+          "enum": [
+            "success",
+            "partial_success",
+            "failed",
+            "skipped",
+            "not_publishable"
+          ],
+          "title": "Build Status",
+          "type": "string"
+        },
+        "errors": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Errors",
+          "type": "array"
+        },
+        "family_id": {
+          "default": "",
+          "title": "Family Id",
+          "type": "string"
+        },
+        "group_id": {
+          "title": "Group Id",
+          "type": "string"
+        },
+        "override_rejection_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Override Rejection Reason"
+        },
+        "override_status": {
+          "default": "none",
+          "enum": [
+            "none",
+            "applied",
+            "partially_applied",
+            "rejected",
+            "unsupported"
+          ],
+          "title": "Override Status",
+          "type": "string"
+        },
+        "payloads": {
+          "items": {
+            "$ref": "#/$defs/CandidatePayloadVariant"
+          },
+          "title": "Payloads",
+          "type": "array"
+        },
+        "review_overrides_applied": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Review Overrides Applied",
+          "type": "array"
+        },
+        "sku_scope": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Sku Scope",
+          "type": "array"
+        },
+        "topology": {
+          "default": "",
+          "title": "Topology",
+          "type": "string"
+        }
+      },
+      "required": [
+        "group_id",
+        "build_status"
+      ],
+      "title": "PublicationCandidate",
+      "type": "object"
+    }
+  },
   "additionalProperties": false,
+  "description": "Cross-app handoff manifest consumed by publisher/orchestrator.",
+  "properties": {
+    "build_failures": {
+      "items": {
+        "$ref": "#/$defs/BuildFailure"
+      },
+      "title": "Build Failures",
+      "type": "array"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "diagnostics": {
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "title": "Diagnostics",
+      "type": "object"
+    },
+    "execution_profile": {
+      "enum": [
+        "dev",
+        "paid"
+      ],
+      "title": "Execution Profile",
+      "type": "string"
+    },
+    "publication_candidates": {
+      "items": {
+        "$ref": "#/$defs/PublicationCandidate"
+      },
+      "title": "Publication Candidates",
+      "type": "array"
+    },
+    "review_overrides": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Review Overrides",
+      "type": "array"
+    },
+    "run_id": {
+      "title": "Run Id",
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "success",
+        "partial_success",
+        "failed"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "workspace_path": {
+      "title": "Workspace Path",
+      "type": "string"
+    }
+  },
   "required": [
     "run_id",
     "created_at",
     "workspace_path",
+    "execution_profile",
     "status",
-    "publication_candidates",
-    "build_failures",
-    "diagnostics"
+    "publication_candidates"
   ],
-  "properties": {
-    "run_id": { "type": "string" },
-    "created_at": { "type": "string", "format": "date-time" },
-    "workspace_path": { "type": "string" },
-    "status": { "type": "string", "enum": ["success", "partial_success", "failed"] },
-    "publication_candidates": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["group_id", "sku_scope", "topology", "build_status", "payloads", "errors"],
-        "properties": {
-          "group_id": { "type": "string" },
-          "family_id": { "type": ["string", "null"] },
-          "sku_scope": { "type": "array", "items": { "type": "string" } },
-          "topology": { "type": ["string", "null"] },
-          "build_status": {
-            "type": "string",
-            "enum": ["success", "partial_success", "failed", "skipped", "not_publishable"]
-          },
-          "payloads": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": ["variant", "listing_type_id", "publishable"],
-              "properties": {
-                "variant": { "type": "string" },
-                "payload_path": { "type": ["string", "null"] },
-                "listing_type_id": { "type": "string" },
-                "publishable": { "type": "boolean" },
-                "artifact_source": { "type": ["string", "null"] },
-                "created_at": { "type": ["string", "null"], "format": "date-time" },
-                "block_reason": { "type": ["string", "null"] },
-                "skip_reason": { "type": ["string", "null"] }
-              }
-            }
-          },
-          "errors": { "type": "array" }
-        }
-      }
-    },
-    "build_failures": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "additionalProperties": true,
-        "properties": {
-          "sku": { "type": ["string", "null"] },
-          "group_id": { "type": ["string", "null"] },
-          "family_id": { "type": ["string", "null"] },
-          "stage": { "type": ["string", "null"] },
-          "reason": { "type": ["string", "null"] },
-          "publishable": { "type": "boolean", "const": false }
-        }
-      }
-    },
-    "diagnostics": {
-      "type": "object",
-      "additionalProperties": { "type": ["string", "null"] }
-    }
-  }
+  "title": "RunManifest",
+  "type": "object"
 }

@@ -3,20 +3,25 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from mercadolivre_upload.adapters.json_payload_reader import JsonPayloadReader
+from mercadolivre_upload.adapters.json_payload_reader import (
+    InvalidPayloadError,
+    JsonPayloadReader,
+    ReadPayloadResult,
+)
 from mercadolivre_upload.api.client import MLApiClient
 from mercadolivre_upload.application.publish_payload_use_case import (
     PublishPayloadUseCase,
-    PublishPayloadResult,
 )
 from mercadolivre_upload.application.validators.seller_policy import (
     load_seller_config,
 )
 from mercadolivre_upload.auth.publisher_context import build_publisher_auth_context
+from mercadolivre_upload.contracts.publication import PublicationOutcome, PublicationPhase
 from mercadolivre_upload.domain.fiscal.service import FiscalService
 
 
@@ -25,6 +30,7 @@ def _build_use_case(
     publish_inactive: bool = False,
     seller_config_path: Path,
     workspace_root: Path,
+    reader: JsonPayloadReader | None = None,
 ) -> PublishPayloadUseCase:
     """Wire the JSON publish use case with the normal scriptml-bot infrastructure."""
     from mercadolivre_upload.application.validators.seller_policy import SellerPolicyValidator
@@ -32,7 +38,7 @@ def _build_use_case(
     config_path = Path(seller_config_path).expanduser().resolve()
     seller_config = load_seller_config(config_path)
 
-    reader = JsonPayloadReader()
+    payload_reader = reader or JsonPayloadReader(strict_publisher_contract=True)
     auth_context = build_publisher_auth_context(
         settings_file=config_path,
         workspace_root=workspace_root,
@@ -42,7 +48,7 @@ def _build_use_case(
     api_client = MLApiClient(auth_manager)
     fiscal_service = FiscalService(api_client)
     return PublishPayloadUseCase(
-        reader=reader,
+        reader=payload_reader,
         policy=SellerPolicyValidator(seller_config),
         publisher=api_client,
         fiscal_service=fiscal_service,
@@ -50,11 +56,113 @@ def _build_use_case(
     )
 
 
-def _result_to_dict(result: PublishPayloadResult, *, report_path: Path | None = None) -> dict[str, Any]:
-    """Convert the existing result dataclass into the public structured response."""
+@dataclass
+class PublisherRuntime:
+    """Reusable publisher infrastructure and payload cache for one invocation."""
+
+    reader: JsonPayloadReader
+    use_case: PublishPayloadUseCase
+    _prepared_payloads: dict[Path, ReadPayloadResult] = field(default_factory=dict)
+
+    @classmethod
+    def build(
+        cls,
+        *,
+        publish_inactive: bool,
+        seller_config_path: Path,
+        workspace_root: Path,
+        reader: JsonPayloadReader | None = None,
+    ) -> PublisherRuntime:
+        """Build auth, API client, policy and fiscal service exactly once."""
+        payload_reader = reader or JsonPayloadReader(strict_publisher_contract=True)
+        return cls(
+            reader=payload_reader,
+            use_case=_build_use_case(
+                publish_inactive=publish_inactive,
+                seller_config_path=seller_config_path,
+                workspace_root=workspace_root,
+                reader=payload_reader,
+            ),
+        )
+
+    def remember(self, payload_path: Path, prepared: ReadPayloadResult) -> None:
+        """Seed the invocation cache with an already validated payload."""
+        cache_key = Path(payload_path).expanduser().resolve()
+        self._prepared_payloads[cache_key] = prepared
+
+    def prepare(self, payload_path: Path) -> ReadPayloadResult:
+        """Read and validate a payload once for this runtime."""
+        path = Path(payload_path)
+        cache_key = path.expanduser().resolve()
+        prepared = self._prepared_payloads.get(cache_key)
+        if prepared is None:
+            prepared = self.reader.read(path)
+            self._prepared_payloads[cache_key] = prepared
+        return prepared
+
+    def publish(self, payload_path: Path, *, dry_run: bool = False) -> PublicationOutcome:
+        """Publish using the invocation-owned prepared payload."""
+        path = Path(payload_path)
+        try:
+            prepared = self.prepare(path)
+        except json.JSONDecodeError as exc:
+            message = f"Invalid JSON payload: {exc}"
+            return PublicationOutcome(
+                sku=None,
+                path=str(path),
+                status="failed",
+                error=message,
+                phases=[
+                    PublicationPhase(
+                        name="payload_validation",
+                        status="failed",
+                        detail=message,
+                    )
+                ],
+            )
+        except InvalidPayloadError as exc:
+            return PublicationOutcome(
+                sku=None,
+                path=str(path),
+                status="failed",
+                error=str(exc),
+                phases=[
+                    PublicationPhase(
+                        name="payload_validation",
+                        status="failed",
+                        detail=str(exc),
+                    )
+                ],
+            )
+        except OSError as exc:
+            message = f"Could not read payload file: {exc}"
+            return PublicationOutcome(
+                sku=None,
+                path=str(path),
+                status="failed",
+                error=message,
+                phases=[
+                    PublicationPhase(
+                        name="payload_validation",
+                        status="failed",
+                        detail=message,
+                    )
+                ],
+            )
+        return self.use_case.execute(
+            path,
+            dry_run=dry_run,
+            prepared_payload=prepared,
+        )
+
+
+def serialize_publication_outcome(result: PublicationOutcome) -> dict[str, Any]:
+    """Serialize the typed outcome for JSON/IPC compatibility boundaries."""
     errors = [result.error] if result.error else []
     return {
         "status": result.status,
+        "side_effect_state": result.side_effect_state,
+        "phases": [phase.model_dump(mode="json") for phase in result.phases],
         "sku": result.sku,
         "item_id": result.item_id,
         "item_ids": result.item_ids,
@@ -66,28 +174,46 @@ def _result_to_dict(result: PublishPayloadResult, *, report_path: Path | None = 
         "validation_report": result.validation_report,
         "fiscal_status": result.fiscal_status,
         "fiscal_report": result.fiscal_report,
-        "report_path": str(report_path) if report_path is not None else None,
+        "reconciliation_required": result.reconciliation_required,
+        "report_path": result.report_path,
     }
 
 
-def _failure(
+def _with_report(
+    result: PublicationOutcome,
+    report_dir: Path | None,
+) -> PublicationOutcome:
+    """Attach the serialized report path without weakening the typed outcome."""
+    if report_dir is None:
+        return result
+    report_path = _write_report([result], report_dir)
+    return result.model_copy(update={"report_path": str(report_path)})
+
+
+def _failure_outcome(
     *,
     payload_path: Path,
     message: str,
     report_dir: Path | None = None,
-) -> dict[str, Any]:
-    """Return a structured failure, optionally writing it to the report directory."""
-    result = PublishPayloadResult(
+) -> PublicationOutcome:
+    """Return a typed failure, optionally writing its report."""
+    result = PublicationOutcome(
         sku=None,
         path=str(payload_path),
         status="failed",
         error=message,
+        phases=[
+            PublicationPhase(
+                name="payload_validation",
+                status="failed",
+                detail=message,
+            )
+        ],
     )
-    report_path = _write_report([result], report_dir) if report_dir is not None else None
-    return _result_to_dict(result, report_path=report_path)
+    return _with_report(result, report_dir)
 
 
-def _write_report(results: list[PublishPayloadResult], report_dir: Path) -> Path:
+def _write_report(results: list[PublicationOutcome], report_dir: Path) -> Path:
     """Write a JSON payload publish report and return the created path."""
     report_dir.mkdir(parents=True, exist_ok=True)
     run_id = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
@@ -112,6 +238,8 @@ def _write_report(results: list[PublishPayloadResult], report_dir: Path) -> Path
                 "sku": result.sku,
                 "path": result.path,
                 "status": result.status,
+                "side_effect_state": result.side_effect_state,
+                "phases": [phase.model_dump(mode="json") for phase in result.phases],
                 "item_id": result.item_id,
                 "item_ids": result.item_ids,
                 "user_product_id": result.user_product_id,
@@ -122,12 +250,78 @@ def _write_report(results: list[PublishPayloadResult], report_dir: Path) -> Path
                 "validation_report": result.validation_report,
                 "fiscal_status": result.fiscal_status,
                 "fiscal_report": result.fiscal_report,
+                "reconciliation_required": result.reconciliation_required,
             }
             for result in results
         ],
     }
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     return report_path
+
+
+def publish_payload_outcome(
+    payload_path: Path,
+    *,
+    report_dir: Path | None = None,
+    dry_run: bool = False,
+    publish_inactive: bool = False,
+    seller_config_path: Path,
+    workspace_root: Path,
+    runtime: PublisherRuntime | None = None,
+) -> PublicationOutcome:
+    """Publish a canonical payload variant produced by ml-builder.
+
+    The input must use the public envelope ``payload``, ``description``,
+    ``fiscal``, and ``_meta``. Publication reuses the same auth, token storage,
+    Mercado Livre client, policy, and fiscal infrastructure for the invocation.
+    """
+    path = Path(payload_path)
+    if not path.exists():
+        return _failure_outcome(
+            payload_path=path,
+            message=f"Payload file not found: {path}",
+            report_dir=report_dir,
+        )
+    if not path.is_file():
+        return _failure_outcome(
+            payload_path=path,
+            message=f"Payload path is not a file: {path}",
+            report_dir=report_dir,
+        )
+
+    if runtime is None:
+        reader = JsonPayloadReader(strict_publisher_contract=True)
+        try:
+            prepared = reader.read(path)
+        except json.JSONDecodeError as exc:
+            return _failure_outcome(
+                payload_path=path,
+                message=f"Invalid JSON payload: {exc}",
+                report_dir=report_dir,
+            )
+        except InvalidPayloadError as exc:
+            return _failure_outcome(
+                payload_path=path,
+                message=str(exc),
+                report_dir=report_dir,
+            )
+        except OSError as exc:
+            return _failure_outcome(
+                payload_path=path,
+                message=f"Could not read payload file: {exc}",
+                report_dir=report_dir,
+            )
+        effective_runtime = PublisherRuntime.build(
+            publish_inactive=publish_inactive,
+            seller_config_path=seller_config_path,
+            workspace_root=workspace_root,
+            reader=reader,
+        )
+        effective_runtime.remember(path, prepared)
+    else:
+        effective_runtime = runtime
+    result = effective_runtime.publish(path, dry_run=dry_run)
+    return _with_report(result, report_dir)
 
 
 def publish_payload_file(
@@ -138,58 +332,29 @@ def publish_payload_file(
     publish_inactive: bool = False,
     seller_config_path: Path,
     workspace_root: Path,
+    runtime: PublisherRuntime | None = None,
 ) -> dict[str, Any]:
-    """Publish a ready-made payload JSON file produced by ml-builder.
+    """Serialize a publication outcome for the CLI/dashboard IPC boundary.
 
-    The path may point at either the artifact-store ``70_payload.json`` or the
-    workspace ``payload.json`` copy. The JSON contract is validated by
-    ``JsonPayloadReader`` and publication reuses the same auth, token storage,
-    Mercado Livre client, policy, and fiscal infrastructure as the existing
-    scriptml-bot publish flow.
+    The dict return is retained because the current CLI and dashboard worker
+    persist and transmit this response as JSON. Publisher internals must call
+    :func:`publish_payload_outcome` instead.
     """
-    path = Path(payload_path)
-    if not path.exists():
-        return _failure(
-            payload_path=path,
-            message=f"Payload file not found: {path}",
-            report_dir=report_dir,
-        )
-    if not path.is_file():
-        return _failure(
-            payload_path=path,
-            message=f"Payload path is not a file: {path}",
-            report_dir=report_dir,
-        )
-
-    try:
-        raw_payload = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        return _failure(
-            payload_path=path,
-            message=f"Invalid JSON payload: {exc}",
-            report_dir=report_dir,
-        )
-    except OSError as exc:
-        return _failure(
-            payload_path=path,
-            message=f"Could not read payload file: {exc}",
-            report_dir=report_dir,
-        )
-    if not isinstance(raw_payload, dict):
-        return _failure(
-            payload_path=path,
-            message="Invalid payload: root JSON value must be an object",
-            report_dir=report_dir,
-        )
-
-    use_case = _build_use_case(
+    outcome = publish_payload_outcome(
+        payload_path,
+        report_dir=report_dir,
+        dry_run=dry_run,
         publish_inactive=publish_inactive,
         seller_config_path=seller_config_path,
         workspace_root=workspace_root,
+        runtime=runtime,
     )
-    result = use_case.execute(path, dry_run=dry_run)
-    report_path = _write_report([result], report_dir) if report_dir is not None else None
-    return _result_to_dict(result, report_path=report_path)
+    return serialize_publication_outcome(outcome)
 
 
-__all__ = ["publish_payload_file"]
+__all__ = [
+    "PublisherRuntime",
+    "publish_payload_file",
+    "publish_payload_outcome",
+    "serialize_publication_outcome",
+]
