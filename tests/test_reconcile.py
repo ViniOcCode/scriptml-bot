@@ -487,6 +487,44 @@ def test_all_manifests_paid_profile_never_loads_same_identity_from_dev(
     ]
 
 
+def test_paid_reconcile_skips_production_diagnostic_manifest(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    payload_path = _write_payload(workspace, "diagnostic-source", "SKU-SHARED")
+    manifest = _single_profile_manifest(
+        workspace=workspace,
+        payload_path=payload_path,
+        run_id="diagnostic-run",
+        execution_profile="paid",
+    )
+    manifest.pop("execution_profile")
+    manifest.update(
+        {
+            "manifest_version": 2,
+            "trust_profile": "production",
+            "run_mode": "diagnostic",
+            "model_policy": "free_only",
+            "generation_outcome": "complete",
+            "quality_gate_status": "passed",
+            "publication_ready": False,
+            "blocking_gaps": [],
+        }
+    )
+    manifest_path = workspace / "runs" / "diagnostic-run" / "run_manifest.json"
+    manifest_path.parent.mkdir(parents=True)
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    report = ReconcileUseCase(FakeInventory([])).execute(
+        workspace_root=workspace,
+        execution_profile="paid",
+        from_manifest=True,
+        all_manifests=True,
+    )
+
+    assert report.rows == []
+    assert report.diagnostics[0]["manifest_execution_profile"] == "dev"
+
+
 def test_explicit_manifest_rejects_profile_mismatch_before_inventory_scan(
     tmp_path: Path,
 ) -> None:

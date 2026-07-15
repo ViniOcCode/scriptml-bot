@@ -651,10 +651,18 @@ def _manifest_publications(
             )
             continue
 
-        if manifest.execution_profile != execution_profile:
+        manifest_execution_profile = (
+            "paid"
+            if (
+                manifest.trust_profile == "production"
+                and manifest.run_mode == "autonomous"
+            )
+            else "dev"
+        )
+        if manifest_execution_profile != execution_profile:
             if not skip_profile_mismatches:
                 raise ReconcileUsageError(
-                    f"Manifest execution_profile={manifest.execution_profile!r} does not match "
+                    f"Manifest trust_profile={manifest.trust_profile!r} does not match "
                     f"requested profile {execution_profile!r}: {manifest_path}"
                 )
             diagnostics.append(
@@ -662,7 +670,7 @@ def _manifest_publications(
                     "code": "manifest_execution_profile_skipped",
                     "manifest_path": str(manifest_path),
                     "requested_execution_profile": execution_profile,
-                    "manifest_execution_profile": manifest.execution_profile,
+                    "manifest_execution_profile": manifest_execution_profile,
                 }
             )
             continue

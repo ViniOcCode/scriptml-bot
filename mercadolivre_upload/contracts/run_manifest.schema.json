@@ -4,21 +4,35 @@
       "additionalProperties": false,
       "description": "Build failure entry for non-publishable groups/SKUs.",
       "properties": {
+        "sku": {
+          "title": "Sku",
+          "type": "string"
+        },
         "group_id": {
           "title": "Group Id",
           "type": "string"
         },
-        "override_rejection_reason": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Override Rejection Reason"
+        "stage": {
+          "title": "Stage",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "publishable": {
+          "const": false,
+          "default": false,
+          "title": "Publishable",
+          "type": "boolean"
+        },
+        "review_issues": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Review Issues",
+          "type": "array"
         },
         "override_status": {
           "default": "none",
@@ -32,24 +46,6 @@
           "title": "Override Status",
           "type": "string"
         },
-        "publishable": {
-          "const": false,
-          "default": false,
-          "title": "Publishable",
-          "type": "boolean"
-        },
-        "reason": {
-          "title": "Reason",
-          "type": "string"
-        },
-        "review_issues": {
-          "items": {
-            "additionalProperties": true,
-            "type": "object"
-          },
-          "title": "Review Issues",
-          "type": "array"
-        },
         "review_overrides_applied": {
           "items": {
             "additionalProperties": true,
@@ -58,13 +54,17 @@
           "title": "Review Overrides Applied",
           "type": "array"
         },
-        "sku": {
-          "title": "Sku",
-          "type": "string"
-        },
-        "stage": {
-          "title": "Stage",
-          "type": "string"
+        "override_rejection_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Override Rejection Reason"
         }
       },
       "required": [
@@ -80,22 +80,28 @@
       "additionalProperties": false,
       "description": "One concrete payload variant for a publication candidate.",
       "properties": {
+        "variant": {
+          "title": "Variant",
+          "type": "string"
+        },
+        "payload_path": {
+          "default": "",
+          "title": "Payload Path",
+          "type": "string"
+        },
+        "listing_type_id": {
+          "default": "",
+          "title": "Listing Type Id",
+          "type": "string"
+        },
+        "publishable": {
+          "title": "Publishable",
+          "type": "boolean"
+        },
         "artifact_source": {
           "default": "",
           "title": "Artifact Source",
           "type": "string"
-        },
-        "block_reason": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Block Reason"
         },
         "created_at": {
           "anyOf": [
@@ -110,19 +116,17 @@
           "default": null,
           "title": "Created At"
         },
-        "listing_type_id": {
-          "default": "",
-          "title": "Listing Type Id",
-          "type": "string"
-        },
-        "payload_path": {
-          "default": "",
-          "title": "Payload Path",
-          "type": "string"
-        },
-        "publishable": {
-          "title": "Publishable",
-          "type": "boolean"
+        "block_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Block Reason"
         },
         "skip_reason": {
           "anyOf": [
@@ -135,10 +139,6 @@
           ],
           "default": null,
           "title": "Skip Reason"
-        },
-        "variant": {
-          "title": "Variant",
-          "type": "string"
         }
       },
       "required": [
@@ -152,6 +152,27 @@
       "additionalProperties": false,
       "description": "One publishable unit candidate (group-level or per-SKU for independent topology).",
       "properties": {
+        "group_id": {
+          "title": "Group Id",
+          "type": "string"
+        },
+        "family_id": {
+          "default": "",
+          "title": "Family Id",
+          "type": "string"
+        },
+        "sku_scope": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Sku Scope",
+          "type": "array"
+        },
+        "topology": {
+          "default": "",
+          "title": "Topology",
+          "type": "string"
+        },
         "build_status": {
           "enum": [
             "success",
@@ -163,6 +184,13 @@
           "title": "Build Status",
           "type": "string"
         },
+        "payloads": {
+          "items": {
+            "$ref": "#/$defs/CandidatePayloadVariant"
+          },
+          "title": "Payloads",
+          "type": "array"
+        },
         "errors": {
           "items": {
             "additionalProperties": true,
@@ -170,27 +198,6 @@
           },
           "title": "Errors",
           "type": "array"
-        },
-        "family_id": {
-          "default": "",
-          "title": "Family Id",
-          "type": "string"
-        },
-        "group_id": {
-          "title": "Group Id",
-          "type": "string"
-        },
-        "override_rejection_reason": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Override Rejection Reason"
         },
         "override_status": {
           "default": "none",
@@ -204,13 +211,6 @@
           "title": "Override Status",
           "type": "string"
         },
-        "payloads": {
-          "items": {
-            "$ref": "#/$defs/CandidatePayloadVariant"
-          },
-          "title": "Payloads",
-          "type": "array"
-        },
         "review_overrides_applied": {
           "items": {
             "additionalProperties": true,
@@ -219,17 +219,17 @@
           "title": "Review Overrides Applied",
           "type": "array"
         },
-        "sku_scope": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Sku Scope",
-          "type": "array"
-        },
-        "topology": {
-          "default": "",
-          "title": "Topology",
-          "type": "string"
+        "override_rejection_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Override Rejection Reason"
         }
       },
       "required": [
@@ -243,17 +243,100 @@
   "additionalProperties": false,
   "description": "Cross-app handoff manifest consumed by publisher/orchestrator.",
   "properties": {
+    "run_id": {
+      "title": "Run Id",
+      "type": "string"
+    },
+    "created_at": {
+      "format": "date-time",
+      "title": "Created At",
+      "type": "string"
+    },
+    "workspace_path": {
+      "title": "Workspace Path",
+      "type": "string"
+    },
+    "manifest_version": {
+      "const": 2,
+      "title": "Manifest Version",
+      "type": "integer"
+    },
+    "trust_profile": {
+      "enum": [
+        "production",
+        "development"
+      ],
+      "title": "Trust Profile",
+      "type": "string"
+    },
+    "run_mode": {
+      "enum": [
+        "autonomous",
+        "diagnostic"
+      ],
+      "title": "Run Mode",
+      "type": "string"
+    },
+    "model_policy": {
+      "enum": [
+        "free_only",
+        "quality_first"
+      ],
+      "title": "Model Policy",
+      "type": "string"
+    },
+    "generation_outcome": {
+      "enum": [
+        "complete",
+        "needs_input",
+        "failed"
+      ],
+      "title": "Generation Outcome",
+      "type": "string"
+    },
+    "quality_gate_status": {
+      "enum": [
+        "passed",
+        "incomplete",
+        "failed"
+      ],
+      "title": "Quality Gate Status",
+      "type": "string"
+    },
+    "publication_ready": {
+      "title": "Publication Ready",
+      "type": "boolean"
+    },
+    "blocking_gaps": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Blocking Gaps",
+      "type": "array"
+    },
+    "status": {
+      "enum": [
+        "success",
+        "partial_success",
+        "failed"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "publication_candidates": {
+      "items": {
+        "$ref": "#/$defs/PublicationCandidate"
+      },
+      "title": "Publication Candidates",
+      "type": "array"
+    },
     "build_failures": {
       "items": {
         "$ref": "#/$defs/BuildFailure"
       },
       "title": "Build Failures",
       "type": "array"
-    },
-    "created_at": {
-      "format": "date-time",
-      "title": "Created At",
-      "type": "string"
     },
     "diagnostics": {
       "additionalProperties": {
@@ -269,21 +352,6 @@
       "title": "Diagnostics",
       "type": "object"
     },
-    "execution_profile": {
-      "enum": [
-        "dev",
-        "paid"
-      ],
-      "title": "Execution Profile",
-      "type": "string"
-    },
-    "publication_candidates": {
-      "items": {
-        "$ref": "#/$defs/PublicationCandidate"
-      },
-      "title": "Publication Candidates",
-      "type": "array"
-    },
     "review_overrides": {
       "items": {
         "additionalProperties": true,
@@ -291,30 +359,19 @@
       },
       "title": "Review Overrides",
       "type": "array"
-    },
-    "run_id": {
-      "title": "Run Id",
-      "type": "string"
-    },
-    "status": {
-      "enum": [
-        "success",
-        "partial_success",
-        "failed"
-      ],
-      "title": "Status",
-      "type": "string"
-    },
-    "workspace_path": {
-      "title": "Workspace Path",
-      "type": "string"
     }
   },
   "required": [
     "run_id",
     "created_at",
     "workspace_path",
-    "execution_profile",
+    "manifest_version",
+    "trust_profile",
+    "run_mode",
+    "model_policy",
+    "generation_outcome",
+    "quality_gate_status",
+    "publication_ready",
     "status",
     "publication_candidates"
   ],

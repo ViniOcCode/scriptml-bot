@@ -129,7 +129,9 @@ def test_load_run_manifest_accepts_dev_profile_as_non_publishable_contract_state
 
     loaded = load_run_manifest(manifest_path)
 
-    assert loaded.execution_profile == "dev"
+    assert loaded.trust_profile == "development"
+    assert loaded.run_mode == "diagnostic"
+    assert loaded.publication_ready is False
 
 
 def test_load_run_manifest_rejects_publishable_dev_payload(tmp_path: Path) -> None:

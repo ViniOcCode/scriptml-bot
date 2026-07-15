@@ -285,9 +285,16 @@ def publish_manifest(
     """Publish payload variants declared in the current run_manifest.json contract."""
     manifest_path = manifest_path.expanduser().resolve()
     manifest = load_run_manifest(manifest_path)
-    if manifest.execution_profile != "paid":
+    if not (
+        manifest.trust_profile == "production"
+        and manifest.run_mode == "autonomous"
+        and manifest.generation_outcome == "complete"
+        and manifest.quality_gate_status == "passed"
+        and manifest.publication_ready
+        and not manifest.blocking_gaps
+    ):
         err_console.print(
-            "[red]Erro:[/red] somente manifestos execution_profile='paid' podem ser publicados"
+            "[red]Erro:[/red] o manifesto não passou os gates comuns de publicação"
         )
         raise typer.Exit(1)
     all_payload_variants = [

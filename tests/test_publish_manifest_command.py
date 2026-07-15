@@ -97,7 +97,13 @@ def _manifest_payload(
     tmp_path: Path,
     *,
     status: str = "success",
-    execution_profile: str = "paid",
+    trust_profile: str = "production",
+    run_mode: str = "autonomous",
+    model_policy: str = "quality_first",
+    generation_outcome: str = "complete",
+    quality_gate_status: str = "passed",
+    publication_ready: bool = True,
+    blocking_gaps: list[dict[str, object]] | None = None,
     publication_candidates: list[dict[str, object]] | None = None,
     build_failures: list[dict[str, object]] | None = None,
 ) -> Path:
@@ -111,10 +117,17 @@ def _manifest_payload(
     manifest_path.write_text(
         json.dumps(
             {
+                "manifest_version": 2,
                 "run_id": "run-1",
                 "created_at": "2026-05-12T22:00:00Z",
                 "workspace_path": "workspace",
-                "execution_profile": execution_profile,
+                "trust_profile": trust_profile,
+                "run_mode": run_mode,
+                "model_policy": model_policy,
+                "generation_outcome": generation_outcome,
+                "quality_gate_status": quality_gate_status,
+                "publication_ready": publication_ready,
+                "blocking_gaps": blocking_gaps or [],
                 "status": status,
                 "publication_candidates": publication_candidates
                 or [
@@ -248,17 +261,23 @@ def test_manifest_reuses_one_runtime_and_one_payload_read_per_variant(
     assert runtimes_seen == [runtime, runtime]
 
 
-def test_dev_manifest_is_rejected_before_payload_read_or_publication(
+def test_diagnostic_manifest_is_rejected_before_payload_read_or_publication(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     publisher_runtime_without_auth: tuple[MagicMock, MagicMock],
 ) -> None:
-    manifest_path = _manifest_payload(tmp_path, execution_profile="dev")
+    manifest_path = _manifest_payload(
+        tmp_path,
+        trust_profile="development",
+        run_mode="diagnostic",
+        model_policy="free_only",
+        publication_ready=False,
+    )
     manifest_data = json.loads(manifest_path.read_text(encoding="utf-8"))
     for candidate in manifest_data["publication_candidates"]:
         for payload in candidate["payloads"]:
             payload["publishable"] = False
-            payload["block_reason"] = "execution_profile_not_publishable"
+            payload["block_reason"] = "diagnostic_manifest_not_publishable"
     manifest_path.write_text(json.dumps(manifest_data), encoding="utf-8")
     publish_calls: list[Path] = []
     _patch_publish(monkeypatch, publish_calls)
@@ -339,6 +358,9 @@ def test_failed_manifest_with_zero_publishable_payloads_fails_clearly(tmp_path: 
     manifest_path = _manifest_payload(
         tmp_path,
         status="failed",
+        generation_outcome="failed",
+        quality_gate_status="failed",
+        publication_ready=False,
         publication_candidates=[
             _candidate(
                 [
@@ -354,10 +376,10 @@ def test_failed_manifest_with_zero_publishable_payloads_fails_clearly(tmp_path: 
     with pytest.raises(typer.Exit) as exc:
         publish_manifest(
             manifest_path, workspace_root=tmp_path / "workspace", report_dir=tmp_path / "reports"
-        )
+    )
 
     assert exc.value.exit_code == 1
-    assert _report(tmp_path)["summary"]["final_status"] == "partial_success"
+    assert not (tmp_path / "reports" / "report.json").exists()
 
 
 def test_failed_manifest_with_publishable_payloads_fails_as_manifest_inconsistency(
@@ -381,6 +403,7 @@ def test_publishable_false_payload_is_skipped_and_reported(
 ) -> None:
     manifest_path = _manifest_payload(
         tmp_path,
+        publication_ready=False,
         publication_candidates=[
             _candidate(
                 [
@@ -403,7 +426,7 @@ def test_publishable_false_payload_is_skipped_and_reported(
         )
 
     assert calls == []
-    assert _report(tmp_path)["results"][0]["publish_result"] == "skipped"
+    assert not (tmp_path / "reports" / "report.json").exists()
 
 
 def test_payload_with_block_reason_is_skipped_and_reported(
