@@ -25,6 +25,7 @@ from mercadolivre_upload.application.publish.internals.validation import (
     MercadoLivreValidationResult,
     classify_mercado_livre_validation_response,
 )
+from mercadolivre_upload.application.user_product_contract import expand_effective_payloads
 from mercadolivre_upload.application.validators.seller_policy import SellerPolicyValidator
 from mercadolivre_upload.contracts.publication import PublicationOutcome, PublicationPhase
 from mercadolivre_upload.domain.fiscal.data import FiscalData
@@ -38,32 +39,6 @@ def _prefix_message(message: str, index: int, total: int) -> str:
     if total <= 1:
         return message
     return f"item[{index}]: {message}"
-
-
-def _expand_publish_payloads(payload: dict[str, Any], upload_mode: str) -> list[dict[str, Any]]:
-    """Expand a normalized envelope into concrete publish payloads."""
-    if upload_mode != "user_products":
-        return [dict(payload)]
-
-    base_payload = {
-        key: value
-        for key, value in payload.items()
-        if key not in {"items", "payload", "_meta", "fiscal", "description", "description_by_sku"}
-    }
-    raw_items = payload.get("payload")
-    if not isinstance(raw_items, list):
-        raw_items = payload.get("items", [])
-    if not isinstance(raw_items, list):
-        return [base_payload]
-
-    expanded: list[dict[str, Any]] = []
-    for item in raw_items:
-        if not isinstance(item, dict):
-            continue
-        merged = dict(base_payload)
-        merged.update(item)
-        expanded.append(merged)
-    return expanded
 
 
 def _is_existing_user_product_selling_condition_payload(payload: dict[str, Any]) -> bool:
@@ -485,7 +460,7 @@ class PublishPayloadUseCase:
             )
 
         # 2. Expand one file into one or more publish payloads.
-        raw_publish_payloads = _expand_publish_payloads(
+        raw_publish_payloads = expand_effective_payloads(
             read_result.payload, read_result.upload_mode
         )
         total_payloads = len(raw_publish_payloads)

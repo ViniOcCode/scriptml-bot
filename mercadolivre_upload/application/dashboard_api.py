@@ -20,6 +20,9 @@ from mercadolivre_upload.application.publish_payload import (
     publish_payload_outcome,
     serialize_publication_outcome,
 )
+from mercadolivre_upload.application.user_product_contract import (
+    expand_effective_payloads,
+)
 from mercadolivre_upload.application.validators.seller_policy import (
     SellerPolicyValidator,
     load_seller_config,
@@ -27,32 +30,6 @@ from mercadolivre_upload.application.validators.seller_policy import (
 from mercadolivre_upload.auth.exceptions import AuthError
 from mercadolivre_upload.auth.publisher_context import build_publisher_auth_context
 from mercadolivre_upload.contracts.publication import PublicationOutcome
-
-
-def _expand_effective_payloads(payload: dict[str, Any], upload_mode: str) -> list[dict[str, Any]]:
-    """Expand dashboard payload envelopes into concrete ML publish/validate payloads."""
-    if upload_mode != "user_products":
-        return [dict(payload)]
-
-    base_payload = {
-        key: value
-        for key, value in payload.items()
-        if key not in {"items", "payload", "_meta", "fiscal", "description", "description_by_sku"}
-    }
-    raw_items = payload.get("payload")
-    if not isinstance(raw_items, list):
-        raw_items = payload.get("items", [])
-    if not isinstance(raw_items, list):
-        return [base_payload]
-
-    expanded: list[dict[str, Any]] = []
-    for item in raw_items:
-        if not isinstance(item, dict):
-            continue
-        merged = dict(base_payload)
-        merged.update(item)
-        expanded.append(merged)
-    return expanded
 
 
 def _prefix_item_message(message: str, index: int, total: int) -> str:
@@ -125,7 +102,7 @@ def prepare_effective_payload_file(
     payloads: list[dict[str, Any]] = []
     warnings: list[str] = []
     errors: list[str] = []
-    raw_payloads = _expand_effective_payloads(read_result.payload, read_result.upload_mode)
+    raw_payloads = expand_effective_payloads(read_result.payload, read_result.upload_mode)
     total = len(raw_payloads)
     for index, candidate in enumerate(raw_payloads, start=1):
         payload = policy.apply_overrides(candidate)
