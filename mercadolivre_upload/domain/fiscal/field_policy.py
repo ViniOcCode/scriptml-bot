@@ -83,6 +83,20 @@ def is_fiscal_field_required(field_name: str) -> bool:
     return field_name in load_required_fiscal_fields()
 
 
+def taxpayer_type_for_document(document_type: str | None) -> str | None:
+    """Resolve the allowed fiscal owner type for an authenticated document."""
+    normalized = str(document_type or "").strip().upper()
+    if not normalized:
+        return None
+    config = _load_fiscal_config()
+    policy = config.get("taxpayer_policy", {})
+    mappings = policy.get("document_types", {}) if isinstance(policy, dict) else {}
+    if not isinstance(mappings, dict):
+        return None
+    value = mappings.get(normalized)
+    return str(value).strip().lower() if isinstance(value, str) and value.strip() else None
+
+
 def normalize_fiscal_cost(value: Any) -> float | None:
     """Normalize fiscal cost for validation and API boundary.
 

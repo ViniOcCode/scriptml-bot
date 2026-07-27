@@ -180,6 +180,18 @@ def test_submit_workflow_fails_fast_for_invalid_origin_type():
     api_client.check_fiscal_data_exists.assert_not_called()
 
 
+def test_submit_workflow_blocks_taxpayer_type_mismatch_before_remote_calls():
+    api_client = MagicMock()
+    service = FiscalService(api_client=api_client, expected_tax_payer_type="individual")
+
+    result = service.submit_fiscal_data_workflow("MLB123", _build_valid_fiscal_data())
+
+    assert result.success is False
+    assert result.status == FiscalSubmissionStatus.SKIPPED
+    assert "authenticated taxpayer document" in (result.error_message or "")
+    api_client.check_fiscal_data_exists.assert_not_called()
+
+
 def test_submit_workflow_checks_fiscal_existence_only_once():
     api_client = MagicMock()
     api_client.check_fiscal_data_exists.return_value = (False, None)

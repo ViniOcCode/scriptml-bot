@@ -187,6 +187,14 @@ fiscal_defaults:
   # Default tax payer type - "individual" or "company"
   tax_payer_type: "company"
 
+# Bind the fiscal payload owner type to the document identity confirmed during
+# OAuth. The publisher reads this map dynamically; unsupported document types
+# fail closed instead of inheriting the default above.
+taxpayer_policy:
+  document_types:
+    CNPJ: "company"
+    CPF: "individual"
+
 
 # -----------------------------------------------------------------------------
 # ORIGIN CODE REFERENCE

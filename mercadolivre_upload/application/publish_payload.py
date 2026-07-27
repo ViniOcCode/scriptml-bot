@@ -22,6 +22,7 @@ from mercadolivre_upload.application.validators.seller_policy import (
 )
 from mercadolivre_upload.auth.publisher_context import build_publisher_auth_context
 from mercadolivre_upload.contracts.publication import PublicationOutcome, PublicationPhase
+from mercadolivre_upload.domain.fiscal.field_policy import taxpayer_type_for_document
 from mercadolivre_upload.domain.fiscal.service import FiscalService
 
 
@@ -52,7 +53,13 @@ def _build_use_case(
     )
     auth_manager = auth_context.token_manager
     api_client = MLApiClient(auth_manager)
-    fiscal_service = FiscalService(api_client)
+    expected_tax_payer_type = taxpayer_type_for_document(expected_document_type)
+    if expected_document_type and expected_tax_payer_type is None:
+        raise ValueError("Authenticated taxpayer document type has no fiscal policy mapping")
+    fiscal_service = FiscalService(
+        api_client,
+        expected_tax_payer_type=expected_tax_payer_type,
+    )
     policy = SellerPolicyValidator(seller_config)
     return PublishPayloadUseCase(
         reader=payload_reader,

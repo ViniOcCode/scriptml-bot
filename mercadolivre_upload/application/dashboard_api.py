@@ -35,6 +35,7 @@ from mercadolivre_upload.application.validators.seller_policy import (
 from mercadolivre_upload.auth.exceptions import AuthError
 from mercadolivre_upload.auth.publisher_context import build_publisher_auth_context
 from mercadolivre_upload.contracts.publication import PublicationOutcome
+from mercadolivre_upload.domain.fiscal.field_policy import taxpayer_type_for_document
 from mercadolivre_upload.domain.fiscal.service import (
     FiscalService,
     FiscalSubmissionStatus,
@@ -357,7 +358,11 @@ def complete_existing_item_fiscal_file(
         if len(selected_rows) != 1:
             raise ValueError("Fiscal payload does not uniquely match the remote item SKU.")
 
-    service = FiscalService(client)
+    document_type = identity["document_type"]
+    expected_tax_payer_type = taxpayer_type_for_document(document_type)
+    if expected_tax_payer_type is None:
+        raise AuthError("Authenticated taxpayer document has no fiscal policy mapping")
+    service = FiscalService(client, expected_tax_payer_type=expected_tax_payer_type)
     reports: list[dict[str, Any]] = []
     for row in selected_rows:
         fiscal_sku = str(row.get("sku") or "").strip()

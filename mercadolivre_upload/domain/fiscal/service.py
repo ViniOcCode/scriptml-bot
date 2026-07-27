@@ -116,6 +116,7 @@ class FiscalService:
         retry_config: RetryConfig | None = None,
         can_invoice_wait_delay: float = 60.0,
         can_invoice_max_retries: int = 5,
+        expected_tax_payer_type: str | None = None,
     ):
         """Initialize fiscal service.
 
@@ -124,11 +125,17 @@ class FiscalService:
             retry_config: Optional retry configuration for API calls
             can_invoice_wait_delay: Delay in seconds between can_invoice retries (default: 60s)
             can_invoice_max_retries: Maximum number of retries for can_invoice check (default: 5)
+            expected_tax_payer_type: Fiscal owner type bound to the authenticated document
         """
         self.api_client = api_client
         self.retry_config = retry_config or RetryConfig()
         self.can_invoice_wait_delay = can_invoice_wait_delay
         self.can_invoice_max_retries = can_invoice_max_retries
+        self.expected_tax_payer_type = (
+            expected_tax_payer_type.strip().lower()
+            if isinstance(expected_tax_payer_type, str)
+            else None
+        )
 
     def _execute_with_retry(
         self, operation: Callable[[], Any], operation_name: str, sku: str, item_id: str
@@ -237,6 +244,12 @@ class FiscalService:
 
         missing_fields = fiscal_data.get_missing_fields()
         validation_errors = fiscal_data.get_validation_errors()
+        if self.expected_tax_payer_type is not None and (
+            fiscal_data.tax_payer_type.strip().lower() != self.expected_tax_payer_type
+        ):
+            validation_errors.append(
+                "tax_payer_type does not match the authenticated taxpayer document"
+            )
         if missing_fields or validation_errors:
             error_msg = (
                 f"Invalid fiscal data for {item_id}: "
