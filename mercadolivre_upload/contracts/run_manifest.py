@@ -79,6 +79,7 @@ class LegacyRunManifestV1(BaseModel):
 
     @model_validator(mode="after")
     def dev_profile_is_never_publishable(self) -> LegacyRunManifestV1:
+        """Reject legacy development manifests that claim publishable payloads."""
         if self.execution_profile == "dev" and any(
             payload.publishable
             for candidate in self.publication_candidates

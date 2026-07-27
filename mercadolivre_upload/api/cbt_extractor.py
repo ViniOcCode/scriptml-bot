@@ -97,7 +97,7 @@ class CbtIdExtractor:
 
         # No CBT ID found
         logger.warning(
-            f"Could not extract CBT ID from response. " f"Available fields: {list(result.keys())}"
+            f"Could not extract CBT ID from response. Available fields: {list(result.keys())}"
         )
         return None
 

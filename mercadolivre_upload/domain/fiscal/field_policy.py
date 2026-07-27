@@ -10,9 +10,7 @@ import yaml
 
 from mercadolivre_upload.shared.utils.config_loader import FISCAL_CONFIG_PATH, load_yaml_config
 
-_APP_FISCAL_CONFIG_FALLBACK_PATH = (
-    Path(__file__).resolve().parents[3] / "config/fiscal_config.yaml"
-)
+_APP_FISCAL_CONFIG_FALLBACK_PATH = Path(__file__).resolve().parents[3] / "config/fiscal_config.yaml"
 
 
 def _load_fiscal_config() -> dict[str, Any]:
@@ -42,13 +40,12 @@ def _parse_float(value: Any) -> float | None:
         return None
     return None if math.isnan(numeric) else numeric
 
+
 # Top-level fiscal model fields always required for publisher validation.
 _ROOT_REQUIRED_FISCAL_FIELDS: frozenset[str] = frozenset({"sku", "title", "type"})
 
 # Tax fields required for submission (also declared in fiscal_fields with required: true).
-_ROOT_REQUIRED_TAX_FIELDS: frozenset[str] = frozenset(
-    {"ncm", "origin_type", "origin_detail"}
-)
+_ROOT_REQUIRED_TAX_FIELDS: frozenset[str] = frozenset({"ncm", "origin_type", "origin_detail"})
 
 
 def load_optional_fiscal_fields() -> frozenset[str]:

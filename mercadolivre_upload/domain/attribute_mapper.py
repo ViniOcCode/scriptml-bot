@@ -243,12 +243,11 @@ class AttributeMapper:
             attr_def, score = self.find_best_match(col, ml_attributes)
 
             if attr_def and score >= self.threshold:
-                logger.info(f"Mapped '{col}' -> '{attr_def['name']}' " f"(score: {score:.2f})")
+                logger.info(f"Mapped '{col}' -> '{attr_def['name']}' (score: {score:.2f})")
                 mapping[col] = attr_def
             else:
                 logger.debug(
-                    f"No match for '{col}' (best score: {score:.2f}, "
-                    f"threshold: {self.threshold})"
+                    f"No match for '{col}' (best score: {score:.2f}, threshold: {self.threshold})"
                 )
 
         return mapping

@@ -221,7 +221,7 @@ class ImageValidator(ExtendedValidator):
                 ValidationResult(
                     field="pictures",
                     message=(
-                        "Produto não pode ter mais que 12 imagens" f" (encontrado: {len(pictures)})"
+                        f"Produto não pode ter mais que 12 imagens (encontrado: {len(pictures)})"
                     ),
                     severity=ValidationSeverity.ERROR,
                 )

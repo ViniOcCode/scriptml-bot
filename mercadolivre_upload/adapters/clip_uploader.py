@@ -138,9 +138,7 @@ class ClipUploader:
             if clip_uuid:
                 result.clip_uuid = clip_uuid
                 result.status = api_result.get("status", "accepted")
-                logger.info(
-                    f"Clip uploaded for {item_id}: {clip_uuid} " f"(status: {result.status})"
-                )
+                logger.info(f"Clip uploaded for {item_id}: {clip_uuid} (status: {result.status})")
             else:
                 result.status = "error"
                 result.error = "API response missing clip_uuid"

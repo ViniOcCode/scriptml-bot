@@ -336,7 +336,7 @@ class ShippingResolver:
                                     self._merge_runtime_policy(cached_policy, runtime_policy)
                                 )
                     logger.info(
-                        "Available shipping modes from shipping_preferences: " f"{available_modes}"
+                        f"Available shipping modes from shipping_preferences: {available_modes}"
                     )
                 except Exception as e:
                     logger.warning(f"Could not fetch shipping_preferences for user {user_id}: {e}")

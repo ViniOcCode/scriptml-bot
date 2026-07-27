@@ -261,8 +261,7 @@ def run_schema_contract_preflight(
             and variation_count > max_variations_allowed
         ):
             violations.append(
-                "Variations count "
-                f"{variation_count} exceeds category max {max_variations_allowed}"
+                f"Variations count {variation_count} exceeds category max {max_variations_allowed}"
             )
 
     violations.extend(identifier_violations)

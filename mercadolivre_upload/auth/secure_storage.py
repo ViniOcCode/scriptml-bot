@@ -79,9 +79,7 @@ class SecureTokenStorage:
             try:
                 decoded = base64.urlsafe_b64decode(raw)
             except Exception as exc:  # noqa: BLE001
-                raise SecureStorageError(
-                    f"Invalid encryption key format at {key_path}"
-                ) from exc
+                raise SecureStorageError(f"Invalid encryption key format at {key_path}") from exc
             if len(decoded) != 32:
                 raise SecureStorageError(f"Invalid encryption key length at {key_path}")
             return raw

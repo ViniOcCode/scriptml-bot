@@ -141,8 +141,7 @@ class ValidationFeedback:
                 penalty = min(50, problematic[attr.id] * 10)
                 adjusted.score -= penalty
                 logger.debug(
-                    f"Feedback penalty for {attr.id}: -{penalty} "
-                    f"({problematic[attr.id]} errors)"
+                    f"Feedback penalty for {attr.id}: -{penalty} ({problematic[attr.id]} errors)"
                 )
 
             # Ensure score doesn't go below 0

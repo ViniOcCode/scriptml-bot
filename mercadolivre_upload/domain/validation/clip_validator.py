@@ -134,9 +134,9 @@ class ClipValidator:
         if props.duration is None:
             return []
         if props.duration < MIN_DURATION_SECONDS:
-            return [f"Video too short: {props.duration:.1f}s " f"(min: {MIN_DURATION_SECONDS}s)"]
+            return [f"Video too short: {props.duration:.1f}s (min: {MIN_DURATION_SECONDS}s)"]
         if props.duration > MAX_DURATION_SECONDS:
-            return [f"Video too long: {props.duration:.1f}s " f"(max: {MAX_DURATION_SECONDS}s)"]
+            return [f"Video too long: {props.duration:.1f}s (max: {MAX_DURATION_SECONDS}s)"]
         return []
 
     def _validate_resolution(self, props: VideoProperties) -> list[str]:
@@ -145,8 +145,7 @@ class ClipValidator:
             return []
         if props.width < MIN_WIDTH or props.height < MIN_HEIGHT:
             return [
-                f"Resolution too low: {props.width}x{props.height} "
-                f"(min: {MIN_WIDTH}x{MIN_HEIGHT})"
+                f"Resolution too low: {props.width}x{props.height} (min: {MIN_WIDTH}x{MIN_HEIGHT})"
             ]
         return []
 

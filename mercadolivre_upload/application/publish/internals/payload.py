@@ -117,7 +117,7 @@ def resolve_listing_type_id(
                 return candidate
 
         logger.warning(
-            "No preferred listing_type_id is available for category %s. " "Using first allowed: %s",
+            "No preferred listing_type_id is available for category %s. Using first allowed: %s",
             category_id,
             available_listing_types[0],
         )
@@ -232,7 +232,7 @@ def resolve_sale_terms(
             existing_ids.add(required_sale_term_id)
         else:
             logger.warning(
-                "Required sale term %s is missing for category %s and " "no default is configured.",
+                "Required sale term %s is missing for category %s and no default is configured.",
                 required_sale_term_id,
                 category_id,
             )

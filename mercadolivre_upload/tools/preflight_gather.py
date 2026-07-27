@@ -850,7 +850,7 @@ def resolve_category(
         )
         if not found:
             raise ValueError(
-                "Could not resolve category from input with predictor: " f"'{category_input}'."
+                f"Could not resolve category from input with predictor: '{category_input}'."
             )
         category_id = found
     else:
@@ -1079,7 +1079,7 @@ def run_preflight(
         "blocking_issues": blocking_issues,
         "warnings": warnings,
         "recommended_next_command": (
-            "uv run ml-upload validate " f"{excel_path} -i anuncios/ -c '{category_input}'"
+            f"uv run ml-upload validate {excel_path} -i anuncios/ -c '{category_input}'"
             if status == "PASS"
             else "Resolve blocking issues and rerun preflight before validate/upload."
         ),

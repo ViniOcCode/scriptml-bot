@@ -695,7 +695,9 @@ class PublishPayloadUseCase:
                     side_effect_state=(
                         "partial"
                         if has_confirmed_side_effects
-                        else "unknown" if ambiguous else "none"
+                        else "unknown"
+                        if ambiguous
+                        else "none"
                     ),
                     item_id=first_item_id,
                     item_ids=created_item_ids,
@@ -1092,9 +1094,7 @@ class PublishPayloadUseCase:
                                     fiscal_result, "side_effect_state", "confirmed"
                                 ),
                                 "reconciliation_required": result_reconciliation,
-                                "invoice_ready": getattr(
-                                    fiscal_result, "invoice_ready", None
-                                ),
+                                "invoice_ready": getattr(fiscal_result, "invoice_ready", None),
                             }
                         )
                         if not fiscal_result.success or result_reconciliation:

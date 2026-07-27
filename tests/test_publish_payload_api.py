@@ -1141,7 +1141,15 @@ def test_publish_payload_cli_delegates_to_public_api(tmp_path: Path) -> None:
         side_effect=[mock_runtime_module, mock_api_module],
     ):
         result = CliRunner().invoke(
-            app, ["publish-payload", str(payload_path), "--config", str(seller_config)]
+            app,
+            [
+                "publish-payload",
+                str(payload_path),
+                "--workspace",
+                str(tmp_path / "workspace"),
+                "--config",
+                str(seller_config),
+            ],
         )
 
     assert result.exit_code == 0

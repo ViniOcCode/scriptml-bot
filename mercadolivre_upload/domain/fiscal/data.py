@@ -348,8 +348,7 @@ class FiscalData:
         if self.origin_type and self.origin_type.lower() not in _CANONICAL_ORIGIN_TYPES:
             accepted = ", ".join(sorted(_CANONICAL_ORIGIN_TYPES))
             errors.append(
-                "origin_type inválido: "
-                f"'{self.origin_type}'. Valores aceitos: {accepted}."
+                f"origin_type inválido: '{self.origin_type}'. Valores aceitos: {accepted}."
             )
         if self.origin_detail and not re.fullmatch(r"[0-8]", str(self.origin_detail)):
             errors.append(
@@ -404,9 +403,12 @@ class FiscalData:
             "cost": self.cost is not None and self.cost > 0 and not math.isnan(self.cost),
         }
         for field_name in sorted(required):
-            if field_name in field_presence and not field_presence[field_name]:
-                missing.append(field_name)
-            elif field_name not in field_presence and is_fiscal_field_required(field_name):
+            if (
+                field_name in field_presence
+                and not field_presence[field_name]
+                or field_name not in field_presence
+                and is_fiscal_field_required(field_name)
+            ):
                 missing.append(field_name)
         return missing
 

@@ -32,8 +32,7 @@ def wait_for_fiscal_data_ready(
                 return True, response, attempt
 
             logger_instance.info(
-                f"Fiscal data already exists for SKU {sku} (item {item_id}), "
-                f"skipping registration"
+                f"Fiscal data already exists for SKU {sku} (item {item_id}), skipping registration"
             )
             return True, response, attempt
 
@@ -138,7 +137,7 @@ def wait_for_invoice_readiness(
             if is_ready:
                 if attempt > 0:
                     logger_instance.info(
-                        f"Invoice readiness confirmed for {item_id} " f"after {attempt} wait cycles"
+                        f"Invoice readiness confirmed for {item_id} after {attempt} wait cycles"
                     )
                 return True, response, total_retry_count + attempt
 

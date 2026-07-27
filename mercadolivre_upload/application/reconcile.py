@@ -653,10 +653,7 @@ def _manifest_publications(
 
         manifest_execution_profile = (
             "paid"
-            if (
-                manifest.trust_profile == "production"
-                and manifest.run_mode == "autonomous"
-            )
+            if (manifest.trust_profile == "production" and manifest.run_mode == "autonomous")
             else "dev"
         )
         if manifest_execution_profile != execution_profile:

@@ -142,9 +142,7 @@ class TokenManager:
         """
         if self._tokens is None:
             if self._oauth_credential is not None:
-                self._tokens = self._persistable_tokens(
-                    dict(self._oauth_credential.payload)
-                )
+                self._tokens = self._persistable_tokens(dict(self._oauth_credential.payload))
             elif self._secure_storage is not None:
                 try:
                     loaded = self._secure_storage.load_tokens()

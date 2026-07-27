@@ -305,9 +305,7 @@ def publish_manifest(
         and manifest.publication_ready
         and not manifest.blocking_gaps
     ):
-        err_console.print(
-            "[red]Erro:[/red] o manifesto não passou os gates comuns de publicação"
-        )
+        err_console.print("[red]Erro:[/red] o manifesto não passou os gates comuns de publicação")
         raise typer.Exit(1)
     all_payload_variants = [
         payload for c in manifest.publication_candidates for payload in c.payloads

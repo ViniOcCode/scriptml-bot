@@ -1,180 +1,77 @@
-# Mercado Livre Bulk Upload (`ml-upload`)
+# Mercado Livre publisher (`ml-upload`)
 
-CLI application for validating and publishing Mercado Livre listings from Excel spreadsheets, with category/attribute resolution, image handling, and report generation.
+`scriptml-bot` validates and publishes immutable builder payloads and
+`run_manifest.json` artifacts. The dashboard and worker are the supported
+production control plane.
 
-## What this app does
+## Production contract
 
-- Reads `.xlsx` and `.xls` spreadsheets and normalizes common Portuguese/English headers.
-- Resolves categories and required metadata before publish.
-- Uploads product images (and optional clips in the publish flow).
-- Supports validation-only runs (`validate`) and publish runs (`upload`).
-- Writes machine-readable reports in `cache/reports/` for retry and auditing.
+- Operational publisher configuration comes from the versioned
+  `publisher_config` document in the dashboard SQLite database.
+- The worker may pass an immutable `MLBOT_PUBLISHER_CONFIG_SNAPSHOT` for one
+  child process.
+- Secrets are materialized by the Bitwarden init container and consumed only
+  through the catalogued `*_FILE` variables.
+- OAuth access and refresh tokens are encrypted in SQLite by
+  `OAuthCredentialRepository` using `OAUTH_TOKEN_ENCRYPTION_KEY`.
+- Real publication is bound to the active integration profile, authenticated
+  seller and taxpayer identity.
+- New listings are created paused. Ambiguous remote effects return `unknown`
+  and require reconciliation.
 
-## Requirements
+OpenBao/Vault, plaintext tokens, `.ml_token.enc`, `tokens.json` and operational
+YAML are not production fallbacks.
 
-- Python `>=3.13`
-- [uv](https://docs.astral.sh/uv/)
+## Supported CLI
 
-## Installation
-
-```bash
-# Development install (same dependency set used by CI)
-uv pip install -e ".[dev]"
-
-# Runtime-only alternative
-uv pip install -r requirements.txt
-```
-
-Entrypoint: `ml-upload` -> `mercadolivre_upload.main:main`.
-
-## Quick workflow (recommended)
-
-### 1) Configure authentication
-
-Dashboard-driven publisher runs use OpenBao/Vault only for Mercado Livre secrets.
-
-- `auth.ml_app_id` stays in `config/publisher.yaml` because it is not secret.
-- `client_secret` must be stored at `profiles/<profile>/mercadolivre/client_secret`.
-- OAuth tokens must be stored at `profiles/<profile>/mercadolivre/tokens`.
-- Set `MLBOT_SECRET_BACKEND=openbao` and the Vault connection envs before running dashboard workers or publisher commands in dashboard mode.
-- If Vault is offline, sealed, missing a token, or missing Mercado Livre secrets, publish/reconcile/sync fails explicitly.
-
-Legacy encrypted token files still exist only for standalone CLI migration/testing when Vault mode is not enabled. Do not use them for dashboard runtime.
-
-#### Access/refresh token lifecycle in Vault mode
-
-- `get_access_token()` reads `access_token`.
-- If token is expired and `auto_refresh=True`, the app uses `refresh_token` to request new
-  credentials and persists updated `access_token`/`refresh_token`/`expires_at` back to the same Vault path.
-- If `refresh_token` is missing, refresh fails with an explicit auth error.
-
-### 2) Prepare input files
-
-- Spreadsheet: `.xlsx` or `.xls`.
-- Images: the uploader searches `<images>/<SKU>/` first; if the SKU folder is missing, it falls back to the base images folder.
-
-Example layout:
-
-```text
-anuncios/
-├── 12345/
-│   ├── foto1.jpg
-│   └── foto2.png
-└── 67890/
-    └── imagem-principal.jpg
-```
-
-### 3) Validate first
-
-```bash
-uv run ml-upload validate anuncios/2.xlsx -i anuncios/ -c "quadros decorativos"
-```
-
-### 4) Publish
-
-```bash
-uv run ml-upload upload anuncios/2.xlsx -i anuncios/ -c "quadros decorativos" --batch-size 5
-```
-
-### 5) Check generated reports
-
-Default report directory: `cache/reports/`
-
-- Validation run: `validation-summary-<timestamp>.json`
-- Upload run: `upload-summary-<timestamp>.json`
-- Upload failures (only when failures happen): `failed-items-<timestamp>.xlsx`
-
-## CLI reference
+The packaged entrypoint is:
 
 ```bash
 ml-upload --help
 ```
 
-| Command | Purpose |
-| --- | --- |
-| `ml-upload upload` | Publish products |
-| `ml-upload validate` | Validate products without publishing |
-| `ml-upload auth` | Set/refresh token and inspect auth status |
-| `ml-upload reconcile` | Compare generated builder payloads with live ML items |
-| `ml-upload cache clear` | Clear attribute cache |
-| `ml-upload cache status` | Show cache status |
-| `ml-upload doctor` | Run environment health checks |
+Supported commands are:
 
-### Common options
+- `publish-payload`
+- `publish-manifest`
+- `reconcile`
 
-- `upload` and `validate`:
-  - `EXCEL` positional argument **or** `--excel/-e`
-  - `--images/-i`
-  - `--category/-c`
-  - `--batch-size` (default: `5`)
-  - `--report-dir` (default: `cache/reports`)
-  - `--detailed`
-- `upload` also supports `--verbose`.
+All require an explicit `--workspace`. Production also requires
+`MLBOT_SETTINGS_DB`, a complete secret-file snapshot and the active encrypted
+OAuth credential. Spreadsheet `upload`/`validate` and local `auth` commands are
+intentionally absent because they bypass the current publication chain.
 
-> `--category/-c` must be passed as an option (not as a positional argument).
-
-## Configuration
-
-Runtime YAML configuration is merged from:
-
-- `config/standard_fields.yaml`
-- `config/shipping.yaml`
-- `config/attribute_rules.yaml`
-
-Config ownership map:
-
-- `standard_fields.yaml`: base field mapping/defaults used by upload flow and `SmartAttributeMapper`.
-- `shipping.yaml`: shipping policy toggles consumed by `ShippingResolver`.
-- `attribute_rules.yaml`: attribute classification/sanitization/scoring rules.
-- `fiscal_config.yaml`: fiscal defaults and value mappings consumed by fiscal domain.
-
-Key behavior controlled there includes:
-
-- explicit/automatic field mapping rules
-- shipping and listing behavior
-- warning gates and rollout routing
-- defaults for sale terms, required core fields, and attribute handling
-
-## Architecture snapshot
-
-- CLI entrypoint: `ml-upload` -> `mercadolivre_upload.main:main` -> Typer app in `mercadolivre_upload/cli/app.py`.
-- Composition root for upload/validate wiring: `mercadolivre_upload/cli/commands/upload.py`.
-- Publish orchestration: `PublishProductUseCase` (`mercadolivre_upload/application/publish_product.py`).
-- Protocol ports (clean boundaries): `mercadolivre_upload/application/ports.py`.
-- Resilient HTTP client (retry/backoff/rate limit): `mercadolivre_upload/infrastructure/http.py`.
-- Caches:
-  - category attributes under `cache/categories/`
-  - category predictions under `cache/categories/predictions/`
-
-## Development commands
+Example:
 
 ```bash
-# Tests
-uv run pytest -q
-uv run pytest tests/test_cli.py -q
-
-# Lint, format, typing, security
-uv run ruff check .
-uv run black --check --diff .
-uv run mypy mercadolivre_upload/
-uv run bandit -q -c pyproject.toml -r mercadolivre_upload
-
-# Hooks
-uv run pre-commit run --all-files
+ml-upload publish-manifest workspace/runs/RUN_ID/run_manifest.json \
+  --workspace workspace \
+  --publish-inactive
 ```
 
-## Troubleshooting
+The dashboard remains the preferred interface because it owns candidate,
+snapshot, attempt, identity and audit relationships.
 
-- **"Arquivo nao encontrado"**: verify spreadsheet path and extension (`.xlsx`/`.xls`).
-- **No images uploaded for SKU**: confirm image names/extensions and folder structure under `--images`.
-- **Auth errors**: verify token file path, encryption key/keyring setup, and refresh token validity.
-- **Unexpected attribute validation failures**: inspect the generated JSON summary report and adjust mapping rules in `config/standard_fields.yaml` / `config/attribute_rules.yaml`.
-- **Fiscal submitted but invoice still pending**: inspect `upload-summary-*.json` -> `fiscal` section.
-  - `verified`: item is invoicing-ready (`/can_invoice` returned `status=true` in workflow window).
-  - `pending_verification`: fiscal link exists but invoice readiness did not turn true within retries.
-  - `failed`: fiscal registration/link/readiness failed with blocking error.
-  - `skipped_invalid`: payload failed local fiscal validation before API submission.
-- **Intermittent fiscal API 400**: verify fiscal fields in spreadsheet and conditional rules:
-  - FCI required for `origin_detail` in `3, 5, 8`
-  - `med_anvisa_code=ISENTO` requires `med_exemption_reason`
-  - `csosn` and `tax_rule_id` cannot be sent together
+## Development
+
+From this repository inside the `mlbot` workspace:
+
+```bash
+uv sync --frozen --extra dev
+uv run pytest -q tests
+uv run ruff check mercadolivre_upload
+```
+
+Development and tests may pass an explicit YAML fixture with `--config`; the
+runtime loader accepts it only when `APP_ENV` is `development` or `test`.
+Production never falls back to that file.
+
+## Security invariants
+
+- Do not commit secrets, SQLite databases, generated artifacts or customer
+  payloads.
+- Do not retry a mutation after an ambiguous transport outcome.
+- Do not publish across profiles or sellers.
+- Do not accept payload or report paths outside the configured workspace and
+  app-data roots.
+- Do not turn reconciliation-required outcomes into success.

@@ -359,9 +359,7 @@ class FiscalService:
                 item_id=item_id,
                 sku=sku,
                 status=(
-                    FiscalSubmissionStatus.UNKNOWN
-                    if ambiguous
-                    else FiscalSubmissionStatus.FAILED
+                    FiscalSubmissionStatus.UNKNOWN if ambiguous else FiscalSubmissionStatus.FAILED
                 ),
                 fiscal_data=fiscal_data,
                 response=error_detail,

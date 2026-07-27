@@ -39,20 +39,14 @@ def expand_effective_payloads(
     for index, raw_item in enumerate(raw_items, start=1):
         if not isinstance(raw_item, dict):
             raise ValueError(f"user_products item[{index}] must be an object")
-        item = {
-            key: value
-            for key, value in raw_item.items()
-            if key not in _LOCAL_ENVELOPE_FIELDS
-        }
+        item = {key: value for key, value in raw_item.items() if key not in _LOCAL_ENVELOPE_FIELDS}
         item_family_name = item.get("family_name")
         if (
             inherited_family_name is not None
             and item_family_name is not None
             and item_family_name != inherited_family_name
         ):
-            raise ValueError(
-                f"user_products item[{index}] family_name conflicts with its envelope"
-            )
+            raise ValueError(f"user_products item[{index}] family_name conflicts with its envelope")
         merged = dict(base_payload)
         merged.update(item)
         expanded.append(merged)
