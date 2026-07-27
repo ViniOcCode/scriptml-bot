@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from mercadolivre_upload.application.publisher_settings import load_publisher_settings
 from mercadolivre_upload.application.validators.seller_policy import load_seller_config
 from mercadolivre_upload.auth.exceptions import AuthError
+from mercadolivre_upload.shared.publisher_settings import load_publisher_settings
 
 
 def test_publisher_code_does_not_reference_builder_config_files() -> None:

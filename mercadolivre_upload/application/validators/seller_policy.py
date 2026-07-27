@@ -13,7 +13,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from mercadolivre_upload.application.publisher_settings import load_publisher_settings
+from mercadolivre_upload.shared.publisher_settings import load_publisher_settings
 
 logger = logging.getLogger(__name__)
 

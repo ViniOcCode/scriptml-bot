@@ -53,8 +53,13 @@ def _build_use_case(
     )
     auth_manager = auth_context.token_manager
     api_client = MLApiClient(auth_manager)
-    expected_tax_payer_type = taxpayer_type_for_document(expected_document_type)
-    if expected_document_type and expected_tax_payer_type is None:
+    authenticated_document_type = (
+        auth_context.expected_document_type
+        if isinstance(auth_context.expected_document_type, str)
+        else expected_document_type
+    )
+    expected_tax_payer_type = taxpayer_type_for_document(authenticated_document_type)
+    if authenticated_document_type and expected_tax_payer_type is None:
         raise ValueError("Authenticated taxpayer document type has no fiscal policy mapping")
     fiscal_service = FiscalService(
         api_client,

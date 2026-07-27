@@ -12,6 +12,9 @@ import pytest
 # Add project root to path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
+workspace_root = project_root.parents[1]
+if (workspace_root / "ml_app_settings_core").is_dir():
+    sys.path.insert(0, str(workspace_root))
 
 
 # ==================== Fixtures de Credenciais Mockadas ====================

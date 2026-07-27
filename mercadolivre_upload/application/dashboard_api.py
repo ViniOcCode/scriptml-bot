@@ -92,10 +92,20 @@ def _build_authenticated_client(
         expected_document_type=expected_document_type,
     )
     client = MLApiClient(auth_context.token_manager)
+    bound_seller_id = (
+        auth_context.expected_seller_id
+        if isinstance(auth_context.expected_seller_id, str)
+        else expected_seller_id
+    )
+    bound_document_type = (
+        auth_context.expected_document_type
+        if isinstance(auth_context.expected_document_type, str)
+        else expected_document_type
+    )
     identity = _authenticated_seller(
         client,
-        expected_seller_id=expected_seller_id,
-        expected_document_type=expected_document_type,
+        expected_seller_id=bound_seller_id,
+        expected_document_type=bound_document_type,
     )
     return client, identity
 

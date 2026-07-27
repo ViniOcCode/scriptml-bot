@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 import requests
 import typer
+from cryptography.fernet import Fernet
+from ml_app_settings_core import OAuthCredentialRepository
 from typer.testing import CliRunner
 
 from mercadolivre_upload.adapters.json_payload_reader import JsonPayloadReader
@@ -30,23 +33,6 @@ from mercadolivre_upload.domain.fiscal.service import (
     FiscalSubmissionResult,
     FiscalSubmissionStatus,
 )
-
-
-class _MemorySecretStore:
-    def __init__(self, values: dict[str, str] | None = None) -> None:
-        self.values = dict(values or {})
-
-    def get_secret(self, path: str) -> str | None:
-        return self.values.get(path)
-
-    def set_secret(self, path: str, value: str) -> None:
-        self.values[path] = value
-
-    def delete_secret(self, path: str) -> None:
-        self.values.pop(path, None)
-
-    def status(self) -> dict[str, object]:
-        return {"backend": "memory", "status": "pronto"}
 
 
 def _publisher_config(tmp_path: Path, *, include_credentials: bool = True) -> Path:
@@ -104,6 +90,83 @@ def _minimal_builder_payload() -> dict[str, object]:
             "traceability": {"publish_item_skus": ["ABC-001"]},
         },
     }
+
+
+def _canonical_oauth_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[Path, str]:
+    database = tmp_path / "settings.sqlite3"
+    with sqlite3.connect(database) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE integration_profiles (
+                id TEXT PRIMARY KEY, slug TEXT NOT NULL, active INTEGER NOT NULL
+            );
+            CREATE TABLE dashboard_settings (
+                key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL
+            );
+            """
+        )
+        connection.execute(
+            "INSERT INTO integration_profiles(id,slug,active) VALUES (?,?,1)",
+            ("profile-default", "default"),
+        )
+        connection.execute(
+            "INSERT INTO dashboard_settings(key,value_json,updated_at) VALUES (?,?,?)",
+            (
+                "ml_oauth_active_identity:profile-default",
+                json.dumps({"seller_id": "seller-expected", "document_type": "CNPJ"}),
+                "now",
+            ),
+        )
+        connection.execute(
+            "INSERT INTO dashboard_settings(key,value_json,updated_at) VALUES (?,?,?)",
+            (
+                "runtime_config:publisher_config",
+                json.dumps(
+                    {
+                        "auth": {"ml_app_id": "app-current"},
+                        "seller": {
+                            "listing": {
+                                "allowed_types": ["gold_special"],
+                                "default_type": "gold_special",
+                            },
+                            "pricing": {"min_price": 1, "max_price": 999999},
+                        },
+                    }
+                ),
+                "now",
+            ),
+        )
+    encryption_key = Fernet.generate_key().decode("ascii")
+    repository = OAuthCredentialRepository(database, encryption_key)
+    repository.initialize_schema()
+    pending = repository.put_pending(
+        flow_id="flow-1",
+        state_hash="state-1",
+        profile_id="profile-default",
+        provider="mercadolivre",
+        external_account_id="seller-expected",
+        credential_kind="tokens",
+        payload={
+            "access_token": "access-from-sqlite",
+            "refresh_token": "refresh-from-sqlite",
+            "expires_at": 9_999_999_999,
+        },
+        expires_at=9_999_999_999,
+    )
+    repository.promote_pending("flow-1", expected_row_version=pending.row_version)
+    client_secret_file = tmp_path / "ml-client-secret"
+    client_secret_file.write_text("client-secret-from-snapshot", encoding="utf-8")
+    encryption_key_file = tmp_path / "oauth-encryption-key"
+    encryption_key_file.write_text(encryption_key, encoding="utf-8")
+    monkeypatch.setenv("MLBOT_SETTINGS_DB", str(database))
+    monkeypatch.setenv("ML_CLIENT_SECRET_FILE", str(client_secret_file))
+    monkeypatch.setenv("OAUTH_TOKEN_ENCRYPTION_KEY_FILE", str(encryption_key_file))
+    monkeypatch.delenv("ML_CLIENT_SECRET", raising=False)
+    monkeypatch.delenv("OAUTH_TOKEN_ENCRYPTION_KEY", raising=False)
+    return database, encryption_key
 
 
 def test_invalid_payload_file_returns_clear_error(tmp_path: Path) -> None:
@@ -457,23 +520,10 @@ def test_publish_payload_uses_explicit_config_from_unrelated_cwd(
     unrelated = tmp_path / "unrelated"
     unrelated.mkdir()
     monkeypatch.chdir(unrelated)
-    monkeypatch.delenv("ML_PIPE_MERCADO_LIVRE_CLIENT_ID", raising=False)
-    monkeypatch.delenv("ML_PIPE_MERCADO_LIVRE_CLIENT_SECRET", raising=False)
-    monkeypatch.setenv("MLBOT_SECRET_BACKEND", "openbao")
     monkeypatch.setattr(
-        "mercadolivre_upload.auth.publisher_context.build_secret_store_from_env",
-        lambda: _MemorySecretStore(
-            {
-                "profiles/default/mercadolivre/client_secret": "secret-from-vault",
-                "profiles/default/mercadolivre/tokens": json.dumps(
-                    {
-                        "access_token": "access-from-vault",
-                        "refresh_token": "refresh-from-vault",
-                        "expires_at": 9_999_999_999,
-                    }
-                ),
-            }
-        ),
+        publish_payload_api,
+        "build_publisher_auth_context",
+        MagicMock(return_value=MagicMock(token_manager=MagicMock())),
     )
 
     result = publish_payload_api.publish_payload_file(
@@ -486,27 +536,23 @@ def test_publish_payload_uses_explicit_config_from_unrelated_cwd(
     assert result["status"] == "skipped"
 
 
-def test_missing_client_credentials_names_resolved_config_and_vault_paths(
+def test_missing_runtime_secret_snapshot_fails_closed(
     tmp_path: Path, monkeypatch
 ) -> None:
     config = _publisher_config(tmp_path)
-    store = _MemorySecretStore()
-    monkeypatch.setenv("MLBOT_SECRET_BACKEND", "openbao")
-    monkeypatch.setattr(
-        "mercadolivre_upload.auth.publisher_context.build_secret_store_from_env",
-        lambda: store,
-    )
+    _canonical_oauth_runtime(tmp_path, monkeypatch)
+    monkeypatch.delenv("ML_CLIENT_SECRET_FILE")
 
     with pytest.raises(AuthError) as exc:
         build_publisher_auth_context(
             settings_file=config,
             workspace_root=tmp_path / "workspace",
             strict=True,
+            expected_seller_id="seller-expected",
+            expected_document_type="CNPJ",
         )
 
-    message = str(exc.value)
-    assert "client_secret" in message
-    assert "profiles/default/mercadolivre/client_secret" in message
+    assert "runtime secret snapshot" in str(exc.value)
 
 
 def test_missing_workspace_root_hard_fails(tmp_path: Path) -> None:
@@ -517,38 +563,28 @@ def test_missing_workspace_root_hard_fails(tmp_path: Path) -> None:
         resolve_workspace_root(workspace=None, seller_config=config)
 
 
-def test_publication_auth_ignores_fallback_token_sources(tmp_path: Path, monkeypatch) -> None:
+def test_publication_auth_uses_encrypted_sqlite_and_secret_files(
+    tmp_path: Path, monkeypatch
+) -> None:
     config = _publisher_config(tmp_path)
     workspace = tmp_path / "workspace"
-    store = _MemorySecretStore(
-        {
-            "profiles/default/mercadolivre/client_secret": "secret-from-vault",
-            "profiles/default/mercadolivre/tokens": json.dumps(
-                {
-                    "access_token": "access-from-vault",
-                    "refresh_token": "refresh-from-vault",
-                    "expires_at": 9_999_999_999,
-                }
-            ),
-        }
-    )
-    monkeypatch.setenv("MLBOT_SECRET_BACKEND", "openbao")
+    _canonical_oauth_runtime(tmp_path, monkeypatch)
     monkeypatch.setenv("ML_PIPE_MERCADO_LIVRE_TOKEN_PATH", str(tmp_path / "legacy_tokens.json"))
-    monkeypatch.setattr(
-        "mercadolivre_upload.auth.publisher_context.build_secret_store_from_env",
-        lambda: store,
-    )
 
     context = build_publisher_auth_context(
         settings_file=config,
         workspace_root=workspace,
         strict=True,
+        expected_seller_id="seller-expected",
+        expected_document_type="CNPJ",
     )
 
-    assert context.token_path == "profiles/default/mercadolivre/tokens"
+    assert context.token_path == "sqlite:oauth_credentials"
     assert context.key_path is None
-    assert str(context.token_manager.token_path) == "profiles/default/mercadolivre/tokens"
-    assert context.token_manager.load_tokens()["access_token"] == "access-from-vault"
+    assert str(context.token_manager.token_path) == "sqlite-oauth-credentials"
+    assert context.token_manager.load_tokens()["access_token"] == "access-from-sqlite"
+    assert context.expected_seller_id == "seller-expected"
+    assert context.expected_document_type == "CNPJ"
     assert not (tmp_path / "legacy_tokens.json").exists()
 
 

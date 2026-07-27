@@ -12,24 +12,6 @@ from .exceptions import AuthError, TokenExpiredError
 from .oauth import OAuthHandler
 from .secure_storage import SecureStorageError, SecureTokenStorage, migrate_plaintext_tokens
 
-try:
-    from ml_app_settings_core import SecretStoreError, build_secret_store_from_env
-except Exception:  # pragma: no cover - standalone package fallback
-    SecretStoreError = Exception
-    build_secret_store_from_env = None
-
-
-def _vault_secret_store_enabled() -> bool:
-    for name in ("MLBOT_SECRET_BACKEND", "ML_PUBLISHER_SECRET_BACKEND", "ML_DASHBOARD_SECRET_BACKEND"):
-        value = os.getenv(name)
-        if value is not None and value.strip().lower() in {"openbao", "vault"}:
-            return True
-    return False
-
-
-def _vault_profile() -> str:
-    return os.getenv("MLBOT_SECRET_PROFILE", "default").strip() or "default"
-
 
 class TokenManager:
     """Manages access and refresh tokens for Mercado Livre API.
@@ -53,8 +35,8 @@ class TokenManager:
         key_path: Path | None = None,
         allow_fallback: bool = True,
         oauth_handler: OAuthHandler | None = None,
-        secret_store: Any | None = None,
-        token_secret_path: str | None = None,
+        oauth_repository: Any | None = None,
+        oauth_credential: Any | None = None,
     ):
         """Initialize the token manager.
 
@@ -65,27 +47,22 @@ class TokenManager:
             key_path: Optional secure-storage key path.
             allow_fallback: Whether legacy env/default token paths are allowed.
             oauth_handler: OAuthHandler for token refresh. If None, creates default
+            oauth_repository: Canonical encrypted SQLite OAuth repository.
+            oauth_credential: Active credential loaded for the bound profile and seller.
         """
         self.oauth_handler = oauth_handler or OAuthHandler(settings_file=settings_file)
         self._tokens: dict[str, Any] | None = None
         self._secure_storage: SecureTokenStorage | None = None
-        self._secret_store = None
-        self._token_secret_path: str | None = None
+        self._oauth_repository = oauth_repository
+        self._oauth_credential = oauth_credential
 
-        if secret_store is not None or token_secret_path is not None or (
-            token_path is None and workspace_root is None and _vault_secret_store_enabled()
-        ):
-            if secret_store is None:
-                if build_secret_store_from_env is None:
-                    raise AuthError("OpenBao/Vault secret store is not available")
-                try:
-                    secret_store = build_secret_store_from_env()
-                except SecretStoreError as err:
-                    raise AuthError(f"OpenBao/Vault unavailable: {err}") from err
-            self._secret_store = secret_store
-            self._token_secret_path = token_secret_path or f"profiles/{_vault_profile()}/mercadolivre/tokens"
-            self.token_path = Path(self._token_secret_path)
+        if (oauth_repository is None) != (oauth_credential is None):
+            raise AuthError("OAuth repository and credential must be provided together")
+        if oauth_repository is not None:
+            self.token_path = Path("sqlite-oauth-credentials")
             return
+        if os.getenv("APP_ENV", "").strip().lower() in {"production", "staging"}:
+            raise AuthError("Production OAuth tokens must use the encrypted SQLite repository")
 
         if not allow_fallback and workspace_root is None and token_path is None:
             raise AuthError(
@@ -164,25 +141,10 @@ class TokenManager:
             json.JSONDecodeError: If token file is invalid JSON
         """
         if self._tokens is None:
-            if self._secret_store is not None:
-                try:
-                    raw = self._secret_store.get_secret(self._token_secret_path or "")
-                except SecretStoreError as err:
-                    raise AuthError(f"OpenBao/Vault token read failed: {err}") from err
-                if not raw:
-                    raise FileNotFoundError(
-                        f"Mercado Livre tokens not found in OpenBao/Vault: {self._token_secret_path}"
-                    )
-                try:
-                    loaded = json.loads(raw)
-                except json.JSONDecodeError as err:
-                    raise AuthError(
-                        f"Invalid Mercado Livre token payload in OpenBao/Vault: {self._token_secret_path}"
-                    ) from err
-                if isinstance(loaded, dict):
-                    self._tokens = self._persistable_tokens(loaded)
-                else:
-                    raise ValueError("Invalid token payload format in OpenBao/Vault")
+            if self._oauth_credential is not None:
+                self._tokens = self._persistable_tokens(
+                    dict(self._oauth_credential.payload)
+                )
             elif self._secure_storage is not None:
                 try:
                     loaded = self._secure_storage.load_tokens()
@@ -209,14 +171,20 @@ class TokenManager:
             tokens: Dictionary containing access_token, refresh_token, and expires_at
         """
         persisted_tokens = self._persistable_tokens(tokens)
-        if self._secret_store is not None:
+        if self._oauth_repository is not None and self._oauth_credential is not None:
             try:
-                self._secret_store.set_secret(
-                    self._token_secret_path or "",
-                    json.dumps(persisted_tokens, separators=(",", ":"), ensure_ascii=False),
+                self._oauth_credential = self._oauth_repository.update_active(
+                    self._oauth_credential,
+                    expected_row_version=self._oauth_credential.row_version,
+                    payload=persisted_tokens,
+                    expires_at=(
+                        int(persisted_tokens["expires_at"])
+                        if persisted_tokens.get("expires_at") is not None
+                        else None
+                    ),
                 )
-            except SecretStoreError as err:
-                raise AuthError(f"OpenBao/Vault token write failed: {err}") from err
+            except Exception as err:
+                raise AuthError("Encrypted OAuth token update failed") from err
         elif self._secure_storage is not None:
             try:
                 self._secure_storage.save_tokens(persisted_tokens)
@@ -399,11 +367,14 @@ class TokenManager:
     def logout(self) -> None:
         """Clear tokens and remove token file."""
         self._tokens = None
-        if self._secret_store is not None:
+        if self._oauth_repository is not None and self._oauth_credential is not None:
             try:
-                self._secret_store.delete_secret(self._token_secret_path or "")
-            except SecretStoreError as err:
-                raise AuthError(f"OpenBao/Vault token delete failed: {err}") from err
+                self._oauth_repository.logout(
+                    profile_id=self._oauth_credential.profile_id,
+                    provider=self._oauth_credential.provider,
+                )
+            except Exception as err:
+                raise AuthError("Encrypted OAuth token removal failed") from err
         elif self._secure_storage is not None:
             self._secure_storage.delete_tokens()
         elif self.token_path.exists():

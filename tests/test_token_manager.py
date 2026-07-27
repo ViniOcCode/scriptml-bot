@@ -6,26 +6,10 @@ from unittest.mock import MagicMock
 
 import pytest
 from cryptography.fernet import Fernet
+from ml_app_settings_core import OAuthCredentialRepository
 
 from mercadolivre_upload.auth.exceptions import AuthError
 from mercadolivre_upload.auth.token_manager import TokenManager
-
-
-class _MemorySecretStore:
-    def __init__(self, values: dict[str, str] | None = None) -> None:
-        self.values = dict(values or {})
-
-    def get_secret(self, path: str) -> str | None:
-        return self.values.get(path)
-
-    def set_secret(self, path: str, value: str) -> None:
-        self.values[path] = value
-
-    def delete_secret(self, path: str) -> None:
-        self.values.pop(path, None)
-
-    def status(self) -> dict[str, object]:
-        return {"backend": "memory", "status": "pronto"}
 
 
 def _sample_tokens() -> dict[str, object]:
@@ -107,13 +91,31 @@ def test_save_tokens_drops_non_persisted_fields(tmp_path: Path, monkeypatch) -> 
     assert persisted == _sample_tokens()
 
 
-def test_vault_mode_loads_and_saves_tokens_without_legacy_files(tmp_path: Path) -> None:
-    token_secret_path = "profiles/default/mercadolivre/tokens"
-    store = _MemorySecretStore({token_secret_path: json.dumps(_sample_tokens())})
+def _repository_credential(tmp_path: Path):
+    repository = OAuthCredentialRepository(
+        tmp_path / "settings.sqlite3",
+        Fernet.generate_key(),
+    )
+    repository.initialize_schema()
+    pending = repository.put_pending(
+        flow_id="flow",
+        state_hash="state",
+        profile_id="profile-default",
+        provider="mercadolivre",
+        external_account_id="seller",
+        credential_kind="tokens",
+        payload=_sample_tokens(),
+        expires_at=9_999_999_999,
+    )
+    return repository, repository.promote_pending("flow", expected_row_version=pending.row_version)
+
+
+def test_repository_mode_loads_and_saves_encrypted_tokens(tmp_path: Path) -> None:
+    repository, credential = _repository_credential(tmp_path)
 
     manager = TokenManager(
-        secret_store=store,
-        token_secret_path=token_secret_path,
+        oauth_repository=repository,
+        oauth_credential=credential,
         oauth_handler=MagicMock(),
     )
     assert manager.load_tokens() == _sample_tokens()
@@ -127,7 +129,11 @@ def test_vault_mode_loads_and_saves_tokens_without_legacy_files(tmp_path: Path) 
         }
     )
 
-    assert json.loads(store.values[token_secret_path]) == {
+    assert repository.load_active(
+        profile_id="profile-default",
+        provider="mercadolivre",
+        external_account_id="seller",
+    ).payload == {
         "access_token": "new-access",
         "refresh_token": "new-refresh",
         "expires_at": 9_999_999_999,
@@ -135,27 +141,16 @@ def test_vault_mode_loads_and_saves_tokens_without_legacy_files(tmp_path: Path) 
     assert not (tmp_path / ".ml_token.enc").exists()
 
 
-def test_vault_mode_refreshes_and_persists_tokens() -> None:
-    token_secret_path = "profiles/default/mercadolivre/tokens"
-    store = _MemorySecretStore(
-        {
-            token_secret_path: json.dumps(
-                {
-                    "access_token": "expired-access",
-                    "refresh_token": "refresh-token",
-                    "expires_at": 1,
-                }
-            )
-        }
-    )
+def test_repository_mode_refreshes_and_persists_tokens(tmp_path: Path) -> None:
+    repository, credential = _repository_credential(tmp_path)
     oauth_handler = MagicMock()
     oauth_handler.refresh_token.return_value = {
         "access_token": "refreshed-access",
         "expires_at": 9_999_999_999,
     }
     manager = TokenManager(
-        secret_store=store,
-        token_secret_path=token_secret_path,
+        oauth_repository=repository,
+        oauth_credential=credential,
         oauth_handler=oauth_handler,
     )
 
@@ -164,7 +159,11 @@ def test_vault_mode_refreshes_and_persists_tokens() -> None:
     oauth_handler.refresh_token.assert_called_once_with("refresh-token")
     assert tokens["access_token"] == "refreshed-access"
     assert tokens["refresh_token"] == "refresh-token"
-    assert json.loads(store.values[token_secret_path]) == {
+    assert repository.load_active(
+        profile_id="profile-default",
+        provider="mercadolivre",
+        external_account_id="seller",
+    ).payload == {
         "access_token": "refreshed-access",
         "refresh_token": "refresh-token",
         "expires_at": 9_999_999_999,
@@ -220,3 +219,13 @@ def test_workspace_root_fails_without_fernet_key_file(tmp_path: Path, monkeypatc
 
     with pytest.raises(AuthError, match="Secure token storage error"):
         manager.save_tokens(_sample_tokens())
+
+
+def test_production_rejects_local_token_storage(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+
+    with pytest.raises(AuthError, match="encrypted SQLite repository"):
+        TokenManager(
+            token_path=str(tmp_path / "tokens.json"),
+            oauth_handler=MagicMock(),
+        )
