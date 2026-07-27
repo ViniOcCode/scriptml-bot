@@ -113,7 +113,7 @@ def _manifest_payload(
     _write_payload(classic_path, "gold_special")
     _write_payload(premium_path, "gold_pro")
 
-    manifest_path = tmp_path / "run_manifest.json"
+    manifest_path = workspace / "run_manifest.json"
     manifest_path.write_text(
         json.dumps(
             {
@@ -880,7 +880,9 @@ def test_no_test_depends_on_old_manifest_format(tmp_path: Path) -> None:
         "warnings": [],
         "diagnostics": {},
     }
-    manifest_path = tmp_path / "run_manifest.json"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    manifest_path = workspace / "run_manifest.json"
     manifest_path.write_text(json.dumps(legacy_manifest), encoding="utf-8")
 
     with pytest.raises(ValidationError):

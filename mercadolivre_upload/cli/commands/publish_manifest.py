@@ -19,6 +19,7 @@ from mercadolivre_upload.application.publish_payload import (
     PublisherRuntime,
     publish_payload_outcome,
 )
+from mercadolivre_upload.application.workspace_artifacts import resolve_workspace_artifact
 from mercadolivre_upload.contracts.run_manifest import load_run_manifest
 
 console = Console()
@@ -286,7 +287,15 @@ def publish_manifest(
     expected_document_type: str | None = None,
 ) -> None:
     """Publish payload variants declared in the current run_manifest.json contract."""
-    manifest_path = manifest_path.expanduser().resolve()
+    try:
+        manifest_path = resolve_workspace_artifact(
+            manifest_path,
+            workspace_root=workspace_root,
+            suffixes=frozenset({".json"}),
+        )
+    except (OSError, ValueError) as exc:
+        err_console.print(f"[red]Erro:[/red] manifesto fora do workspace: {exc}")
+        raise typer.Exit(1) from exc
     manifest = load_run_manifest(manifest_path)
     if not (
         manifest.trust_profile == "production"
@@ -414,7 +423,13 @@ def publish_manifest(
                     workspace_root=workspace_root,
                     raw_path=payload_variant.payload_path or "",
                 )
-            except ValueError as exc:
+                if payload_path.exists():
+                    payload_path = resolve_workspace_artifact(
+                        payload_path,
+                        workspace_root=workspace_root,
+                        suffixes=frozenset({".json"}),
+                    )
+            except (OSError, ValueError) as exc:
                 result_row["validation_result"] = {"status": "failed"}
                 result_row["publish_result"] = "failed"
                 result_row["api_errors"] = [str(exc)]

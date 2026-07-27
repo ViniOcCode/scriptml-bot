@@ -265,9 +265,13 @@ def test_dashboard_effective_payload_has_typed_internal_entrypoint(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    payload_path = workspace / "payload.json"
+    payload_path.write_text(json.dumps(_minimal_builder_payload()), encoding="utf-8")
     expected = PublicationOutcome(
         sku="ABC-001",
-        path=str(tmp_path / "payload.json"),
+        path=str(payload_path),
         status="published",
         side_effect_state="confirmed",
         item_id="MLB123",
@@ -284,12 +288,34 @@ def test_dashboard_effective_payload_has_typed_internal_entrypoint(
     )
 
     outcome = publish_effective_payload_outcome(
-        tmp_path / "payload.json",
+        payload_path,
         seller_config_path=tmp_path / "publisher.yaml",
-        workspace_root=tmp_path / "workspace",
+        workspace_root=workspace,
     )
 
     assert outcome is expected
+
+
+def test_dashboard_effective_payload_outside_workspace_is_rejected_before_auth(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    payload_path = tmp_path / "outside.json"
+    payload_path.write_text(json.dumps(_minimal_builder_payload()), encoding="utf-8")
+    with patch(
+        "mercadolivre_upload.application.dashboard_api._build_authenticated_client"
+    ) as authenticate:
+        outcome = publish_effective_payload_outcome(
+            payload_path,
+            seller_config_path=tmp_path / "publisher.yaml",
+            workspace_root=workspace,
+        )
+
+    assert outcome.status == "failed"
+    assert outcome.side_effect_state == "none"
+    assert outcome.reconciliation_required is False
+    authenticate.assert_not_called()
 
 
 def test_publish_payload_report_keeps_validation_warnings(tmp_path: Path, monkeypatch) -> None:

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import stat
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +31,7 @@ from mercadolivre_upload.application.validators.seller_policy import (
     SellerPolicyValidator,
     load_seller_config,
 )
+from mercadolivre_upload.application.workspace_artifacts import resolve_workspace_artifact
 from mercadolivre_upload.auth.exceptions import AuthError
 from mercadolivre_upload.auth.publisher_context import build_publisher_auth_context
 from mercadolivre_upload.contracts.publication import PublicationOutcome
@@ -210,6 +210,21 @@ def publish_effective_payload_outcome(
     expected_document_type: str | None = None,
 ) -> PublicationOutcome:
     """Publish a dashboard effective payload while preserving the typed outcome."""
+    try:
+        payload_path = resolve_workspace_artifact(
+            payload_path,
+            workspace_root=workspace_root,
+            suffixes=frozenset({".json"}),
+        )
+    except (OSError, ValueError) as exc:
+        return PublicationOutcome(
+            sku=None,
+            path=str(payload_path),
+            status="failed",
+            side_effect_state="none",
+            error=str(exc),
+            phases=[],
+        )
     _build_authenticated_client(
         seller_config_path=seller_config_path,
         workspace_root=workspace_root,
@@ -261,19 +276,11 @@ def publish_effective_payload_file(
 
 def _verified_workspace_payload(payload_path: Path, workspace_root: Path) -> Path:
     """Resolve one regular JSON artifact without accepting symlink escapes."""
-    candidate = payload_path.expanduser()
-    workspace = workspace_root.expanduser().resolve(strict=True)
-    resolved = candidate.resolve(strict=True)
-    if candidate.suffix.lower() != ".json" or not resolved.is_relative_to(workspace):
-        raise ValueError("Payload path is outside the allowed workspace.")
-    current = candidate.absolute()
-    while current != workspace and current != current.parent:
-        if stat.S_ISLNK(current.lstat().st_mode):
-            raise ValueError("Symlinked payload paths are not allowed.")
-        current = current.parent
-    if current != workspace or not stat.S_ISREG(resolved.stat().st_mode):
-        raise ValueError("Payload must be a regular file in the allowed workspace.")
-    return resolved
+    return resolve_workspace_artifact(
+        payload_path,
+        workspace_root=workspace_root,
+        suffixes=frozenset({".json"}),
+    )
 
 
 def complete_existing_item_fiscal_file(
