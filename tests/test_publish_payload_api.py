@@ -15,6 +15,7 @@ from mercadolivre_upload.adapters.json_payload_reader import JsonPayloadReader
 from mercadolivre_upload.application import publish_payload as publish_payload_api
 from mercadolivre_upload.application.dashboard_api import (
     apply_remote_item_update,
+    complete_existing_item_fiscal_file,
     fetch_authenticated_seller_identity,
     publish_effective_payload_outcome,
     publish_manifest_file,
@@ -25,6 +26,10 @@ from mercadolivre_upload.auth.publisher_context import build_publisher_auth_cont
 from mercadolivre_upload.cli import app
 from mercadolivre_upload.cli.commands.publish_runtime import resolve_workspace_root
 from mercadolivre_upload.contracts.publication import PublicationOutcome
+from mercadolivre_upload.domain.fiscal.service import (
+    FiscalSubmissionResult,
+    FiscalSubmissionStatus,
+)
 
 
 class _MemorySecretStore:
@@ -792,6 +797,98 @@ def test_dashboard_remote_update_success_is_confirmed_and_auditable(
         "patch": {"status": "paused"},
         "response": {"id": "MLB123", "status": "paused"},
     }
+
+
+def test_dashboard_fiscal_recovery_requires_terminal_invoice_confirmation(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    payload_path = workspace / "effective.json"
+    payload = _minimal_builder_payload()
+    payload["fiscal"] = {
+        "items": [
+            {
+                "sku": "ABC-001",
+                "type": "single",
+                "measurement_unit": "UN",
+                "cost": 10,
+                "tax_information": {
+                    "ncm": "39263000",
+                    "origin_type": "reseller",
+                    "origin_detail": "2",
+                },
+            }
+        ]
+    }
+    payload_path.write_text(json.dumps(payload), encoding="utf-8")
+    client = MagicMock()
+    client.get.return_value = {
+        "id": "MLB123",
+        "seller_id": "seller-expected",
+        "status": "paused",
+        "attributes": [{"id": "SELLER_SKU", "value_name": "ABC-001"}],
+    }
+    fiscal_result = FiscalSubmissionResult(
+        success=True,
+        item_id="MLB123",
+        sku="ABC-001",
+        status=FiscalSubmissionStatus.VERIFIED,
+        side_effect_state="confirmed",
+        invoice_ready=True,
+    )
+    with (
+        patch(
+            "mercadolivre_upload.application.dashboard_api._build_authenticated_client",
+            return_value=(
+                client,
+                {"seller_id": "seller-expected", "site_id": "MLB", "document_type": "CNPJ"},
+            ),
+        ),
+        patch(
+            "mercadolivre_upload.application.dashboard_api.FiscalService"
+        ) as fiscal_service,
+    ):
+        fiscal_service.return_value.submit_fiscal_data_workflow.return_value = fiscal_result
+        result = complete_existing_item_fiscal_file(
+            payload_path,
+            "MLB123",
+            seller_config_path=tmp_path / "publisher.yaml",
+            workspace_root=workspace,
+            expected_seller_id="seller-expected",
+            expected_document_type="CNPJ",
+        )
+
+    assert result["status"] == result["fiscal_status"] == "completed"
+    assert result["side_effect_state"] == "confirmed"
+    assert result["reconciliation_required"] is False
+    assert result["invoice_ready"] is True
+    assert result["payload_path"] == str(payload_path)
+    assert result["remote_item_id"] == "MLB123"
+
+
+def test_dashboard_fiscal_recovery_rejects_symlinked_payload(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "outside.json"
+    outside.write_text(json.dumps(_minimal_builder_payload()), encoding="utf-8")
+    symlink = workspace / "effective.json"
+    symlink.symlink_to(outside)
+
+    with (
+        patch(
+            "mercadolivre_upload.application.dashboard_api._build_authenticated_client"
+        ) as authenticate,
+        pytest.raises(ValueError, match="outside the allowed workspace|Symlinked"),
+    ):
+        complete_existing_item_fiscal_file(
+            symlink,
+            "MLB123",
+            seller_config_path=tmp_path / "publisher.yaml",
+            workspace_root=workspace,
+        )
+
+    authenticate.assert_not_called()
 
 
 def test_remote_update_rejects_invalid_item_id_before_auth(tmp_path: Path) -> None:

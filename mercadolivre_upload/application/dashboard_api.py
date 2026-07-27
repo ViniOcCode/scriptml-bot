@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,10 @@ from mercadolivre_upload.application.publish_payload import (
     publish_payload_outcome,
     serialize_publication_outcome,
 )
+from mercadolivre_upload.application.publish_payload_use_case import (
+    _build_fiscal_data,
+    _extract_payload_seller_sku,
+)
 from mercadolivre_upload.application.user_product_contract import (
     expand_effective_payloads,
 )
@@ -30,6 +35,10 @@ from mercadolivre_upload.application.validators.seller_policy import (
 from mercadolivre_upload.auth.exceptions import AuthError
 from mercadolivre_upload.auth.publisher_context import build_publisher_auth_context
 from mercadolivre_upload.contracts.publication import PublicationOutcome
+from mercadolivre_upload.domain.fiscal.service import (
+    FiscalService,
+    FiscalSubmissionStatus,
+)
 
 
 def _prefix_item_message(message: str, index: int, total: int) -> str:
@@ -247,6 +256,177 @@ def publish_effective_payload_file(
         expected_document_type=expected_document_type,
     )
     return serialize_publication_outcome(outcome)
+
+
+def _verified_workspace_payload(payload_path: Path, workspace_root: Path) -> Path:
+    """Resolve one regular JSON artifact without accepting symlink escapes."""
+    candidate = payload_path.expanduser()
+    workspace = workspace_root.expanduser().resolve(strict=True)
+    resolved = candidate.resolve(strict=True)
+    if candidate.suffix.lower() != ".json" or not resolved.is_relative_to(workspace):
+        raise ValueError("Payload path is outside the allowed workspace.")
+    current = candidate.absolute()
+    while current != workspace and current != current.parent:
+        if stat.S_ISLNK(current.lstat().st_mode):
+            raise ValueError("Symlinked payload paths are not allowed.")
+        current = current.parent
+    if current != workspace or not stat.S_ISREG(resolved.stat().st_mode):
+        raise ValueError("Payload must be a regular file in the allowed workspace.")
+    return resolved
+
+
+def complete_existing_item_fiscal_file(
+    payload_path: Path,
+    remote_item_id: str,
+    *,
+    seller_config_path: Path,
+    workspace_root: Path,
+    ml_client_id: str | None = None,
+    expected_seller_id: str | None = None,
+    expected_document_type: str | None = None,
+) -> dict[str, Any]:
+    """Complete only the fiscal phase for an already-created paused item.
+
+    This entry point never creates or updates the listing itself. Its structured
+    result preserves whether any fiscal mutation was confirmed, rejected, or
+    left uncertain so the dashboard can enforce reconciliation.
+    """
+    resolved_payload = _verified_workspace_payload(payload_path, workspace_root)
+    validate_item_id(remote_item_id)
+    client, identity = _build_authenticated_client(
+        seller_config_path=seller_config_path,
+        workspace_root=workspace_root,
+        ml_client_id=ml_client_id,
+        expected_seller_id=expected_seller_id,
+        expected_document_type=expected_document_type,
+    )
+    if not remote_item_id.startswith(identity["site_id"]):
+        raise AuthError("Remote item site does not match the authenticated seller site")
+    remote_item = client.get(f"/items/{remote_item_id}")
+    if not isinstance(remote_item, dict):
+        raise ValueError("Remote item response is invalid.")
+    remote_seller_id = str(remote_item.get("seller_id") or "").strip()
+    if remote_seller_id and remote_seller_id != identity["seller_id"]:
+        raise AuthError("Remote item does not belong to the authenticated seller")
+    remote_status = str(remote_item.get("status") or "").strip().lower()
+    if remote_status and remote_status != "paused":
+        return {
+            "status": "failed",
+            "fiscal_status": "failed",
+            "side_effect_state": "none",
+            "reconciliation_required": False,
+            "invoice_ready": None,
+            "payload_path": str(resolved_payload),
+            "remote_item_id": remote_item_id,
+            "fiscal_report": [],
+            "errors": ["Fiscal recovery requires the remote item to remain paused."],
+            "warnings": [],
+        }
+
+    read_result = JsonPayloadReader(strict_publisher_contract=True).read(resolved_payload)
+    if not read_result.fiscal_items:
+        return {
+            "status": "not_applicable",
+            "fiscal_status": "not_applicable",
+            "side_effect_state": "none",
+            "reconciliation_required": False,
+            "invoice_ready": None,
+            "payload_path": str(resolved_payload),
+            "remote_item_id": remote_item_id,
+            "fiscal_report": [],
+            "errors": [],
+            "warnings": [],
+        }
+
+    effective_payloads = expand_effective_payloads(read_result.payload, read_result.upload_mode)
+    payload_by_sku = {
+        sku.casefold(): payload
+        for payload in effective_payloads
+        if (sku := _extract_payload_seller_sku(payload))
+    }
+    remote_sku = _extract_payload_seller_sku(remote_item)
+    selected_rows = list(read_result.fiscal_items)
+    if len(selected_rows) > 1:
+        if not remote_sku:
+            raise ValueError("Remote item SKU is required for multi-item fiscal recovery.")
+        selected_rows = [
+            row
+            for row in selected_rows
+            if str(row.get("sku") or "").strip().casefold() == remote_sku.casefold()
+        ]
+        if len(selected_rows) != 1:
+            raise ValueError("Fiscal payload does not uniquely match the remote item SKU.")
+
+    service = FiscalService(client)
+    reports: list[dict[str, Any]] = []
+    for row in selected_rows:
+        fiscal_sku = str(row.get("sku") or "").strip()
+        publish_payload = payload_by_sku.get(fiscal_sku.casefold())
+        if publish_payload is None:
+            publish_payload = effective_payloads[0] if len(effective_payloads) == 1 else {}
+        fiscal_data = _build_fiscal_data(
+            fiscal_item=row,
+            publish_payload=publish_payload,
+            fallback_sku=read_result.sku,
+        )
+        result = service.submit_fiscal_data_workflow(remote_item_id, fiscal_data)
+        status = result.status.value
+        if result.status is FiscalSubmissionStatus.VERIFIED:
+            status = "completed"
+        reports.append(
+            {
+                "item_id": remote_item_id,
+                "sku": fiscal_data.sku,
+                "success": result.success,
+                "final_fiscal_status": status,
+                "side_effect_state": result.side_effect_state,
+                "reconciliation_required": result.reconciliation_required,
+                "invoice_ready": result.invoice_ready,
+                "api_response": result.response,
+                "error_code": result.error_code,
+                "error_message": result.error_message,
+            }
+        )
+
+    statuses = {str(row["final_fiscal_status"]) for row in reports}
+    if statuses == {"completed"}:
+        status = "completed"
+        side_effect_state = "confirmed"
+        reconciliation_required = False
+        invoice_ready: bool | None = True
+    elif "unknown" in statuses:
+        status = "unknown"
+        side_effect_state = "unknown"
+        reconciliation_required = True
+        invoice_ready = None
+    elif statuses & {"pending", "pending_verification"}:
+        status = "pending_verification"
+        side_effect_state = "confirmed"
+        reconciliation_required = True
+        invoice_ready = False
+    else:
+        status = "failed"
+        side_effect_values = {str(row["side_effect_state"]) for row in reports}
+        side_effect_state = "none" if side_effect_values == {"none"} else "partial"
+        reconciliation_required = side_effect_state != "none"
+        invoice_ready = None
+    errors = [
+        str(row["error_message"])
+        for row in reports
+        if isinstance(row.get("error_message"), str) and row["error_message"]
+    ]
+    return {
+        "status": status,
+        "fiscal_status": status,
+        "side_effect_state": side_effect_state,
+        "reconciliation_required": reconciliation_required,
+        "invoice_ready": invoice_ready,
+        "payload_path": str(resolved_payload),
+        "remote_item_id": remote_item_id,
+        "fiscal_report": reports,
+        "errors": errors,
+        "warnings": [],
+    }
 
 
 def publish_manifest_file(
@@ -471,6 +651,7 @@ def fetch_authenticated_seller_identity(
 
 __all__ = [
     "apply_remote_item_update",
+    "complete_existing_item_fiscal_file",
     "fetch_authenticated_seller_identity",
     "fetch_remote_item",
     "prepare_effective_payload_file",
