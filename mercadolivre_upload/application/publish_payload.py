@@ -53,12 +53,13 @@ def _build_use_case(
     auth_manager = auth_context.token_manager
     api_client = MLApiClient(auth_manager)
     fiscal_service = FiscalService(api_client)
+    policy = SellerPolicyValidator(seller_config)
     return PublishPayloadUseCase(
         reader=payload_reader,
-        policy=SellerPolicyValidator(seller_config),
+        policy=policy,
         publisher=api_client,
         fiscal_service=fiscal_service,
-        publish_inactive=publish_inactive,
+        publish_inactive=publish_inactive or policy.requires_inactive_publication,
     )
 
 

@@ -395,6 +395,28 @@ def test_publish_payload_passes_resolved_config_and_workspace_to_auth(
     }
 
 
+def test_seller_policy_forces_paused_publication_even_without_cli_flag(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _publisher_config(tmp_path)
+    auth_context = MagicMock()
+    auth_context.token_manager = MagicMock()
+    monkeypatch.setattr(
+        publish_payload_api,
+        "build_publisher_auth_context",
+        MagicMock(return_value=auth_context),
+    )
+
+    use_case = publish_payload_api._build_use_case(
+        publish_inactive=False,
+        seller_config_path=config,
+        workspace_root=tmp_path / "workspace",
+    )
+
+    assert use_case._publish_inactive is True
+
+
 def test_publish_payload_uses_explicit_config_from_unrelated_cwd(
     tmp_path: Path, monkeypatch
 ) -> None:

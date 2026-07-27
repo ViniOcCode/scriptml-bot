@@ -55,7 +55,7 @@ class BatchConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     human_review_required: bool = True
-    publish_inactive: bool = False
+    publish_inactive: bool = True
     min_ai_confidence: float = 0.0  # 0.0 = disabled; e.g. 0.70 blocks AI categories < 70%
 
 
@@ -192,6 +192,11 @@ class SellerPolicyValidator:
     def __init__(self, config: SellerConfig) -> None:
         """Initialize with a validated SellerConfig."""
         self._config = config
+
+    @property
+    def requires_inactive_publication(self) -> bool:
+        """Whether seller policy requires every newly created item to be paused."""
+        return self._config.batch.publish_inactive
 
     def validate(
         self,

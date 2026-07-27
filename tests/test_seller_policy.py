@@ -53,6 +53,19 @@ def _make_payload(**overrides: object) -> dict:
 
 
 class TestSellerPolicyValidator:
+    def test_new_publications_are_paused_by_default(self) -> None:
+        validator = SellerPolicyValidator(
+            SellerConfig(
+                listing=ListingConfig(
+                    allowed_types=["gold_special"],
+                    default_type="gold_special",
+                ),
+                pricing=PricingConfig(min_price=1, max_price=999_999),
+            )
+        )
+
+        assert validator.requires_inactive_publication is True
+
     def test_listing_type_permitido(self) -> None:
         config = _make_config(allowed_types=["gold_special"])
         validator = SellerPolicyValidator(config)
@@ -177,7 +190,7 @@ class TestSellerPolicyConfidenceThreshold:
         assert not any("Confiança" in v.message for v in result.violations)
 
     def test_ai_confidence_none_value_treated_as_zero(self) -> None:
-        """category_confidence=None with threshold configured → treated as 0.0, triggers violation."""
+        """Treat missing confidence as zero when a threshold is configured."""
         config = _make_config(human_review_required=False, min_ai_confidence=0.70)
         validator = SellerPolicyValidator(config)
         result = validator.validate(_make_payload(), ai_suggested=True, category_confidence=None)
