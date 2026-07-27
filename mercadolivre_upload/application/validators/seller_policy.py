@@ -11,8 +11,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-import yaml
 from pydantic import BaseModel, ConfigDict, Field
+
+from mercadolivre_upload.application.publisher_settings import load_publisher_settings
 
 logger = logging.getLogger(__name__)
 
@@ -107,10 +108,10 @@ class PolicyResult:
 
 
 def load_seller_config(path: Path) -> SellerConfig:
-    """Load and validate publisher.yaml.
+    """Load and validate the canonical publisher policy.
 
     Args:
-        path: Path to publisher.yaml.
+        path: Development-only YAML fallback path.
 
     Returns:
         Validated SellerConfig instance.
@@ -119,9 +120,7 @@ def load_seller_config(path: Path) -> SellerConfig:
         FileNotFoundError: If path does not exist.
         pydantic.ValidationError: If YAML content fails schema validation.
     """
-    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    if not isinstance(raw, dict):
-        raise ValueError(f"Publisher config must contain a mapping: {path}")
+    raw = load_publisher_settings(path)
 
     # Support both top-level keys and nested under "seller:", but forbid mixed top-level ownership.
     if "seller" in raw:

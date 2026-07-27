@@ -27,10 +27,12 @@ def mock_credentials():
     original_app_id = os.environ.get("ML_PIPE_MERCADO_LIVRE_CLIENT_ID")
     original_app_secret = os.environ.get("ML_PIPE_MERCADO_LIVRE_CLIENT_SECRET")
     original_redirect_uri = os.environ.get("ML_PIPE_MERCADO_LIVRE_REDIRECT_URI")
+    original_app_env = os.environ.get("APP_ENV")
 
     os.environ["ML_PIPE_MERCADO_LIVRE_CLIENT_ID"] = "mock_app_id_12345"
     os.environ["ML_PIPE_MERCADO_LIVRE_CLIENT_SECRET"] = "mock_app_secret_67890"
     os.environ["ML_PIPE_MERCADO_LIVRE_REDIRECT_URI"] = "http://localhost:8000/callback"
+    os.environ["APP_ENV"] = "test"
 
     yield
 
@@ -49,6 +51,10 @@ def mock_credentials():
         os.environ["ML_PIPE_MERCADO_LIVRE_REDIRECT_URI"] = original_redirect_uri
     elif "ML_PIPE_MERCADO_LIVRE_REDIRECT_URI" in os.environ:
         del os.environ["ML_PIPE_MERCADO_LIVRE_REDIRECT_URI"]
+    if original_app_env is not None:
+        os.environ["APP_ENV"] = original_app_env
+    else:
+        os.environ.pop("APP_ENV", None)
 
 
 @pytest.fixture(autouse=True)

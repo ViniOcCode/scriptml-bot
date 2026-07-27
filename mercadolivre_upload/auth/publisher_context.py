@@ -7,14 +7,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import yaml
+from mercadolivre_upload.application.publisher_settings import load_publisher_settings
 
 try:
     from ml_app_settings_core import SecretStoreError, build_secret_store_from_env
-except Exception:  # pragma: no cover - standalone package fallback
+except ImportError:  # pragma: no cover - unavailable in standalone development installs
     SecretStoreError = Exception
     build_secret_store_from_env = None
-
 from mercadolivre_upload.auth.oauth import OAuthHandler
 from mercadolivre_upload.auth.token_manager import TokenManager
 
@@ -35,15 +34,7 @@ class PublisherAuthContext:
 
 
 def _read_config(settings_file: Path) -> dict[str, Any]:
-    try:
-        raw = yaml.safe_load(settings_file.read_text(encoding="utf-8")) or {}
-    except OSError as exc:
-        raise AuthError(f"Could not read publisher config: {settings_file}") from exc
-    except yaml.YAMLError as exc:
-        raise AuthError(f"Invalid publisher config YAML: {settings_file}") from exc
-    if not isinstance(raw, dict):
-        raise AuthError(f"Publisher config must be a mapping: {settings_file}")
-    return raw
+    return load_publisher_settings(settings_file)
 
 
 def _load_client_id(settings_file: Path, explicit_client_id: str | None = None) -> str:
