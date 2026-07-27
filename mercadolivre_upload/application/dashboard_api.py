@@ -160,6 +160,7 @@ def validate_effective_payload_file(
     expected_document_type: str | None = None,
 ) -> dict[str, Any]:
     """Validate a dashboard payload using local checks and Mercado Livre validation."""
+    payload_path = _verified_workspace_payload(payload_path, workspace_root)
     prepared = prepare_effective_payload_file(
         payload_path,
         seller_config_path=seller_config_path,
@@ -649,6 +650,7 @@ def fetch_authenticated_seller_identity(
     workspace_root: Path,
     ml_client_id: str | None = None,
     expected_seller_id: str | None = None,
+    expected_document_type: str | None = None,
 ) -> dict[str, str]:
     """Return the minimal authenticated seller identity needed by safe operations."""
     auth_context = build_publisher_auth_context(
@@ -657,12 +659,13 @@ def fetch_authenticated_seller_identity(
         strict=True,
         ml_client_id=ml_client_id,
         expected_seller_id=expected_seller_id,
+        expected_document_type=expected_document_type,
     )
     client = MLApiClient(auth_context.token_manager)
     identity = _authenticated_seller(
         client,
         expected_seller_id=expected_seller_id,
-        expected_document_type=None,
+        expected_document_type=expected_document_type,
     )
     return {
         "status": "authenticated",

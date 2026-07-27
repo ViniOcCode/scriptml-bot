@@ -22,6 +22,7 @@ from mercadolivre_upload.application.dashboard_api import (
     fetch_authenticated_seller_identity,
     publish_effective_payload_outcome,
     publish_manifest_file,
+    validate_effective_payload_file,
 )
 from mercadolivre_upload.application.publish_payload import PublisherRuntime
 from mercadolivre_upload.auth.exceptions import AuthError
@@ -685,6 +686,49 @@ def test_dashboard_account_identity_rejects_incomplete_provider_response(
             )
 
 
+def test_dashboard_account_identity_enforces_expected_taxpayer_document(
+    tmp_path: Path,
+) -> None:
+    auth_context = MagicMock()
+    with (
+        patch(
+            "mercadolivre_upload.application.dashboard_api.build_publisher_auth_context",
+            return_value=auth_context,
+        ) as build_context,
+        patch("mercadolivre_upload.application.dashboard_api.MLApiClient") as client_class,
+    ):
+        client_class.return_value.get.return_value = {
+            "id": 123456789,
+            "site_id": "MLB",
+            "identification": {"type": "CPF"},
+        }
+        with pytest.raises(AuthError, match="taxpayer document"):
+            fetch_authenticated_seller_identity(
+                seller_config_path=tmp_path / "publisher.yaml",
+                workspace_root=tmp_path / "workspace",
+                expected_seller_id="123456789",
+                expected_document_type="CNPJ",
+            )
+
+    assert build_context.call_args.kwargs["expected_document_type"] == "CNPJ"
+
+
+def test_dashboard_validation_rejects_payload_outside_workspace(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    payload = tmp_path / "outside.json"
+    payload.write_text("{}", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="outside the allowed workspace"):
+        validate_effective_payload_file(
+            payload,
+            seller_config_path=tmp_path / "publisher.yaml",
+            workspace_root=workspace,
+        )
+
+
 def test_dashboard_remote_update_requires_explicit_lifecycle_operation_for_status(
     tmp_path: Path,
 ) -> None:
@@ -1040,7 +1084,9 @@ def test_remote_update_blocks_item_from_another_site(tmp_path: Path) -> None:
 def test_effective_validation_blocks_taxpayer_mismatch_before_item_validation(
     tmp_path: Path,
 ) -> None:
-    payload_path = tmp_path / "70_payload.json"
+    seller_config = _publisher_config(tmp_path)
+    (tmp_path / "workspace").mkdir()
+    payload_path = tmp_path / "workspace" / "70_payload.json"
     payload_path.write_text(json.dumps(_minimal_builder_payload()), encoding="utf-8")
     with (
         patch(
@@ -1056,13 +1102,9 @@ def test_effective_validation_blocks_taxpayer_mismatch_before_item_validation(
         }
 
         with pytest.raises(AuthError, match="expected document"):
-            from mercadolivre_upload.application.dashboard_api import (
-                validate_effective_payload_file,
-            )
-
             validate_effective_payload_file(
                 payload_path,
-                seller_config_path=_publisher_config(tmp_path),
+                seller_config_path=seller_config,
                 workspace_root=tmp_path / "workspace",
                 expected_seller_id="seller-expected",
                 expected_document_type="CNPJ",
