@@ -18,6 +18,7 @@ classifiers = [
 ]
 
 dependencies = [
+    "ml-app-settings-core",
     "openpyxl>=3.0.0",
     "xlrd>=2.0.1",
     "pandas>=1.5.0",
@@ -32,6 +33,9 @@ dependencies = [
     "pydantic>=2.0.0",
     "pydantic-settings>=2.14.2",
 ]
+
+[tool.uv.sources]
+ml-app-settings-core = { path = "../../ml_app_settings_core", editable = true }
 
 [project.optional-dependencies]
 dev = [

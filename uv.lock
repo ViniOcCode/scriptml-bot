@@ -731,6 +731,7 @@ dependencies = [
     { name = "aiohttp" },
     { name = "cryptography" },
     { name = "keyring" },
+    { name = "ml-app-settings-core" },
     { name = "openpyxl" },
     { name = "pandas" },
     { name = "pydantic" },
@@ -764,6 +765,7 @@ requires-dist = [
     { name = "black", marker = "extra == 'dev'", specifier = ">=26.3.1" },
     { name = "cryptography", specifier = ">=48.0.1" },
     { name = "keyring", specifier = ">=24.0.0" },
+    { name = "ml-app-settings-core", editable = "../../ml_app_settings_core" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.7.0" },
     { name = "openpyxl", specifier = ">=3.0.0" },
     { name = "pandas", specifier = ">=1.5.0" },
@@ -784,6 +786,11 @@ requires-dist = [
     { name = "xlrd", specifier = ">=2.0.1" },
 ]
 provides-extras = ["dev"]
+
+[[package]]
+name = "ml-app-settings-core"
+version = "0.1.0"
+source = { editable = "../../ml_app_settings_core" }
 
 [[package]]
 name = "more-itertools"
@@ -1495,8 +1502,8 @@ name = "secretstorage"
 version = "3.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cryptography", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
-    { name = "jeepney", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "cryptography" },
+    { name = "jeepney" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/1c/03/e834bcd866f2f8a49a85eaff47340affa3bfa391ee9912a952a1faa68c7b/secretstorage-3.5.0.tar.gz", hash = "sha256:f04b8e4689cbce351744d5537bf6b1329c6fc68f91fa666f60a380edddcd11be", size = 19884, upload-time = "2025-11-23T19:02:53.191Z" }
 wheels = [
