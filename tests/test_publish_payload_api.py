@@ -608,11 +608,16 @@ def test_dashboard_remote_update_requires_explicit_lifecycle_operation_for_statu
 
     assert blocked == {
         "status": "failed",
+        "side_effect_state": "none",
+        "reconciliation_required": False,
         "errors": ["Status changes require pause, activate, finalize, or delete operation."],
     }
     assert finalized == {
         "status": "dry_run",
+        "side_effect_state": "none",
+        "reconciliation_required": False,
         "item_id": "MLB123",
+        "operation": "finalize",
         "patch": {"status": "closed"},
     }
 
@@ -702,6 +707,40 @@ def test_dashboard_remote_update_connection_error_requires_reconciliation(
     assert outcome["side_effect_state"] == "unknown"
     assert outcome["reconciliation_required"] is True
     client_class.return_value.update_item.assert_called_once_with("MLB123", {"status": "paused"})
+
+
+def test_dashboard_remote_update_success_is_confirmed_and_auditable(
+    tmp_path: Path,
+) -> None:
+    with (
+        patch(
+            "mercadolivre_upload.application.dashboard_api.build_publisher_auth_context",
+            return_value=MagicMock(),
+        ),
+        patch("mercadolivre_upload.application.dashboard_api.MLApiClient") as client_class,
+    ):
+        client_class.return_value.update_item.return_value = {
+            "id": "MLB123",
+            "status": "paused",
+        }
+
+        outcome = apply_remote_item_update(
+            "MLB123",
+            {"status": "paused"},
+            operation="pause",
+            seller_config_path=tmp_path / "publisher.yaml",
+            workspace_root=tmp_path / "workspace",
+        )
+
+    assert outcome == {
+        "status": "updated",
+        "side_effect_state": "confirmed",
+        "reconciliation_required": False,
+        "item_id": "MLB123",
+        "operation": "pause",
+        "patch": {"status": "paused"},
+        "response": {"id": "MLB123", "status": "paused"},
+    }
 
 
 def test_publish_payload_cli_delegates_to_public_api(tmp_path: Path) -> None:

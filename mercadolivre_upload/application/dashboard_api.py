@@ -262,6 +262,8 @@ def apply_remote_item_update(
         if "status" in patch:
             return {
                 "status": "failed",
+                "side_effect_state": "none",
+                "reconciliation_required": False,
                 "errors": [
                     "Status changes require pause, activate, finalize, or delete operation."
                 ],
@@ -272,16 +274,35 @@ def apply_remote_item_update(
         if patch != expected_patch:
             return {
                 "status": "failed",
+                "side_effect_state": "none",
+                "reconciliation_required": False,
                 "errors": [f"Operation {operation} requires the exact patch {expected_patch}."],
             }
         allowed = {"status"}
     else:
-        return {"status": "failed", "errors": [f"Unsupported remote operation: {operation}"]}
+        return {
+            "status": "failed",
+            "side_effect_state": "none",
+            "reconciliation_required": False,
+            "errors": [f"Unsupported remote operation: {operation}"],
+        }
     rejected = sorted(key for key in patch if key not in allowed)
     if rejected:
-        return {"status": "failed", "errors": [f"Unsupported remote update fields: {rejected}"]}
+        return {
+            "status": "failed",
+            "side_effect_state": "none",
+            "reconciliation_required": False,
+            "errors": [f"Unsupported remote update fields: {rejected}"],
+        }
     if dry_run:
-        return {"status": "dry_run", "item_id": item_id, "patch": patch}
+        return {
+            "status": "dry_run",
+            "side_effect_state": "none",
+            "reconciliation_required": False,
+            "item_id": item_id,
+            "operation": operation,
+            "patch": patch,
+        }
 
     auth_context = build_publisher_auth_context(
         settings_file=seller_config_path,
@@ -310,7 +331,15 @@ def apply_remote_item_update(
                 "Verifique o anúncio antes de tentar novamente."
             ],
         }
-    return {"status": "updated", "item_id": item_id, "response": response}
+    return {
+        "status": "updated",
+        "side_effect_state": "confirmed",
+        "reconciliation_required": False,
+        "item_id": item_id,
+        "operation": operation,
+        "patch": patch,
+        "response": response,
+    }
 
 
 def fetch_remote_item(
