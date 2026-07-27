@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import ANY, MagicMock, patch
 
@@ -98,7 +99,7 @@ def _canonical_oauth_runtime(
     monkeypatch: pytest.MonkeyPatch,
 ) -> tuple[Path, str]:
     database = tmp_path / "settings.sqlite3"
-    with sqlite3.connect(database) as connection:
+    with closing(sqlite3.connect(database)) as connection:
         connection.executescript(
             """
             CREATE TABLE integration_profiles (
@@ -140,6 +141,7 @@ def _canonical_oauth_runtime(
                 "now",
             ),
         )
+        connection.commit()
     encryption_key = Fernet.generate_key().decode("ascii")
     repository = OAuthCredentialRepository(database, encryption_key)
     repository.initialize_schema()

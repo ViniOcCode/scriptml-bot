@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -58,7 +59,7 @@ def _active_oauth_identity(
     """Resolve one active profile and its dashboard-confirmed OAuth identity."""
     profile_slug = os.getenv("MLBOT_SECRET_PROFILE", "default").strip() or "default"
     try:
-        with sqlite3.connect(database_path) as connection:
+        with closing(sqlite3.connect(database_path)) as connection:
             profiles = connection.execute(
                 "SELECT id,slug FROM integration_profiles WHERE active=1"
             ).fetchall()
