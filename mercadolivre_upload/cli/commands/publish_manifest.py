@@ -281,6 +281,9 @@ def publish_manifest(
     workspace_root: Path,
     report_dir: Path = Path("cache/reports"),
     seller_config: Path = Path("config/publisher.yaml"),
+    ml_client_id: str | None = None,
+    expected_seller_id: str | None = None,
+    expected_document_type: str | None = None,
 ) -> None:
     """Publish payload variants declared in the current run_manifest.json contract."""
     manifest_path = manifest_path.expanduser().resolve()
@@ -469,6 +472,9 @@ def publish_manifest(
                     seller_config_path=seller_config,
                     workspace_root=workspace_root,
                     reader=payload_reader,
+                    ml_client_id=ml_client_id,
+                    expected_seller_id=expected_seller_id,
+                    expected_document_type=expected_document_type,
                 )
             runtime.remember(payload_path, cast(ReadPayloadResult, prepared_payload))
             outcome = publish_payload_outcome(
@@ -479,6 +485,9 @@ def publish_manifest(
                 seller_config_path=seller_config,
                 workspace_root=workspace_root,
                 runtime=runtime,
+                ml_client_id=ml_client_id,
+                expected_seller_id=expected_seller_id,
+                expected_document_type=expected_document_type,
             )
             result_row["validation_result"] = outcome.validation_report or {
                 "status": outcome.validation_status

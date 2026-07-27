@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -10,7 +11,7 @@ import requests
 import typer
 
 from mercadolivre_upload.adapters.json_payload_reader import JsonPayloadReader
-from mercadolivre_upload.api.client import MLApiClient
+from mercadolivre_upload.api.client import MLApiClient, validate_item_id
 from mercadolivre_upload.application.mutation_failure import is_ambiguous_mutation_failure
 from mercadolivre_upload.application.publish.internals.validation import (
     classify_mercado_livre_validation_response,
@@ -23,6 +24,7 @@ from mercadolivre_upload.application.validators.seller_policy import (
     SellerPolicyValidator,
     load_seller_config,
 )
+from mercadolivre_upload.auth.exceptions import AuthError
 from mercadolivre_upload.auth.publisher_context import build_publisher_auth_context
 from mercadolivre_upload.contracts.publication import PublicationOutcome
 
@@ -55,6 +57,60 @@ def _expand_effective_payloads(payload: dict[str, Any], upload_mode: str) -> lis
 
 def _prefix_item_message(message: str, index: int, total: int) -> str:
     return message if total <= 1 else f"item[{index}]: {message}"
+
+
+def _authenticated_seller(
+    client: MLApiClient,
+    *,
+    expected_seller_id: str | None,
+    expected_document_type: str | None,
+) -> dict[str, str]:
+    seller = client.get("/users/me")
+    if not isinstance(seller, dict):
+        raise AuthError("Mercado Livre authenticated identity is invalid")
+    seller_id = str(seller.get("id") or seller.get("user_id") or "").strip()
+    site_id = str(seller.get("site_id") or "").strip().upper()
+    identification = seller.get("identification")
+    identification = identification if isinstance(identification, dict) else {}
+    document_type = str(identification.get("type") or "").strip().upper()
+    if not seller_id or not site_id:
+        raise AuthError("Mercado Livre authenticated identity is incomplete")
+    if expected_seller_id and seller_id != expected_seller_id.strip():
+        raise AuthError("Authenticated Mercado Livre seller does not match the expected seller")
+    if expected_document_type and document_type != expected_document_type.strip().upper():
+        raise AuthError(
+            "Authenticated Mercado Livre taxpayer document does not match the expected document"
+        )
+    return {
+        "seller_id": seller_id,
+        "site_id": site_id,
+        "document_type": document_type,
+    }
+
+
+def _build_authenticated_client(
+    *,
+    seller_config_path: Path,
+    workspace_root: Path,
+    ml_client_id: str | None,
+    expected_seller_id: str | None,
+    expected_document_type: str | None,
+) -> tuple[MLApiClient, dict[str, str]]:
+    auth_context = build_publisher_auth_context(
+        settings_file=seller_config_path,
+        workspace_root=workspace_root,
+        strict=True,
+        ml_client_id=ml_client_id,
+        expected_seller_id=expected_seller_id,
+        expected_document_type=expected_document_type,
+    )
+    client = MLApiClient(auth_context.token_manager)
+    identity = _authenticated_seller(
+        client,
+        expected_seller_id=expected_seller_id,
+        expected_document_type=expected_document_type,
+    )
+    return client, identity
 
 
 def prepare_effective_payload_file(
@@ -102,6 +158,9 @@ def validate_effective_payload_file(
     *,
     seller_config_path: Path,
     workspace_root: Path,
+    ml_client_id: str | None = None,
+    expected_seller_id: str | None = None,
+    expected_document_type: str | None = None,
 ) -> dict[str, Any]:
     """Validate a dashboard payload using local checks and Mercado Livre validation."""
     prepared = prepare_effective_payload_file(
@@ -116,12 +175,13 @@ def validate_effective_payload_file(
             "should_block": True,
         }
 
-    auth_context = build_publisher_auth_context(
-        settings_file=seller_config_path,
+    client, _identity = _build_authenticated_client(
+        seller_config_path=seller_config_path,
         workspace_root=workspace_root,
-        strict=True,
+        ml_client_id=ml_client_id,
+        expected_seller_id=expected_seller_id,
+        expected_document_type=expected_document_type,
     )
-    client = MLApiClient(auth_context.token_manager)
     payloads = prepared.get("payloads")
     effective_payloads = (
         payloads if isinstance(payloads, list) and payloads else [prepared["payload"]]
@@ -158,13 +218,26 @@ def publish_effective_payload_outcome(
     workspace_root: Path,
     report_dir: Path | None = None,
     publish_inactive: bool = False,
+    ml_client_id: str | None = None,
+    expected_seller_id: str | None = None,
+    expected_document_type: str | None = None,
 ) -> PublicationOutcome:
     """Publish a dashboard effective payload while preserving the typed outcome."""
+    _build_authenticated_client(
+        seller_config_path=seller_config_path,
+        workspace_root=workspace_root,
+        ml_client_id=ml_client_id,
+        expected_seller_id=expected_seller_id,
+        expected_document_type=expected_document_type,
+    )
     return publish_payload_outcome(
         payload_path,
         report_dir=report_dir,
         dry_run=False,
         publish_inactive=publish_inactive,
+        ml_client_id=ml_client_id,
+        expected_seller_id=expected_seller_id,
+        expected_document_type=expected_document_type,
         seller_config_path=seller_config_path,
         workspace_root=workspace_root,
     )
@@ -177,6 +250,9 @@ def publish_effective_payload_file(
     workspace_root: Path,
     report_dir: Path | None = None,
     publish_inactive: bool = False,
+    ml_client_id: str | None = None,
+    expected_seller_id: str | None = None,
+    expected_document_type: str | None = None,
 ) -> dict[str, Any]:
     """Serialize an effective-payload outcome for dashboard worker IPC.
 
@@ -189,6 +265,9 @@ def publish_effective_payload_file(
         workspace_root=workspace_root,
         report_dir=report_dir,
         publish_inactive=publish_inactive,
+        ml_client_id=ml_client_id,
+        expected_seller_id=expected_seller_id,
+        expected_document_type=expected_document_type,
     )
     return serialize_publication_outcome(outcome)
 
@@ -201,6 +280,7 @@ def publish_manifest_file(
     report_dir: Path,
     dry_run: bool = True,
     publish_inactive: bool = False,
+    ml_client_id: str | None = None,
 ) -> dict[str, Any]:
     """Publish or dry-run a manifest and serialize its aggregate report.
 
@@ -211,6 +291,15 @@ def publish_manifest_file(
     """
     from mercadolivre_upload.cli.commands.publish_manifest import publish_manifest
 
+    expected_seller_id = os.getenv("MLBOT_EXPECTED_SELLER_ID", "").strip() or None
+    expected_document_type = os.getenv("MLBOT_EXPECTED_DOCUMENT_TYPE", "").strip() or None
+    _build_authenticated_client(
+        seller_config_path=seller_config_path,
+        workspace_root=workspace_root,
+        ml_client_id=ml_client_id,
+        expected_seller_id=expected_seller_id,
+        expected_document_type=expected_document_type,
+    )
     report_dir.mkdir(parents=True, exist_ok=True)
     report_path = report_dir / "report.json"
     cli_exit_code: int | None = None
@@ -222,6 +311,9 @@ def publish_manifest_file(
             workspace_root=workspace_root,
             report_dir=report_dir,
             seller_config=seller_config_path,
+            ml_client_id=ml_client_id,
+            expected_seller_id=expected_seller_id,
+            expected_document_type=expected_document_type,
         )
     except typer.Exit as exc:
         cli_exit_code = int(exc.exit_code or 0)
@@ -250,6 +342,9 @@ def apply_remote_item_update(
     seller_config_path: Path,
     workspace_root: Path,
     dry_run: bool = False,
+    ml_client_id: str | None = None,
+    expected_seller_id: str | None = None,
+    expected_document_type: str | None = None,
 ) -> dict[str, Any]:
     """Apply an allowlisted remote item update for post-publication operations."""
     lifecycle_status = {
@@ -304,12 +399,16 @@ def apply_remote_item_update(
             "patch": patch,
         }
 
-    auth_context = build_publisher_auth_context(
-        settings_file=seller_config_path,
+    validate_item_id(item_id)
+    client, identity = _build_authenticated_client(
+        seller_config_path=seller_config_path,
         workspace_root=workspace_root,
-        strict=True,
+        ml_client_id=ml_client_id,
+        expected_seller_id=expected_seller_id,
+        expected_document_type=expected_document_type,
     )
-    client = MLApiClient(auth_context.token_manager)
+    if not item_id.startswith(identity["site_id"]):
+        raise AuthError("Remote item site does not match the authenticated seller site")
     try:
         response = client.update_item(item_id, patch)
     except requests.RequestException as exc:
@@ -347,14 +446,21 @@ def fetch_remote_item(
     *,
     seller_config_path: Path,
     workspace_root: Path,
+    ml_client_id: str | None = None,
+    expected_seller_id: str | None = None,
+    expected_document_type: str | None = None,
 ) -> dict[str, Any]:
     """Fetch a single remote Mercado Livre item for dashboard sync."""
-    auth_context = build_publisher_auth_context(
-        settings_file=seller_config_path,
+    validate_item_id(item_id)
+    client, identity = _build_authenticated_client(
+        seller_config_path=seller_config_path,
         workspace_root=workspace_root,
-        strict=True,
+        ml_client_id=ml_client_id,
+        expected_seller_id=expected_seller_id,
+        expected_document_type=expected_document_type,
     )
-    client = MLApiClient(auth_context.token_manager)
+    if not item_id.startswith(identity["site_id"]):
+        raise AuthError("Remote item site does not match the authenticated seller site")
     return {"status": "synced", "item_id": item_id, "item": client.get(f"/items/{item_id}")}
 
 
@@ -362,22 +468,28 @@ def fetch_authenticated_seller_identity(
     *,
     seller_config_path: Path,
     workspace_root: Path,
+    ml_client_id: str | None = None,
+    expected_seller_id: str | None = None,
 ) -> dict[str, str]:
     """Return the minimal authenticated seller identity needed by safe operations."""
     auth_context = build_publisher_auth_context(
         settings_file=seller_config_path,
         workspace_root=workspace_root,
         strict=True,
+        ml_client_id=ml_client_id,
+        expected_seller_id=expected_seller_id,
     )
     client = MLApiClient(auth_context.token_manager)
-    seller = client.get("/users/me")
-    if not isinstance(seller, dict):
-        raise RuntimeError("GET /users/me returned an invalid response")
-    seller_id = str(seller.get("id") or "").strip()
-    site_id = str(seller.get("site_id") or "").strip().upper()
-    if not seller_id or not site_id:
-        raise RuntimeError("GET /users/me did not return seller id and site id")
-    return {"status": "authenticated", "seller_id": seller_id, "site_id": site_id}
+    identity = _authenticated_seller(
+        client,
+        expected_seller_id=expected_seller_id,
+        expected_document_type=None,
+    )
+    return {
+        "status": "authenticated",
+        "seller_id": identity["seller_id"],
+        "site_id": identity["site_id"],
+    }
 
 
 __all__ = [

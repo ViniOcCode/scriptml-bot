@@ -208,6 +208,9 @@ def test_publish_payload_file_uses_mocked_use_case(tmp_path: Path, monkeypatch) 
         seller_config_path=tmp_path / "publisher.yaml",
         workspace_root=tmp_path / "workspace",
         reader=ANY,
+        ml_client_id=None,
+        expected_seller_id=None,
+        expected_document_type=None,
     )
     mock_use_case.execute.assert_called_once_with(
         payload_path,
@@ -269,6 +272,10 @@ def test_dashboard_effective_payload_has_typed_internal_entrypoint(
     monkeypatch.setattr(
         "mercadolivre_upload.application.dashboard_api.publish_payload_outcome",
         typed_publish,
+    )
+    monkeypatch.setattr(
+        "mercadolivre_upload.application.dashboard_api._build_authenticated_client",
+        MagicMock(),
     )
 
     outcome = publish_effective_payload_outcome(
@@ -382,6 +389,9 @@ def test_publish_payload_passes_resolved_config_and_workspace_to_auth(
         "settings_file": config.resolve(),
         "workspace_root": workspace,
         "strict": True,
+        "ml_client_id": None,
+        "expected_seller_id": None,
+        "expected_document_type": None,
     }
 
 
@@ -579,7 +589,7 @@ def test_dashboard_account_identity_rejects_incomplete_provider_response(
         patch("mercadolivre_upload.application.dashboard_api.MLApiClient") as client_class,
     ):
         client_class.return_value.get.return_value = {"id": 123456789}
-        with pytest.raises(RuntimeError, match="seller id and site id"):
+        with pytest.raises(AuthError, match="identity is incomplete"):
             fetch_authenticated_seller_identity(
                 seller_config_path=tmp_path / "publisher.yaml",
                 workspace_root=tmp_path / "workspace",
@@ -633,6 +643,10 @@ def test_dashboard_manifest_exit_without_report_returns_client_safe_failure(
         "mercadolivre_upload.cli.commands.publish_manifest.publish_manifest",
         _exit_without_report,
     )
+    monkeypatch.setattr(
+        "mercadolivre_upload.application.dashboard_api._build_authenticated_client",
+        MagicMock(),
+    )
 
     result = publish_manifest_file(
         tmp_path / "run_manifest.json",
@@ -658,6 +672,11 @@ def test_dashboard_remote_update_timeout_requires_reconciliation(tmp_path: Path)
         ),
         patch("mercadolivre_upload.application.dashboard_api.MLApiClient") as client_class,
     ):
+        client_class.return_value.get.return_value = {
+            "id": "123456789",
+            "site_id": "MLB",
+            "identification": {"type": "CNPJ"},
+        }
         client_class.return_value.update_item.side_effect = requests.Timeout("timed out")
 
         outcome = apply_remote_item_update(
@@ -691,6 +710,11 @@ def test_dashboard_remote_update_connection_error_requires_reconciliation(
         ),
         patch("mercadolivre_upload.application.dashboard_api.MLApiClient") as client_class,
     ):
+        client_class.return_value.get.return_value = {
+            "id": "123456789",
+            "site_id": "MLB",
+            "identification": {"type": "CNPJ"},
+        }
         client_class.return_value.update_item.side_effect = requests.ConnectionError(
             "connection dropped after send"
         )
@@ -719,6 +743,11 @@ def test_dashboard_remote_update_success_is_confirmed_and_auditable(
         ),
         patch("mercadolivre_upload.application.dashboard_api.MLApiClient") as client_class,
     ):
+        client_class.return_value.get.return_value = {
+            "id": "123456789",
+            "site_id": "MLB",
+            "identification": {"type": "CNPJ"},
+        }
         client_class.return_value.update_item.return_value = {
             "id": "MLB123",
             "status": "paused",
@@ -741,6 +770,124 @@ def test_dashboard_remote_update_success_is_confirmed_and_auditable(
         "patch": {"status": "paused"},
         "response": {"id": "MLB123", "status": "paused"},
     }
+
+
+def test_remote_update_rejects_invalid_item_id_before_auth(tmp_path: Path) -> None:
+    with (
+        patch(
+            "mercadolivre_upload.application.dashboard_api.build_publisher_auth_context"
+        ) as build_context,
+        pytest.raises(ValueError, match="Invalid item_id format"),
+    ):
+        apply_remote_item_update(
+            "../MLB123",
+            {"status": "paused"},
+            operation="pause",
+            seller_config_path=tmp_path / "publisher.yaml",
+            workspace_root=tmp_path / "workspace",
+        )
+
+    build_context.assert_not_called()
+
+
+def test_remote_update_blocks_authenticated_seller_mismatch_before_mutation(
+    tmp_path: Path,
+) -> None:
+    auth_context = MagicMock()
+    with (
+        patch(
+            "mercadolivre_upload.application.dashboard_api.build_publisher_auth_context",
+            return_value=auth_context,
+        ) as build_context,
+        patch("mercadolivre_upload.application.dashboard_api.MLApiClient") as client_class,
+    ):
+        client_class.return_value.get.return_value = {
+            "id": "seller-other",
+            "site_id": "MLB",
+            "identification": {"type": "CNPJ"},
+        }
+
+        with pytest.raises(AuthError, match="expected seller"):
+            apply_remote_item_update(
+                "MLB123",
+                {"status": "paused"},
+                operation="pause",
+                seller_config_path=tmp_path / "publisher.yaml",
+                workspace_root=tmp_path / "workspace",
+                ml_client_id="app-current",
+                expected_seller_id="seller-expected",
+            )
+
+    build_context.assert_called_once_with(
+        settings_file=tmp_path / "publisher.yaml",
+        workspace_root=tmp_path / "workspace",
+        strict=True,
+        ml_client_id="app-current",
+        expected_seller_id="seller-expected",
+        expected_document_type=None,
+    )
+    client_class.return_value.update_item.assert_not_called()
+
+
+def test_remote_update_blocks_item_from_another_site(tmp_path: Path) -> None:
+    with (
+        patch(
+            "mercadolivre_upload.application.dashboard_api.build_publisher_auth_context",
+            return_value=MagicMock(),
+        ),
+        patch("mercadolivre_upload.application.dashboard_api.MLApiClient") as client_class,
+    ):
+        client_class.return_value.get.return_value = {
+            "id": "seller-expected",
+            "site_id": "MLA",
+            "identification": {"type": "CUIT"},
+        }
+
+        with pytest.raises(AuthError, match="item site"):
+            apply_remote_item_update(
+                "MLB123",
+                {"status": "paused"},
+                operation="pause",
+                seller_config_path=tmp_path / "publisher.yaml",
+                workspace_root=tmp_path / "workspace",
+                expected_seller_id="seller-expected",
+            )
+
+    client_class.return_value.update_item.assert_not_called()
+
+
+def test_effective_validation_blocks_taxpayer_mismatch_before_item_validation(
+    tmp_path: Path,
+) -> None:
+    payload_path = tmp_path / "70_payload.json"
+    payload_path.write_text(json.dumps(_minimal_builder_payload()), encoding="utf-8")
+    with (
+        patch(
+            "mercadolivre_upload.application.dashboard_api.build_publisher_auth_context",
+            return_value=MagicMock(),
+        ),
+        patch("mercadolivre_upload.application.dashboard_api.MLApiClient") as client_class,
+    ):
+        client_class.return_value.get.return_value = {
+            "id": "seller-expected",
+            "site_id": "MLB",
+            "identification": {"type": "CPF"},
+        }
+
+        with pytest.raises(AuthError, match="expected document"):
+            from mercadolivre_upload.application.dashboard_api import (
+                validate_effective_payload_file,
+            )
+
+            validate_effective_payload_file(
+                payload_path,
+                seller_config_path=_publisher_config(tmp_path),
+                workspace_root=tmp_path / "workspace",
+                expected_seller_id="seller-expected",
+                expected_document_type="CNPJ",
+            )
+
+    client_class.return_value.validate_item.assert_not_called()
 
 
 def test_publish_payload_cli_delegates_to_public_api(tmp_path: Path) -> None:

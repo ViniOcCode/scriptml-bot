@@ -31,6 +31,9 @@ def _build_use_case(
     seller_config_path: Path,
     workspace_root: Path,
     reader: JsonPayloadReader | None = None,
+    ml_client_id: str | None = None,
+    expected_seller_id: str | None = None,
+    expected_document_type: str | None = None,
 ) -> PublishPayloadUseCase:
     """Wire the JSON publish use case with the normal scriptml-bot infrastructure."""
     from mercadolivre_upload.application.validators.seller_policy import SellerPolicyValidator
@@ -43,6 +46,9 @@ def _build_use_case(
         settings_file=config_path,
         workspace_root=workspace_root,
         strict=True,
+        ml_client_id=ml_client_id,
+        expected_seller_id=expected_seller_id,
+        expected_document_type=expected_document_type,
     )
     auth_manager = auth_context.token_manager
     api_client = MLApiClient(auth_manager)
@@ -72,6 +78,9 @@ class PublisherRuntime:
         seller_config_path: Path,
         workspace_root: Path,
         reader: JsonPayloadReader | None = None,
+        ml_client_id: str | None = None,
+        expected_seller_id: str | None = None,
+        expected_document_type: str | None = None,
     ) -> PublisherRuntime:
         """Build auth, API client, policy and fiscal service exactly once."""
         payload_reader = reader or JsonPayloadReader(strict_publisher_contract=True)
@@ -82,6 +91,9 @@ class PublisherRuntime:
                 seller_config_path=seller_config_path,
                 workspace_root=workspace_root,
                 reader=payload_reader,
+                ml_client_id=ml_client_id,
+                expected_seller_id=expected_seller_id,
+                expected_document_type=expected_document_type,
             ),
         )
 
@@ -268,6 +280,9 @@ def publish_payload_outcome(
     seller_config_path: Path,
     workspace_root: Path,
     runtime: PublisherRuntime | None = None,
+    ml_client_id: str | None = None,
+    expected_seller_id: str | None = None,
+    expected_document_type: str | None = None,
 ) -> PublicationOutcome:
     """Publish a canonical payload variant produced by ml-builder.
 
@@ -316,6 +331,9 @@ def publish_payload_outcome(
             seller_config_path=seller_config_path,
             workspace_root=workspace_root,
             reader=reader,
+            ml_client_id=ml_client_id,
+            expected_seller_id=expected_seller_id,
+            expected_document_type=expected_document_type,
         )
         effective_runtime.remember(path, prepared)
     else:
@@ -333,6 +351,9 @@ def publish_payload_file(
     seller_config_path: Path,
     workspace_root: Path,
     runtime: PublisherRuntime | None = None,
+    ml_client_id: str | None = None,
+    expected_seller_id: str | None = None,
+    expected_document_type: str | None = None,
 ) -> dict[str, Any]:
     """Serialize a publication outcome for the CLI/dashboard IPC boundary.
 
@@ -348,6 +369,9 @@ def publish_payload_file(
         seller_config_path=seller_config_path,
         workspace_root=workspace_root,
         runtime=runtime,
+        ml_client_id=ml_client_id,
+        expected_seller_id=expected_seller_id,
+        expected_document_type=expected_document_type,
     )
     return serialize_publication_outcome(outcome)
 
