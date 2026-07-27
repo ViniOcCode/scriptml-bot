@@ -937,6 +937,7 @@ class PublishPayloadUseCase:
         fiscal_blocking_errors: list[str] = []
         fiscal_report: list[dict[str, Any]] = []
         fiscal_unknown = False
+        fiscal_pending = False
         if read_result.fiscal_items:
             if self._fiscal_service is None:
                 fiscal_blocking_errors.append(
@@ -1054,6 +1055,24 @@ class PublishPayloadUseCase:
                                 fiscal_data,
                                 variation_id=target_variation_id,
                             )
+                        raw_result_status = getattr(fiscal_result, "status", None)
+                        raw_result_value = getattr(raw_result_status, "value", raw_result_status)
+                        result_status = (
+                            raw_result_value.strip().lower()
+                            if isinstance(raw_result_value, str) and raw_result_value.strip()
+                            else "completed"
+                            if fiscal_result.success
+                            else "failed"
+                        )
+                        if result_status == "verified":
+                            result_status = "completed"
+                        result_reconciliation = (
+                            getattr(fiscal_result, "reconciliation_required", False) is True
+                        )
+                        if result_status == "unknown":
+                            fiscal_unknown = True
+                        if result_status in {"pending", "pending_verification"}:
+                            fiscal_pending = True
                         fiscal_report.append(
                             {
                                 "index": fiscal_index,
@@ -1068,21 +1087,23 @@ class PublishPayloadUseCase:
                                 "validation_errors": fiscal_data.get_validation_errors(),
                                 "api_response": getattr(fiscal_result, "response", None),
                                 "published_item_exists": True,
-                                "final_fiscal_status": (
-                                    str(
-                                        getattr(
-                                            getattr(fiscal_result, "status", None),
-                                            "value",
-                                            getattr(fiscal_result, "status", None),
-                                        )
-                                    )
-                                    if getattr(fiscal_result, "status", None) is not None
-                                    else "unknown"
+                                "final_fiscal_status": result_status,
+                                "side_effect_state": getattr(
+                                    fiscal_result, "side_effect_state", "confirmed"
+                                ),
+                                "reconciliation_required": result_reconciliation,
+                                "invoice_ready": getattr(
+                                    fiscal_result, "invoice_ready", None
                                 ),
                             }
                         )
-                        if not fiscal_result.success:
-                            message = fiscal_result.error_message or "falha no envio fiscal"
+                        if not fiscal_result.success or result_reconciliation:
+                            raw_message = getattr(fiscal_result, "error_message", None)
+                            message = (
+                                raw_message.strip()
+                                if isinstance(raw_message, str) and raw_message.strip()
+                                else "falha no envio fiscal"
+                            )
                             fiscal_blocking_errors.append(f"fiscal[{fiscal_index}]: {message}")
                     except requests.RequestException as exc:
                         ambiguous = is_ambiguous_mutation_failure(exc)
@@ -1163,7 +1184,13 @@ class PublishPayloadUseCase:
                 warnings=warnings,
                 validation_status=aggregate_validation_status,
                 validation_report=validation_report,
-                fiscal_status="failed",
+                fiscal_status=(
+                    "unknown"
+                    if fiscal_unknown
+                    else "pending_verification"
+                    if fiscal_pending
+                    else "failed"
+                ),
                 fiscal_report=fiscal_report,
                 reconciliation_required=True,
                 phases=[
@@ -1193,7 +1220,7 @@ class PublishPayloadUseCase:
             warnings=warnings,
             validation_status=aggregate_validation_status,
             validation_report=validation_report,
-            fiscal_status="submitted" if read_result.fiscal_items else None,
+            fiscal_status="completed" if read_result.fiscal_items else None,
             fiscal_report=fiscal_report,
             reconciliation_required=requires_reconciliation,
             phases=phases,

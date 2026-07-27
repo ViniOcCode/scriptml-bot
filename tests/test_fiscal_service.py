@@ -201,6 +201,49 @@ def test_submit_workflow_checks_fiscal_existence_only_once():
     api_client.check_fiscal_data_exists.assert_called_once_with("SKU-123")
 
 
+def test_submit_workflow_does_not_retry_ambiguous_fiscal_registration():
+    api_client = MagicMock()
+    api_client.check_fiscal_data_exists.return_value = (False, None)
+    api_client.register_fiscal_data.side_effect = requests.Timeout("response lost")
+    service = FiscalService(
+        api_client=api_client,
+        retry_config=MagicMock(max_retries=4),
+        can_invoice_wait_delay=0.0,
+    )
+
+    result = service.submit_fiscal_data_workflow("MLB123", _build_valid_fiscal_data())
+
+    assert result.success is False
+    assert result.status == FiscalSubmissionStatus.UNKNOWN
+    assert result.side_effect_state == "unknown"
+    assert result.reconciliation_required is True
+    api_client.register_fiscal_data.assert_called_once()
+    api_client.link_fiscal_sku_to_item.assert_not_called()
+
+
+def test_submit_workflow_does_not_retry_ambiguous_fiscal_link():
+    response = MagicMock(status_code=503)
+    response.json.return_value = {"message": "upstream unavailable"}
+    link_error = requests.HTTPError("upstream unavailable", response=response)
+    api_client = MagicMock()
+    api_client.check_fiscal_data_exists.return_value = (True, {"sku": "SKU-123"})
+    api_client.link_fiscal_sku_to_item.side_effect = link_error
+    service = FiscalService(
+        api_client=api_client,
+        can_invoice_wait_delay=0.0,
+        can_invoice_max_retries=4,
+    )
+
+    result = service.submit_fiscal_data_workflow("MLB123", _build_valid_fiscal_data())
+
+    assert result.success is False
+    assert result.status == FiscalSubmissionStatus.UNKNOWN
+    assert result.side_effect_state == "unknown"
+    assert result.reconciliation_required is True
+    api_client.link_fiscal_sku_to_item.assert_called_once()
+    api_client.verify_invoice_readiness.assert_not_called()
+
+
 def test_extract_error_code_returns_first_cause_code():
     api_client = MagicMock()
     service = FiscalService(api_client=api_client)

@@ -33,6 +33,7 @@ class FiscalSubmissionStatus(Enum):
     VERIFIED = "verified"
     PENDING_VERIFICATION = "pending_verification"
     FAILED = "failed"
+    UNKNOWN = "unknown"
     SKIPPED = "skipped"
 
 
@@ -49,6 +50,9 @@ class FiscalSubmissionResult:
     error_message: str | None = None
     error_code: str | None = None
     retry_count: int = 0
+    side_effect_state: str = "none"
+    reconciliation_required: bool = False
+    invoice_ready: bool | None = None
 
 
 class FiscalApiPort(Protocol):
@@ -144,6 +148,11 @@ class FiscalService:
     def _extract_status_code(self, exception: Exception) -> int:
         """Extract HTTP status code from exception."""
         return extract_status_code(exception)
+
+    def _is_ambiguous_mutation_failure(self, exception: Exception) -> bool:
+        """Return whether a failed write may nevertheless have reached Mercado Livre."""
+        status_code = self._extract_status_code(exception)
+        return status_code == 0 or status_code in {408, 425, 500, 502, 503, 504}
 
     @staticmethod
     def _extract_response_detail(exception: Exception) -> dict[str, Any] | None:
@@ -280,12 +289,10 @@ class FiscalService:
                 logger.info(f"Registering fiscal data for SKU {sku} (item {item_id})")
                 logger.debug(f"Fiscal payload: {payload}")
 
-                _, registration_retry_count = self._execute_with_retry(
-                    lambda: self.api_client.register_fiscal_data(payload),
-                    "Register fiscal data",
-                    sku,
-                    item_id,
-                )
+                # Registration is a non-idempotent provider mutation. A timeout
+                # or 5xx can mean that Mercado Livre applied it but the response
+                # was lost, so it must never be retried automatically.
+                self.api_client.register_fiscal_data(payload)
 
                 logger.info(f"Successfully registered fiscal data for SKU {sku} (item {item_id})")
 
@@ -296,16 +303,23 @@ class FiscalService:
                 if error_detail is not None:
                     error_msg = f"{error_msg} - Response: {error_detail}"
                 logger.error(f"{error_msg} for SKU {sku} (item {item_id})")
+                ambiguous = self._is_ambiguous_mutation_failure(e)
                 return FiscalSubmissionResult(
                     success=False,
                     item_id=item_id,
                     sku=sku,
-                    status=FiscalSubmissionStatus.FAILED,
+                    status=(
+                        FiscalSubmissionStatus.UNKNOWN
+                        if ambiguous
+                        else FiscalSubmissionStatus.FAILED
+                    ),
                     fiscal_data=fiscal_data,
                     response=error_detail,
                     error_message=error_msg,
                     error_code=error_code or "REGISTER_ERROR",
                     retry_count=check_exists_retry_count + registration_retry_count,
+                    side_effect_state="unknown" if ambiguous else "none",
+                    reconciliation_required=ambiguous,
                 )
         else:
             logger.info(f"Fiscal data already exists for SKU {sku} (item {item_id})")
@@ -326,16 +340,23 @@ class FiscalService:
             if error_detail is not None:
                 error_msg = f"{error_msg} - Response: {error_detail}"
             logger.error(f"{error_msg} for SKU {sku} (item {item_id})")
+            ambiguous = self._is_ambiguous_mutation_failure(e)
             return FiscalSubmissionResult(
                 success=False,
                 item_id=item_id,
                 sku=sku,
-                status=FiscalSubmissionStatus.FAILED,
+                status=(
+                    FiscalSubmissionStatus.UNKNOWN
+                    if ambiguous
+                    else FiscalSubmissionStatus.FAILED
+                ),
                 fiscal_data=fiscal_data,
                 response=error_detail,
                 error_message=error_msg,
                 error_code="SKU_ITEM_LINK_ERROR",
                 retry_count=total_retry_count,
+                side_effect_state="unknown" if ambiguous else "partial",
+                reconciliation_required=True,
             )
 
         return self._verify_invoice_readiness(
@@ -381,6 +402,8 @@ class FiscalService:
                     fiscal_data=fiscal_data,
                     response=response,
                     retry_count=total_retry_count,
+                    side_effect_state="confirmed",
+                    invoice_ready=True,
                 )
 
             logger.warning(
@@ -396,6 +419,9 @@ class FiscalService:
                 error_message="Invoice readiness pending verification",
                 error_code="INVOICE_PENDING",
                 retry_count=total_retry_count,
+                side_effect_state="confirmed",
+                reconciliation_required=True,
+                invoice_ready=False,
             )
 
         except Exception as e:
@@ -410,6 +436,8 @@ class FiscalService:
                 error_message=error_msg,
                 error_code="VERIFY_ERROR",
                 retry_count=previous_retry_count,
+                side_effect_state="confirmed",
+                reconciliation_required=True,
             )
 
     def _extract_error_code(self, exception: Exception) -> str | None:

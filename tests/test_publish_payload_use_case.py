@@ -589,7 +589,7 @@ class TestPublishPayloadUseCase:
         assert fiscal_data.sku == "ABC-001"
         assert fiscal_data.ncm == "90183929"
         assert fiscal_data.origin_type == "reseller"
-        assert result.fiscal_status == "submitted"
+        assert result.fiscal_status == "completed"
         assert result.fiscal_report[0]["item_id"] == "MLB987654321"
         assert result.fiscal_report[0]["raw_origin_type"] == "reseller"
         assert result.fiscal_report[0]["normalized_origin_type"] == "reseller"

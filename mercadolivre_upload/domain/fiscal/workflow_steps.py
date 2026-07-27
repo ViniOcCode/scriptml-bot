@@ -89,7 +89,10 @@ def wait_for_sku_link(
                 logger_instance.info(f"SKU {sku} is already linked to item {item_id}")
                 return response_detail, attempt
 
-            if status_code and status_code not in retryable_statuses:
+            # Only retry responses proving that the link was not applied. A
+            # transport failure or 5xx is ambiguous and requires reconciliation.
+            safe_to_retry = status_code in {404, 429}
+            if not safe_to_retry:
                 raise
 
             if attempt < max_retries:
