@@ -50,6 +50,13 @@ def _payload_document(
         "description": "desc",
         "fiscal": {"items": []},
         "_meta": {
+            "category_decision": {
+                "schema_version": 1,
+                "category_id": "MLB123",
+                "source": "ai",
+                "resolution_mode": "llm_authoritative",
+                "review": {"status": "unreviewed", "evidence": None},
+            },
             "sku": "SKU-1",
             "publication": {
                 "seller_model": "user_products" if wrapper_list else "items",
@@ -206,6 +213,26 @@ def _patch_publish(
     monkeypatch.setattr(
         "mercadolivre_upload.cli.commands.publish_manifest.publish_payload_outcome", _fake_publish
     )
+
+
+def test_manifest_rejects_real_publication_without_explicit_intent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest_reader = MagicMock()
+    monkeypatch.setattr(
+        "mercadolivre_upload.cli.commands.publish_manifest.load_run_manifest", manifest_reader
+    )
+
+    with pytest.raises(typer.Exit) as exc:
+        publish_manifest(
+            tmp_path / "workspace" / "run_manifest.json",
+            dry_run=False,
+            workspace_root=tmp_path / "workspace",
+            report_dir=tmp_path / "reports",
+        )
+
+    assert exc.value.exit_code == 2
+    manifest_reader.assert_not_called()
 
 
 def test_current_manifest_shape_with_classic_and_premium_selects_both(
@@ -376,7 +403,7 @@ def test_failed_manifest_with_zero_publishable_payloads_fails_clearly(tmp_path: 
     with pytest.raises(typer.Exit) as exc:
         publish_manifest(
             manifest_path, workspace_root=tmp_path / "workspace", report_dir=tmp_path / "reports"
-    )
+        )
 
     assert exc.value.exit_code == 1
     assert not (tmp_path / "reports" / "report.json").exists()

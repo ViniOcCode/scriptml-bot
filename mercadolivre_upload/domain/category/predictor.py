@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from mercadolivre_upload.infrastructure.logging import log_safe_event
 from mercadolivre_upload.shared.utils.text_utils import TextNormalizer
 
 logger = logging.getLogger(__name__)
@@ -19,7 +20,14 @@ def call_domain_discovery(
     """Call domain discovery API and return normalized prediction list."""
     logger.info(f"Calling domain discovery for: '{title[:60]}...'")
     predictions = api.predict_category(title, site_id, limit=limit)
-    logger.debug(f"Domain discovery response: {predictions}")
+    log_safe_event(
+        logger,
+        logging.DEBUG,
+        "category_domain_discovery_completed",
+        operation="predict_category",
+        count=len(predictions) if isinstance(predictions, list) else 0,
+        response=predictions,
+    )
     return predictions if isinstance(predictions, list) else []
 
 

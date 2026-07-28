@@ -13,6 +13,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from mercadolivre_upload.adapters.json_payload_reader import CategoryDecision
 from mercadolivre_upload.shared.publisher_settings import load_publisher_settings
 
 logger = logging.getLogger(__name__)
@@ -138,25 +139,6 @@ def load_seller_config(path: Path) -> SellerConfig:
     return SellerConfig.model_validate(seller_raw)
 
 
-def default_seller_config() -> SellerConfig:
-    """Return a permissive SellerConfig for environments without seller.yaml."""
-    return SellerConfig(
-        listing=ListingConfig(
-            allowed_types=[
-                "gold_special",
-                "gold_pro",
-                "gold_premium",
-                "gold",
-                "silver",
-                "bronze",
-                "free",
-            ],
-            default_type="gold_special",
-        ),
-        pricing=PricingConfig(min_price=0.01, max_price=999_999.00),
-    )
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -203,6 +185,7 @@ class SellerPolicyValidator:
         *,
         ai_suggested: bool = False,
         category_confidence: float | None = None,
+        category_decision: CategoryDecision | None = None,
     ) -> PolicyResult:
         """Validate payload against seller rules.
 
@@ -210,6 +193,7 @@ class SellerPolicyValidator:
             payload: Item payload dict (without _meta).
             ai_suggested: Whether the category was suggested by AI.
             category_confidence: AI confidence score (0.0–1.0); None = not available.
+            category_decision: Versioned category provenance from a strict builder payload.
 
         Returns:
             PolicyResult with list of violations (may be empty).
@@ -266,14 +250,24 @@ class SellerPolicyValidator:
                 )
             )
 
-        # AI-suggested category without human review
-        if ai_suggested and self._config.batch.human_review_required:
+        decision_is_ai = (
+            category_decision.source == "ai" if category_decision is not None else ai_suggested
+        )
+        decision_is_approved = (
+            category_decision.is_approved if category_decision is not None else False
+        )
+        decision_confidence = (
+            category_decision.confidence if category_decision is not None else category_confidence
+        )
+
+        # An AI decision only becomes publishable after an explicit auditable review.
+        if decision_is_ai and not decision_is_approved and self._config.batch.human_review_required:
             violations.append(
                 PolicyViolation(
                     field="category_id",
                     message=(
-                        "Categoria sugerida por IA não foi revisada por humano. "
-                        "Defina review evidence no run_manifest.json ou "
+                        "Categoria decidida por IA não possui revisão humana aprovada e auditável. "
+                        "Registre category_decision.review.evidence ou "
                         "human_review_required: false em publisher.yaml"
                     ),
                     severity="error",
@@ -282,8 +276,8 @@ class SellerPolicyValidator:
 
         # AI confidence threshold check
         min_conf = self._config.batch.min_ai_confidence
-        confidence = category_confidence if category_confidence is not None else 0.0
-        if ai_suggested and min_conf > 0.0 and confidence < min_conf:
+        confidence = decision_confidence if decision_confidence is not None else 0.0
+        if decision_is_ai and min_conf > 0.0 and confidence < min_conf:
             violations.append(
                 PolicyViolation(
                     field="category_id",

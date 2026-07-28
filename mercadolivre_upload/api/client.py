@@ -4,8 +4,12 @@ Uses ResilientHTTPClient for automatic retry, backoff, jitter and rate limiting.
 All HTTP config is read from infrastructure.config.Settings or sensible defaults.
 """
 
+import json
 import logging
+import math
+import os
 import re
+from types import SimpleNamespace
 from typing import Any, cast
 
 from mercadolivre_upload.api.domains import categories as category_endpoints
@@ -52,32 +56,124 @@ def validate_clip_item_id(item_id: str | None) -> None:
         )
 
 
-def _build_http_client() -> ResilientHTTPClient:
-    """Build HTTP client reading config from Settings when available."""
+def _validate_http_settings(settings: Any) -> None:
+    """Validate HTTP resilience values even when settings were injected in tests."""
+    timeout = settings.http_timeout
+    retries = settings.http_max_retries
+    backoff_factor = settings.http_backoff_factor
+    burst = settings.rate_limit_burst
+    rate_enabled = settings.rate_limit_enabled
+    rate = settings.rate_limit_requests_per_second
+
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0:
+        raise ValueError("http_timeout must be greater than zero")
+    if not math.isfinite(float(timeout)):
+        raise ValueError("http_timeout must be finite")
+    if isinstance(retries, bool) or not isinstance(retries, int) or retries < 0:
+        raise ValueError("http_max_retries must be a finite non-negative integer")
+    if (
+        isinstance(backoff_factor, bool)
+        or not isinstance(backoff_factor, (int, float))
+        or not math.isfinite(float(backoff_factor))
+        or backoff_factor < 0
+    ):
+        raise ValueError("http_backoff_factor must be finite and non-negative")
+    if isinstance(burst, bool) or not isinstance(burst, int) or burst < 1:
+        raise ValueError("rate_limit_burst must be at least one")
+    if rate_enabled and (
+        isinstance(rate, bool)
+        or not isinstance(rate, (int, float))
+        or not math.isfinite(float(rate))
+        or rate <= 0
+    ):
+        raise ValueError(
+            "rate_limit_requests_per_second must be finite and greater than zero "
+            "when rate limiting is enabled"
+        )
+
+
+def _snapshot_http_settings(snapshot: str) -> SimpleNamespace:
+    """Read validated HTTP values from ``runtime.http`` in a publisher snapshot."""
     try:
+        raw = json.loads(snapshot)
+    except json.JSONDecodeError as exc:
+        raise ValueError("Canonical publisher configuration snapshot is invalid JSON") from exc
+    if not isinstance(raw, dict):
+        raise ValueError("Canonical publisher configuration snapshot must be an object")
+    runtime = raw.get("runtime", {})
+    if runtime is None:
+        runtime = {}
+    if not isinstance(runtime, dict):
+        raise ValueError("Canonical publisher runtime configuration must be an object")
+    runtime_http = runtime.get("http", {})
+    if runtime_http is None:
+        runtime_http = {}
+    if not isinstance(runtime_http, dict):
+        raise ValueError("Canonical publisher HTTP configuration must be an object")
+    runtime_rate_limit = runtime_http.get("rate_limit", {})
+    if runtime_rate_limit is None:
+        runtime_rate_limit = {}
+    if not isinstance(runtime_rate_limit, dict):
+        raise ValueError("Canonical publisher HTTP rate_limit configuration must be an object")
+
+    allowed_http_keys = {"timeout", "max_retries", "backoff_factor", "rate_limit"}
+    unsupported_http_keys = sorted(set(runtime_http) - allowed_http_keys)
+    if unsupported_http_keys:
+        raise ValueError(
+            "Canonical publisher HTTP configuration contains unsupported fields: "
+            + ", ".join(unsupported_http_keys)
+        )
+    allowed_rate_limit_keys = {"enabled", "requests_per_second", "burst"}
+    unsupported_rate_limit_keys = sorted(set(runtime_rate_limit) - allowed_rate_limit_keys)
+    if unsupported_rate_limit_keys:
+        raise ValueError(
+            "Canonical publisher HTTP rate_limit configuration contains unsupported fields: "
+            + ", ".join(unsupported_rate_limit_keys)
+        )
+
+    def value(container: dict[str, Any], name: str, default: Any) -> Any:
+        return container.get(name, default)
+
+    settings = SimpleNamespace(
+        http_timeout=value(runtime_http, "timeout", 30),
+        http_max_retries=value(runtime_http, "max_retries", 3),
+        http_backoff_factor=value(runtime_http, "backoff_factor", 0.5),
+        rate_limit_enabled=value(runtime_rate_limit, "enabled", True),
+        rate_limit_requests_per_second=value(runtime_rate_limit, "requests_per_second", 2.0),
+        rate_limit_burst=value(runtime_rate_limit, "burst", 5),
+    )
+    _validate_http_settings(settings)
+    return settings
+
+
+def _build_http_client() -> ResilientHTTPClient:
+    """Build a validated HTTP client; never fall back after configuration errors."""
+    snapshot = os.getenv("MLBOT_PUBLISHER_CONFIG_SNAPSHOT")
+    if snapshot is not None:
+        settings = _snapshot_http_settings(snapshot)
+    else:
         from mercadolivre_upload.infrastructure.config import get_settings
 
         settings = get_settings()
-        limiter = (
-            TokenBucketLimiter(
-                rate=settings.rate_limit_requests_per_second,
-                burst=settings.rate_limit_burst,
-            )
-            if settings.rate_limit_enabled
-            else None
+
+    _validate_http_settings(settings)
+    limiter = (
+        TokenBucketLimiter(
+            rate=settings.rate_limit_requests_per_second,
+            burst=settings.rate_limit_burst,
         )
-        default_policy = RetryPolicy(
-            max_retries=settings.http_max_retries,
-            base_delay=settings.http_backoff_factor,
-        )
-        return ResilientHTTPClient(
-            timeout=settings.http_timeout,
-            default_policy=default_policy,
-            limiter=limiter,
-        )
-    except (ImportError, OSError, RuntimeError, ValueError) as exc:
-        logger.debug("Falling back to default HTTP client settings: %s", exc)
-        return ResilientHTTPClient()
+        if settings.rate_limit_enabled
+        else None
+    )
+    default_policy = RetryPolicy(
+        max_retries=settings.http_max_retries,
+        base_delay=settings.http_backoff_factor,
+    )
+    return ResilientHTTPClient(
+        timeout=settings.http_timeout,
+        default_policy=default_policy,
+        limiter=limiter,
+    )
 
 
 class MLApiClient:

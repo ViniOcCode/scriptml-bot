@@ -23,10 +23,12 @@ from mercadolivre_upload.cli.commands.common import (
     merge_category_resolution_fields,
     parse_products_or_exit,
 )
-from mercadolivre_upload.cli.commands.upload import (
-    _build_row_category_metadata,
-    _extract_row_identity,
-    _prime_category_resolution_context,
+from mercadolivre_upload.cli.commands.spreadsheet_inputs import (
+    build_row_category_metadata,
+    extract_row_identity,
+    prime_category_resolution_context,
+)
+from mercadolivre_upload.cli.commands.spreadsheet_runtime import (
     build_publish_use_case,
     load_config,
 )
@@ -76,7 +78,7 @@ def validate(
 
     products = parse_products_or_exit(parser=parser, excel=excel, err_console=err_console)
     console.print(f"Found {len(products)} products")
-    _prime_category_resolution_context(use_case, products, category)
+    prime_category_resolution_context(use_case, products, category)
 
     total_items = len(products)
     total_batches = (total_items + batch_size - 1) // batch_size if total_items else 0
@@ -99,8 +101,8 @@ def validate(
 
         item_results: list[dict[str, Any]] = []
         for index, row in enumerate(batch_products):
-            sku, title = _extract_row_identity(row)
-            row_category_metadata = _build_row_category_metadata(row, category)
+            sku, title = extract_row_identity(row)
+            row_category_metadata = build_row_category_metadata(row, category)
             base_item: dict[str, Any] = {
                 "index": index,
                 "sku": sku,

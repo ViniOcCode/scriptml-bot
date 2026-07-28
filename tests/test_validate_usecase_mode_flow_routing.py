@@ -148,6 +148,9 @@ def test_forced_user_products_flow_requires_explicit_family_name() -> None:
         publisher=publisher,  # type: ignore[arg-type]
         image_uploader=_ImageUploader(),  # type: ignore[arg-type]
         config=config,
+        dry_run=False,
+        execute=True,
+        confirmation="PUBLICAR",
         enable_feedback=False,
         enable_fiscal_submission=False,
     )

@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Protocol
 
+from mercadolivre_upload.infrastructure.logging import log_safe_event
+
 from .data import FiscalData
 from .retry import RetryConfig, execute_with_retry, extract_response_detail, extract_status_code
 from .workflow_steps import (
@@ -283,7 +285,15 @@ class FiscalService:
             )
         except Exception as e:
             error_msg = f"Failed to check fiscal data existence: {str(e)}"
-            logger.error(f"{error_msg} for SKU {sku} (item {item_id})")
+            log_safe_event(
+                logger,
+                logging.ERROR,
+                "fiscal_existence_check_failed",
+                operation="check_fiscal_data_exists",
+                sku=sku,
+                item_id=item_id,
+                error_type=type(e).__name__,
+            )
             return FiscalSubmissionResult(
                 success=False,
                 item_id=item_id,
@@ -300,7 +310,16 @@ class FiscalService:
             try:
                 payload = fiscal_data.to_api_payload()
                 logger.info(f"Registering fiscal data for SKU {sku} (item {item_id})")
-                logger.debug(f"Fiscal payload: {payload}")
+                log_safe_event(
+                    logger,
+                    logging.DEBUG,
+                    "fiscal_registration_payload_prepared",
+                    operation="register_fiscal_data",
+                    sku=sku,
+                    item_id=item_id,
+                    field_count=len(payload),
+                    payload=payload,
+                )
 
                 # Registration is a non-idempotent provider mutation. A timeout
                 # or 5xx can mean that Mercado Livre applied it but the response
@@ -315,7 +334,16 @@ class FiscalService:
                 error_detail = self._extract_response_detail(e)
                 if error_detail is not None:
                     error_msg = f"{error_msg} - Response: {error_detail}"
-                logger.error(f"{error_msg} for SKU {sku} (item {item_id})")
+                log_safe_event(
+                    logger,
+                    logging.ERROR,
+                    "fiscal_registration_failed",
+                    operation="register_fiscal_data",
+                    sku=sku,
+                    item_id=item_id,
+                    error_type=type(e).__name__,
+                    response=error_detail,
+                )
                 ambiguous = self._is_ambiguous_mutation_failure(e)
                 return FiscalSubmissionResult(
                     success=False,
@@ -352,7 +380,16 @@ class FiscalService:
             error_detail = self._extract_response_detail(e)
             if error_detail is not None:
                 error_msg = f"{error_msg} - Response: {error_detail}"
-            logger.error(f"{error_msg} for SKU {sku} (item {item_id})")
+            log_safe_event(
+                logger,
+                logging.ERROR,
+                "fiscal_sku_link_failed",
+                operation="link_fiscal_sku",
+                sku=sku,
+                item_id=item_id,
+                error_type=type(e).__name__,
+                response=error_detail,
+            )
             ambiguous = self._is_ambiguous_mutation_failure(e)
             return FiscalSubmissionResult(
                 success=False,
@@ -417,8 +454,15 @@ class FiscalService:
                     invoice_ready=True,
                 )
 
-            logger.warning(
-                f"Invoice readiness still pending for item {item_id} (SKU: {sku}): {response}"
+            log_safe_event(
+                logger,
+                logging.WARNING,
+                "fiscal_invoice_readiness_pending",
+                operation="verify_invoice_readiness",
+                sku=sku,
+                item_id=item_id,
+                status="pending",
+                response=response,
             )
             return FiscalSubmissionResult(
                 success=True,
@@ -556,7 +600,15 @@ class FiscalService:
             )
             return exists, data, retry_count
         except Exception as e:
-            logger.error(f"Failed to check fiscal data for SKU {sku}: {e}")
+            log_safe_event(
+                logger,
+                logging.ERROR,
+                "fiscal_existence_check_failed",
+                operation="check_fiscal_data_exists",
+                sku=sku,
+                item_id=item_id or None,
+                error_type=type(e).__name__,
+            )
             raise
 
     def register_fiscal_data(
@@ -587,7 +639,15 @@ class FiscalService:
             )
             return response, retry_count
         except Exception as e:
-            logger.error(f"Failed to register fiscal data for SKU {sku}: {e}")
+            log_safe_event(
+                logger,
+                logging.ERROR,
+                "fiscal_registration_failed",
+                operation="register_fiscal_data",
+                sku=sku,
+                item_id=item_id or None,
+                error_type=type(e).__name__,
+            )
             raise
 
     def verify_invoice_readiness(
@@ -611,5 +671,12 @@ class FiscalService:
             )
             return is_ready, response, retry_count
         except Exception as e:
-            logger.error(f"Failed to verify invoice readiness for {item_id}: {e}")
+            log_safe_event(
+                logger,
+                logging.ERROR,
+                "fiscal_invoice_readiness_check_failed",
+                operation="verify_invoice_readiness",
+                item_id=item_id,
+                error_type=type(e).__name__,
+            )
             raise

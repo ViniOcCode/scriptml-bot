@@ -1,14 +1,127 @@
 """Tests for MLApiClient behavior."""
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 import requests
 
+from mercadolivre_upload.api import client as client_module
 from mercadolivre_upload.api.client import MLApiClient
 from mercadolivre_upload.api.domains import items as item_endpoints
 from mercadolivre_upload.api.exceptions import MLApiError
 from mercadolivre_upload.infrastructure.http import NON_IDEMPOTENT, SAFE_RETRY
+
+
+def test_invalid_http_config_fails_before_a_client_can_issue_requests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    invalid_settings = SimpleNamespace(
+        http_timeout=0,
+        http_max_retries=3,
+        http_backoff_factor=0.5,
+        rate_limit_enabled=True,
+        rate_limit_requests_per_second=2.0,
+        rate_limit_burst=5,
+    )
+    settings_loader = MagicMock(return_value=invalid_settings)
+    monkeypatch.delenv("MLBOT_PUBLISHER_CONFIG_SNAPSHOT", raising=False)
+    monkeypatch.setattr("mercadolivre_upload.infrastructure.config.get_settings", settings_loader)
+
+    with pytest.raises(ValueError, match="http_timeout"):
+        client_module._build_http_client()
+
+    settings_loader.assert_called_once_with()
+
+
+def test_canonical_snapshot_does_not_fall_back_to_dotenv_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MLBOT_PUBLISHER_CONFIG_SNAPSHOT", '{"seller": {}}')
+    settings_loader = MagicMock(side_effect=AssertionError("legacy settings consulted"))
+    monkeypatch.setattr("mercadolivre_upload.infrastructure.config.get_settings", settings_loader)
+
+    http = client_module._build_http_client()
+
+    assert http.timeout == 30
+    settings_loader.assert_not_called()
+
+
+def test_canonical_snapshot_reads_runtime_http_schema(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "MLBOT_PUBLISHER_CONFIG_SNAPSHOT",
+        """
+        {
+          "runtime": {
+            "http": {
+              "timeout": 17,
+              "max_retries": 2,
+              "backoff_factor": 0.75,
+              "rate_limit": {
+                "enabled": false,
+                "requests_per_second": 9,
+                "burst": 7
+              }
+            }
+          }
+        }
+        """,
+    )
+    settings_loader = MagicMock(side_effect=AssertionError("legacy settings consulted"))
+    monkeypatch.setattr("mercadolivre_upload.infrastructure.config.get_settings", settings_loader)
+
+    http = client_module._build_http_client()
+
+    assert http.timeout == 17
+    assert http.default_policy.max_retries == 2
+    assert http.default_policy.base_delay == 0.75
+    assert http.limiter is None
+    settings_loader.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "snapshot",
+    [
+        '{"http":{"timeout":1}}',
+        '{"http_timeout":1}',
+        '{"runtime":{"http_timeout":1}}',
+    ],
+)
+def test_canonical_snapshot_ignores_legacy_http_shapes(
+    monkeypatch: pytest.MonkeyPatch,
+    snapshot: str,
+) -> None:
+    monkeypatch.setenv("MLBOT_PUBLISHER_CONFIG_SNAPSHOT", snapshot)
+
+    http = client_module._build_http_client()
+
+    assert http.timeout == 30
+    assert http.default_policy.max_retries == 3
+    assert http.default_policy.base_delay == 0.5
+
+
+@pytest.mark.parametrize(
+    "snapshot, message",
+    [
+        ('{"runtime":{"http":{"timeout":0}}}', "http_timeout"),
+        ('{"runtime":{"http":{"unknown":1}}}', "unsupported fields"),
+        (
+            '{"runtime":{"http":{"rate_limit":{"enabled":true,"burst":false}}}}',
+            "rate_limit_burst",
+        ),
+    ],
+)
+def test_canonical_snapshot_rejects_invalid_runtime_http_values(
+    monkeypatch: pytest.MonkeyPatch,
+    snapshot: str,
+    message: str,
+) -> None:
+    monkeypatch.setenv("MLBOT_PUBLISHER_CONFIG_SNAPSHOT", snapshot)
+
+    with pytest.raises(ValueError, match=message):
+        client_module._build_http_client()
 
 
 def test_validate_item_returns_400_json_payload():
@@ -113,24 +226,23 @@ def test_validate_user_product_item_does_not_infer_existing_user_product_from_id
     client.validate_item.assert_called_once_with(payload)
 
 
-def test_validate_existing_user_product_sales_condition_does_not_require_family_name():
+def test_validate_existing_user_product_sales_condition_runs_remote_validation():
     client = MLApiClient(http_client=MagicMock())
     client.validate_item = MagicMock(return_value={"cause": []})
+    payload = {
+        "user_product_id": " MLBU123 ",
+        "target": "existing_user_product_selling_condition",
+        "price": 100.0,
+        "category_id": "MLB1055",
+        "currency_id": "BRL",
+        "buying_mode": "buy_it_now",
+        "listing_type_id": "gold_special",
+    }
 
-    result = client.validate_user_product_item(
-        {
-            "user_product_id": " MLBU123 ",
-            "target": "existing_user_product_selling_condition",
-            "price": 100.0,
-            "category_id": "MLB1055",
-            "currency_id": "BRL",
-            "buying_mode": "buy_it_now",
-            "listing_type_id": "gold_special",
-        }
-    )
+    result = client.validate_user_product_item(payload)
 
-    assert result == {}
-    client.validate_item.assert_not_called()
+    assert result == {"cause": []}
+    client.validate_item.assert_called_once_with(payload)
 
 
 def test_get_user_product_fetches_metadata():

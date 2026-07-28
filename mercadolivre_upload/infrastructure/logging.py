@@ -24,6 +24,43 @@ DEFAULT_LOG_FILE = "mercadolivre_upload.log"
 # Níveis de log válidos
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
+# Publishing logs are an operational signal, not an artifact store.  Keep the
+# allowlist intentionally small so new call sites cannot accidentally emit a
+# request payload, provider response, fiscal document, or /users/me object.
+_SAFE_EVENT_FIELDS = frozenset(
+    {
+        "event",
+        "operation",
+        "sku",
+        "item_id",
+        "status",
+        "count",
+        "field_count",
+        "cause_codes",
+        "error_type",
+        "has_user_id",
+    }
+)
+
+
+def log_safe_event(
+    logger: logging.Logger,
+    level: int,
+    event: str,
+    /,
+    **fields: object,
+) -> None:
+    """Log allowlisted scalar metadata without serializing sensitive objects."""
+    safe_fields: dict[str, object] = {}
+    for key, value in fields.items():
+        if key not in _SAFE_EVENT_FIELDS:
+            continue
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            safe_fields[key] = value
+        elif key == "cause_codes" and isinstance(value, (list, tuple)):
+            safe_fields[key] = [str(code) for code in value]
+    logger.log(level, "%s %s", event, json.dumps(safe_fields, ensure_ascii=False, sort_keys=True))
+
 
 class JSONFormatter(logging.Formatter):
     """Formatador JSON para logs estruturados."""

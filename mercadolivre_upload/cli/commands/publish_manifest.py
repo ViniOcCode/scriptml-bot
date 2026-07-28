@@ -15,6 +15,10 @@ from mercadolivre_upload.adapters.json_payload_reader import (
     JsonPayloadReader,
     ReadPayloadResult,
 )
+from mercadolivre_upload.application.publication_intent import (
+    PublicationIntentError,
+    require_publication_intent,
+)
 from mercadolivre_upload.application.publish_payload import (
     PublisherRuntime,
     publish_payload_outcome,
@@ -277,8 +281,10 @@ def _write_manifest_report(
 def publish_manifest(
     manifest_path: Path,
     *,
-    dry_run: bool = False,
-    publish_inactive: bool = False,
+    dry_run: bool = True,
+    execute: bool = False,
+    confirmation: str | None = None,
+    publish_inactive: bool = True,
     workspace_root: Path,
     report_dir: Path = Path("cache/reports"),
     seller_config: Path = Path("config/publisher.yaml"),
@@ -287,6 +293,15 @@ def publish_manifest(
     expected_document_type: str | None = None,
 ) -> None:
     """Publish payload variants declared in the current run_manifest.json contract."""
+    try:
+        require_publication_intent(
+            dry_run=dry_run,
+            execute=execute,
+            confirmation=confirmation,
+        )
+    except PublicationIntentError as exc:
+        err_console.print(f"[red]Erro:[/red] {exc}")
+        raise typer.Exit(2) from exc
     try:
         manifest_path = resolve_workspace_artifact(
             manifest_path,
@@ -494,6 +509,8 @@ def publish_manifest(
                 payload_path,
                 report_dir=None,
                 dry_run=dry_run,
+                execute=execute,
+                confirmation=confirmation,
                 publish_inactive=publish_inactive,
                 seller_config_path=seller_config,
                 workspace_root=workspace_root,
@@ -565,6 +582,12 @@ def publish_manifest(
     if not selected_payloads:
         raise typer.Exit(1)
     if dry_run:
-        return
+        selected_results = [row for row in results if row.get("selected")]
+        if (
+            selected_results
+            and not manifest.build_failures
+            and all(row.get("publish_result") == "skipped" for row in selected_results)
+        ):
+            return
     if final_status != "success":
         raise typer.Exit(1)

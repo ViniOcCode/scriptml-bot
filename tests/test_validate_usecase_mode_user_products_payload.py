@@ -54,6 +54,9 @@ def test_user_products_flow_builds_distinct_pxv_payload_and_artifacts() -> None:
         publisher=publisher,  # type: ignore[arg-type]
         image_uploader=_ImageUploader(),  # type: ignore[arg-type]
         config=config,
+        dry_run=False,
+        execute=True,
+        confirmation="PUBLICAR",
         enable_feedback=False,
         enable_fiscal_submission=False,
     )

@@ -97,6 +97,9 @@ def reset_execution_state(use_case: Any) -> None:
     use_case._current_publish_category_id = None
     use_case._current_publish_sku = None
     use_case._current_variation_reference_attributes = []
+    use_case._current_side_effect_state = "none"
+    use_case._current_reconciliation_required = False
+    use_case._current_published_item_id = None
     use_case._category_resolution_context_cache = {}
 
 

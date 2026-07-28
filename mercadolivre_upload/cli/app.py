@@ -50,9 +50,20 @@ def setup_logging(verbose: bool = False) -> None:
 @app.command()
 def publish_payload(
     path: Path = typer.Argument(..., help="Path to payload.json or 70_payload.json"),  # noqa: B008
-    dry_run: bool = typer.Option(False, "--dry-run", help="Validate without publishing."),  # noqa: B008
-    publish_inactive: bool = typer.Option(  # noqa: B008
+    dry_run: bool = typer.Option(True, "--dry-run", help="Validate without publishing."),  # noqa: B008
+    execute: bool = typer.Option(
         False,
+        "--execute",
+        help="Permit a real publication when paired with --confirm PUBLICAR.",
+    ),  # noqa: B008
+    confirmation: str | None = typer.Option(
+        None,
+        "--confirm",
+        "--confirmation",
+        help="Literal confirmation required for real publication: PUBLICAR.",
+    ),  # noqa: B008
+    publish_inactive: bool = typer.Option(  # noqa: B008
+        True,
         "--publish-inactive/--no-publish-inactive",
         help="Publish items in paused (inactive) state. Items can be activated later.",
     ),
@@ -76,7 +87,9 @@ def publish_payload(
     result = api.publish_payload_file(
         path,
         report_dir=report_dir,
-        dry_run=dry_run,
+        dry_run=not execute,
+        execute=execute,
+        confirmation=confirmation,
         publish_inactive=publish_inactive,
         seller_config_path=seller_config,
         workspace_root=workspace_root,
@@ -91,9 +104,20 @@ def publish_payload(
 @app.command()
 def publish_manifest(
     manifest_path: Path = typer.Argument(..., help="Path to run_manifest.json"),  # noqa: B008
-    dry_run: bool = typer.Option(False, "--dry-run", help="Validate without publishing."),  # noqa: B008
-    publish_inactive: bool = typer.Option(  # noqa: B008
+    dry_run: bool = typer.Option(True, "--dry-run", help="Validate without publishing."),  # noqa: B008
+    execute: bool = typer.Option(
         False,
+        "--execute",
+        help="Permit real publication when paired with --confirm PUBLICAR.",
+    ),  # noqa: B008
+    confirmation: str | None = typer.Option(
+        None,
+        "--confirm",
+        "--confirmation",
+        help="Literal confirmation required for real publication: PUBLICAR.",
+    ),  # noqa: B008
+    publish_inactive: bool = typer.Option(  # noqa: B008
+        True,
         "--publish-inactive/--no-publish-inactive",
         help="Publish items in paused (inactive) state. Items can be activated later.",
     ),
@@ -116,7 +140,9 @@ def publish_manifest(
     cmd = import_module("mercadolivre_upload.cli.commands.publish_manifest")
     cmd.publish_manifest(
         manifest_path=manifest_path,
-        dry_run=dry_run,
+        dry_run=not execute,
+        execute=execute,
+        confirmation=confirmation,
         publish_inactive=publish_inactive,
         workspace_root=workspace_root,
         report_dir=report_dir,

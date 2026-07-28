@@ -111,9 +111,40 @@ class TestPublishManifestCommand:
         mock_manifest_module.publish_manifest.assert_called_once()
         kwargs = mock_manifest_module.publish_manifest.call_args.kwargs
         assert kwargs["manifest_path"] == Path("run_manifest.json")
-        assert kwargs["dry_run"] is False
-        assert kwargs["publish_inactive"] is False
+        assert kwargs["dry_run"] is True
+        assert kwargs["publish_inactive"] is True
+        assert kwargs["execute"] is False
+        assert kwargs["confirmation"] is None
         assert kwargs["seller_config"] == Path(".canonical-publisher-config")
+
+    @patch("mercadolivre_upload.cli.app.import_module")
+    def test_publish_manifest_requires_explicit_execute_and_literal_confirmation(
+        self, mock_import_module
+    ):
+        mock_runtime_module = MagicMock()
+        mock_runtime_module.resolve_workspace_root.return_value = Path("/tmp/workspace")
+        mock_runtime_module.build_attempt_report_dir.return_value = Path("/tmp/workspace/reports")
+        mock_manifest_module = MagicMock()
+        mock_import_module.side_effect = [mock_runtime_module, mock_manifest_module]
+
+        result = runner.invoke(
+            app,
+            [
+                "publish-manifest",
+                "run_manifest.json",
+                "--workspace",
+                "workspace",
+                "--execute",
+                "--confirm",
+                "PUBLICAR",
+            ],
+        )
+
+        assert result.exit_code == 0
+        kwargs = mock_manifest_module.publish_manifest.call_args.kwargs
+        assert kwargs["dry_run"] is False
+        assert kwargs["execute"] is True
+        assert kwargs["confirmation"] == "PUBLICAR"
 
 
 class TestReconcileCommand:

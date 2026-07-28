@@ -6,7 +6,7 @@ from pathlib import Path
 from textwrap import dedent
 from typing import Any
 
-from mercadolivre_upload.cli.commands import upload as upload_command
+from mercadolivre_upload.cli.commands import spreadsheet_runtime
 from mercadolivre_upload.domain.shipping import resolver as shipping_resolver
 from mercadolivre_upload.domain.validation import sanitizer as sanitizer_module
 from mercadolivre_upload.shared.utils.config_loader import load_merged_yaml_config
@@ -75,7 +75,10 @@ def test_load_merged_yaml_config_precedence(tmp_path: Path) -> None:
     assert config["nested"] == {"owner": "split-a"}
 
 
-def test_upload_load_config_merges_split_files_only(monkeypatch, tmp_path: Path) -> None:
+def test_spreadsheet_runtime_load_config_merges_split_files_only(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
     config_dir = tmp_path / "config"
     config_dir.mkdir()
 
@@ -109,7 +112,7 @@ def test_upload_load_config_merges_split_files_only(monkeypatch, tmp_path: Path)
     )
 
     monkeypatch.chdir(tmp_path)
-    config = upload_command.load_config()
+    config = spreadsheet_runtime.load_config()
 
     assert "fiscal_only" not in config
     assert config["standard_only"] is True

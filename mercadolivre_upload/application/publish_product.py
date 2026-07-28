@@ -16,6 +16,7 @@ from mercadolivre_upload.domain.validation import ValidationFeedback
 
 from .attribute_builder import AttributeBuilderService
 from .ports import ClipUploaderPort, ImageUploaderPort, ItemPublisherPort, ShippingResolverPort
+from .publication_intent import require_publication_intent
 from .publish.internals.category import (
     build_category_resolution_observability,
     build_resolution_artifact,
@@ -150,8 +151,10 @@ class PublishProductUseCase:
         fiscal_service: FiscalService | None = None,
         clip_uploader: ClipUploaderPort | None = None,
         config: dict[str, Any] | None = None,
-        dry_run: bool = False,
+        dry_run: bool = True,
         validation_only: bool = False,
+        execute: bool = False,
+        confirmation: str | None = None,
         min_attribute_score: int = 50,
         enable_feedback: bool = True,
         enable_fiscal_submission: bool = True,
@@ -168,8 +171,10 @@ class PublishProductUseCase:
             fiscal_service: Fiscal data submission service (optional)
             clip_uploader: Video clip uploader service (optional)
             config: Configuration dictionary with defaults (optional)
-            dry_run: If True, only validate
+            dry_run: If True, only validate. Defaults to the safe, non-mutating mode.
             validation_only: If True, validates payloads via /items/validate and skips create
+            execute: Explicit intent required when dry_run and validation_only are both False
+            confirmation: Exact ``PUBLICAR`` literal required for real publication
             min_attribute_score: Minimum score for attributes (0-100)
             enable_feedback: Enable validation feedback tracking
             enable_fiscal_submission: Whether to submit fiscal data after publishing
@@ -208,6 +213,8 @@ class PublishProductUseCase:
         self._rollout_flags_artifact = self._build_rollout_flags_artifact()
         self.dry_run = dry_run
         self.validation_only = validation_only
+        self._execute_intent = execute
+        self._publication_confirmation = confirmation
         self.publish_inactive = publish_inactive
         self.enable_fiscal_submission = enable_fiscal_submission
         self.attribute_cache = attribute_cache
@@ -268,6 +275,9 @@ class PublishProductUseCase:
         self._current_publish_category_id: str | None = None
         self._current_publish_sku: str | None = None
         self._current_variation_reference_attributes: list[dict[str, Any]] = []
+        self._current_side_effect_state = "none"
+        self._current_reconciliation_required = False
+        self._current_published_item_id: str | None = None
         self._category_resolution_context_cache: dict[str, dict[str, Any]] = {}
 
     def _reset_execution_state(self) -> None:
@@ -348,6 +358,11 @@ class PublishProductUseCase:
         Returns:
             Execution results
         """
+        require_publication_intent(
+            dry_run=self.dry_run or self.validation_only,
+            execute=self._execute_intent,
+            confirmation=self._publication_confirmation,
+        )
         return _execute_publish_helper(self, products, category_name)
 
     def _build_product_from_dict(self, data: dict[str, Any]) -> Product:

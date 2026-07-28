@@ -14,6 +14,15 @@ auth:
 
 runtime:
   workspace_root: "./workspace"
+  http:
+    # Resilience settings consumed only from this canonical snapshot path.
+    timeout: 30
+    max_retries: 3
+    backoff_factor: 0.5
+    rate_limit:
+      enabled: true
+      requests_per_second: 2.0
+      burst: 5
 
 seller:
   listing:

@@ -7,7 +7,9 @@ from typing import Any
 
 import requests
 
+from mercadolivre_upload.application.mutation_failure import is_ambiguous_mutation_failure
 from mercadolivre_upload.domain.product.model import Product
+from mercadolivre_upload.infrastructure.logging import log_safe_event
 
 from .api_validation_repair import (
     validate_item_with_api_repair,
@@ -468,7 +470,15 @@ def publish_one(use_case: Any, product: Product, category_id: str) -> bool:
             use_case.image_diagnostics_gate_mode,
         )
 
-    logger.debug("Full item payload for %s: %s", product.sku, item)
+    log_safe_event(
+        logger,
+        logging.DEBUG,
+        "publish_item_prepared",
+        operation="create_item",
+        sku=product.sku,
+        field_count=len(item),
+        payload=item,
+    )
 
     validation_result = None
     required_attribute_ids: set[str] = set()
@@ -497,15 +507,23 @@ def publish_one(use_case: Any, product: Product, category_id: str) -> bool:
             required_attribute_ids=required_attribute_ids,
         )
         use_case._current_validation_repair = validation_repair_artifact
-        logger.debug("Validation response for %s: %s", product.sku, validation)
         validation_classification = classify_mercado_livre_validation_response(validation)
         use_case._current_validation_status = validation_classification.status
         use_case._current_validation_report = validation_classification.to_report_dict()
 
         raw_causes = validation.get("cause", [])
         causes = [cause for cause in raw_causes if isinstance(cause, dict)]
-        for cause in causes:
-            logger.debug("Validation cause for %s: %s", product.sku, cause)
+        log_safe_event(
+            logger,
+            logging.DEBUG,
+            "publish_item_validation_completed",
+            operation="validate_item",
+            sku=product.sku,
+            status=validation_classification.status,
+            count=len(causes),
+            cause_codes=[str(cause.get("code", "")) for cause in causes],
+            response=validation,
+        )
         shipping_cause_decisions = _register_shipping_cause_decisions(
             use_case,
             causes,
@@ -653,11 +671,15 @@ def publish_one(use_case: Any, product: Product, category_id: str) -> bool:
                 if cause_code:
                     cause_codes.append(cause_code)
             for shipping_cause in shipping_cause_decisions:
-                logger.error(
-                    "Shipping validation error for %s: [%s] %s",
-                    product.sku,
-                    shipping_cause.get("classification"),
-                    shipping_cause,
+                log_safe_event(
+                    logger,
+                    logging.ERROR,
+                    "shipping_validation_error",
+                    operation="validate_item",
+                    sku=product.sku,
+                    status=str(shipping_cause.get("classification", "")),
+                    cause_codes=[str(shipping_cause.get("code", ""))],
+                    response=shipping_cause,
                 )
         else:
             response_excerpt = extract_exception_response_excerpt(error)
@@ -672,7 +694,16 @@ def publish_one(use_case: Any, product: Product, category_id: str) -> bool:
             if validation_exception_taxonomy
             else {}
         )
-        logger.error("Validation error for %s: %s", product.sku, error_msg)
+        log_safe_event(
+            logger,
+            logging.ERROR,
+            "publish_item_validation_failed",
+            operation="validate_item",
+            sku=product.sku,
+            error_type=type(error).__name__,
+            cause_codes=cause_codes,
+            response=error_detail,
+        )
         use_case.errors.append(f"{product.sku}: {error_msg}")
         use_case.failed += 1
         return False
@@ -699,7 +730,22 @@ def publish_one(use_case: Any, product: Product, category_id: str) -> bool:
     cbt_item_id: str | None = None
     try:
         result = use_case._create_item_for_flow(item=item, selected_flow=selected_flow)
-        published_item_id = result.get("id")
+        if not isinstance(result, dict):
+            use_case._current_side_effect_state = "unknown"
+            use_case._current_reconciliation_required = True
+            raise RuntimeError(
+                "Mercado Livre returned an invalid create response; reconciliation is required"
+            )
+        raw_published_item_id = result.get("id")
+        if not isinstance(raw_published_item_id, str) or not raw_published_item_id.strip():
+            use_case._current_side_effect_state = "unknown"
+            use_case._current_reconciliation_required = True
+            raise RuntimeError(
+                "Mercado Livre create response did not include an item ID; "
+                "reconciliation is required"
+            )
+        published_item_id = raw_published_item_id.strip()
+        use_case._current_published_item_id = published_item_id
 
         cbt_item_id = use_case.cbt_extractor.extract_cbt_id(result)
 
@@ -714,12 +760,21 @@ def publish_one(use_case: Any, product: Product, category_id: str) -> bool:
                     "Paused item %s after publish (publish_inactive=True)", published_item_id
                 )
             except (requests.RequestException, RuntimeError, ValueError, TypeError) as exc:
-                logger.warning(
-                    "Failed to pause item %s after publish: %s — "
-                    "item was published but status was NOT set to paused.",
-                    published_item_id,
-                    exc,
+                ambiguous = is_ambiguous_mutation_failure(exc)
+                use_case._current_side_effect_state = "unknown" if ambiguous else "partial"
+                use_case._current_reconciliation_required = True
+                error_msg = (
+                    f"{product.sku}: item {published_item_id} was created but could not be paused; "
+                    "reconciliation is required"
                 )
+                use_case.errors.append(error_msg)
+                use_case.failed += 1
+                logger.error(
+                    "Pause after publish failed for item %s; reconciliation is required (%s)",
+                    published_item_id,
+                    type(exc).__name__,
+                )
+                return False
 
         description_text = product.description.strip()
         if published_item_id and description_text:
@@ -810,11 +865,15 @@ def publish_one(use_case: Any, product: Product, category_id: str) -> bool:
                 stage="publish_exception",
             )
             for shipping_cause in shipping_cause_decisions:
-                logger.error(
-                    "Shipping publish error for %s: [%s] %s",
-                    product.sku,
-                    shipping_cause.get("classification"),
-                    shipping_cause,
+                log_safe_event(
+                    logger,
+                    logging.ERROR,
+                    "shipping_publish_error",
+                    operation="create_item",
+                    sku=product.sku,
+                    status=str(shipping_cause.get("classification", "")),
+                    cause_codes=[str(shipping_cause.get("code", ""))],
+                    response=shipping_cause,
                 )
         else:
             response_excerpt = extract_exception_response_excerpt(error)
@@ -829,7 +888,16 @@ def publish_one(use_case: Any, product: Product, category_id: str) -> bool:
             if publish_exception_taxonomy
             else {}
         )
-        logger.error("Publish error for %s: %s", product.sku, error_msg)
+        log_safe_event(
+            logger,
+            logging.ERROR,
+            "publish_item_create_failed",
+            operation="create_item",
+            sku=product.sku,
+            error_type=type(error).__name__,
+            cause_codes=publish_cause_codes,
+            response=error_detail,
+        )
         use_case.errors.append(f"{product.sku}: {error_msg}")
         use_case.failed += 1
         return False

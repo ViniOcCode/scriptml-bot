@@ -15,6 +15,7 @@ PublicationStatus = Literal[
 ]
 SideEffectState = Literal["none", "confirmed", "partial", "unknown"]
 PublicationPhaseName = Literal[
+    "publication_intent",
     "payload_validation",
     "policy_validation",
     "remote_validation",

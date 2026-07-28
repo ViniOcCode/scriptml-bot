@@ -14,6 +14,10 @@ from mercadolivre_upload.adapters.json_payload_reader import (
     ReadPayloadResult,
 )
 from mercadolivre_upload.api.client import MLApiClient
+from mercadolivre_upload.application.publication_intent import (
+    PublicationIntentError,
+    require_publication_intent,
+)
 from mercadolivre_upload.application.publish_payload_use_case import (
     PublishPayloadUseCase,
 )
@@ -28,7 +32,7 @@ from mercadolivre_upload.domain.fiscal.service import FiscalService
 
 def _build_use_case(
     *,
-    publish_inactive: bool = False,
+    publish_inactive: bool = True,
     seller_config_path: Path,
     workspace_root: Path,
     reader: JsonPayloadReader | None = None,
@@ -125,9 +129,24 @@ class PublisherRuntime:
             self._prepared_payloads[cache_key] = prepared
         return prepared
 
-    def publish(self, payload_path: Path, *, dry_run: bool = False) -> PublicationOutcome:
+    def publish(
+        self,
+        payload_path: Path,
+        *,
+        dry_run: bool = True,
+        execute: bool = False,
+        confirmation: str | None = None,
+    ) -> PublicationOutcome:
         """Publish using the invocation-owned prepared payload."""
         path = Path(payload_path)
+        try:
+            require_publication_intent(
+                dry_run=dry_run,
+                execute=execute,
+                confirmation=confirmation,
+            )
+        except PublicationIntentError as exc:
+            return _intent_failure_outcome(payload_path=path, message=str(exc))
         try:
             prepared = self.prepare(path)
         except json.JSONDecodeError as exc:
@@ -238,6 +257,23 @@ def _failure_outcome(
     return _with_report(result, report_dir)
 
 
+def _intent_failure_outcome(*, payload_path: Path, message: str) -> PublicationOutcome:
+    """Return a typed failure before authentication or any remote request."""
+    return PublicationOutcome(
+        sku=None,
+        path=str(payload_path),
+        status="failed",
+        error=message,
+        phases=[
+            PublicationPhase(
+                name="publication_intent",
+                status="failed",
+                detail=message,
+            )
+        ],
+    )
+
+
 def _write_report(results: list[PublicationOutcome], report_dir: Path) -> Path:
     """Write a JSON payload publish report and return the created path."""
     report_dir.mkdir(parents=True, exist_ok=True)
@@ -288,8 +324,10 @@ def publish_payload_outcome(
     payload_path: Path,
     *,
     report_dir: Path | None = None,
-    dry_run: bool = False,
-    publish_inactive: bool = False,
+    dry_run: bool = True,
+    execute: bool = False,
+    confirmation: str | None = None,
+    publish_inactive: bool = True,
     seller_config_path: Path,
     workspace_root: Path,
     runtime: PublisherRuntime | None = None,
@@ -304,6 +342,17 @@ def publish_payload_outcome(
     Mercado Livre client, policy, and fiscal infrastructure for the invocation.
     """
     path = Path(payload_path)
+    try:
+        require_publication_intent(
+            dry_run=dry_run,
+            execute=execute,
+            confirmation=confirmation,
+        )
+    except PublicationIntentError as exc:
+        return _with_report(
+            _intent_failure_outcome(payload_path=path, message=str(exc)),
+            report_dir,
+        )
     if not path.exists():
         return _failure_outcome(
             payload_path=path,
@@ -351,7 +400,12 @@ def publish_payload_outcome(
         effective_runtime.remember(path, prepared)
     else:
         effective_runtime = runtime
-    result = effective_runtime.publish(path, dry_run=dry_run)
+    result = effective_runtime.publish(
+        path,
+        dry_run=dry_run,
+        execute=execute,
+        confirmation=confirmation,
+    )
     return _with_report(result, report_dir)
 
 
@@ -359,8 +413,10 @@ def publish_payload_file(
     payload_path: Path,
     *,
     report_dir: Path | None = None,
-    dry_run: bool = False,
-    publish_inactive: bool = False,
+    dry_run: bool = True,
+    execute: bool = False,
+    confirmation: str | None = None,
+    publish_inactive: bool = True,
     seller_config_path: Path,
     workspace_root: Path,
     runtime: PublisherRuntime | None = None,
@@ -378,6 +434,8 @@ def publish_payload_file(
         payload_path,
         report_dir=report_dir,
         dry_run=dry_run,
+        execute=execute,
+        confirmation=confirmation,
         publish_inactive=publish_inactive,
         seller_config_path=seller_config_path,
         workspace_root=workspace_root,

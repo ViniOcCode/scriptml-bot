@@ -142,7 +142,7 @@ class ClipUploader:
             else:
                 result.status = "error"
                 result.error = "API response missing clip_uuid"
-                logger.error(f"Clip upload response missing clip_uuid: {api_result}")
+                logger.error("Clip upload response missing clip_uuid")
 
         except requests.HTTPError as e:
             status_code = e.response.status_code if e.response else "unknown"

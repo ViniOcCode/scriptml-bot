@@ -39,8 +39,8 @@ Introduce a dedicated `SellerPolicyValidator` in
 configuration file (git-ignored, per-tenant):
 
 - **`SellerConfig`** — Pydantic v2 `BaseModel` with nested sub-models (`ListingConfig`,
-  `PricingConfig`, `ShippingConfig`, `CategoriesConfig`, `BatchConfig`). Loaded via
-  `load_seller_config(path)` or `default_seller_config()` for tests.
+  `PricingConfig`, `ShippingConfig`, `CategoriesConfig`, `BatchConfig`). Loaded explicitly via
+  `load_seller_config(path)`; listing rules remain seller-owned configuration rather than code defaults.
 - **`PolicyViolation`** — `@dataclass` with `field`, `message`, and `severity`
   (`Literal["error", "warning"]`).
 - **`PolicyResult`** — `@dataclass` with `violations: list[PolicyViolation]` and `has_errors` /
@@ -73,9 +73,8 @@ git-ignored (added to `.gitignore`) so per-tenant secrets and policy do not leak
 
 - **NEG-001**: `seller.yaml` is git-ignored and must be provisioned manually per environment;
   there is no automatic secret management or rotation mechanism.
-- **NEG-002**: `default_seller_config()` returns permissive defaults (all listing types allowed,
-  wide price range) — a missing `seller.yaml` silently allows all payloads through rather than
-  failing closed.
+- **NEG-002**: A missing or invalid seller policy fails closed; local test fixtures must supply an
+  explicit policy rather than inheriting permissive listing-type defaults.
 - **NEG-003**: Per-category `listing_type_id` overrides in `seller.yaml` must be kept in sync
   with ML category hierarchy changes; no automated validation against the live ML API.
 - **NEG-004**: Price variance alert (`variance_alert_pct`) is declared in the config schema but
@@ -113,8 +112,8 @@ git-ignored (added to `.gitignore`) so per-tenant secrets and policy do not leak
 - **IMP-001**: `load_seller_config(path: Path) -> SellerConfig` raises `FileNotFoundError` if
   `seller.yaml` is absent. The CLI command catches this and prints an actionable error message
   pointing to `config/seller.example.yaml`.
-- **IMP-002**: `default_seller_config()` is used in tests to avoid dependency on a real
-  `seller.yaml`; it is not intended for production use.
+- **IMP-002**: Tests construct explicit `SellerConfig` fixtures, keeping marketplace listing types
+  and seller price policy out of production-code defaults.
 - **IMP-003**: Future rule additions should be added to both `seller.example.yaml` (documented)
   and `SellerConfig` (typed); the Pydantic model enforces that new fields are optional with sane
   defaults to avoid breaking existing `seller.yaml` files.

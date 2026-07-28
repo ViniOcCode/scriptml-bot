@@ -52,8 +52,113 @@ def _make_envelope(payload: dict, meta: dict | None = None) -> dict:
     return {"payload": payload, "_meta": base_meta}
 
 
+def _strict_items_envelope(*, category_id: str = "MLB271599") -> dict:
+    return {
+        "payload": {
+            "title": "Produto Teste",
+            "category_id": category_id,
+            "price": 99.90,
+            "currency_id": "BRL",
+            "available_quantity": 10,
+            "buying_mode": "buy_it_now",
+            "listing_type_id": "gold_special",
+            "condition": "new",
+            "pictures": [{"source": "https://cdn.ml.com/abc.jpg"}],
+        },
+        "description": "Descrição do produto",
+        "fiscal": {"items": []},
+        "_meta": {
+            "sku": "ABC-001",
+            "category_decision": {
+                "schema_version": 1,
+                "category_id": category_id,
+                "source": "ai",
+                "resolution_mode": "llm_authoritative",
+                "confidence": 0.88,
+                "review": {"status": "unreviewed", "evidence": None},
+            },
+            "publication": {"seller_model": "items", "publication_ready": True},
+            "traceability": {"publish_item_skus": ["ABC-001"]},
+        },
+    }
+
+
 class TestJsonPayloadReader:
     reader = JsonPayloadReader()
+
+    def test_strict_contract_requires_category_decision(self, tmp_path: Path) -> None:
+        envelope = _strict_items_envelope()
+        envelope["_meta"].pop("category_decision")
+
+        with pytest.raises(InvalidPayloadError, match="category_decision is required"):
+            JsonPayloadReader(strict_publisher_contract=True).read(
+                _write_payload(tmp_path, envelope)
+            )
+
+    def test_strict_contract_exposes_typed_category_decision(self, tmp_path: Path) -> None:
+        result = JsonPayloadReader(strict_publisher_contract=True).read(
+            _write_payload(tmp_path, _strict_items_envelope())
+        )
+
+        assert result.category_decision is not None
+        assert result.category_decision.category_id == "MLB271599"
+        assert result.category_decision.source == "ai"
+        assert result.ai_suggested is True
+
+    def test_strict_contract_rejects_category_decision_not_bound_to_body(
+        self, tmp_path: Path
+    ) -> None:
+        envelope = _strict_items_envelope()
+        envelope["_meta"]["category_decision"]["category_id"] = "MLB999"  # type: ignore[index]
+
+        with pytest.raises(InvalidPayloadError, match="must match every payload category_id"):
+            JsonPayloadReader(strict_publisher_contract=True).read(
+                _write_payload(tmp_path, envelope)
+            )
+
+    def test_strict_contract_rejects_approved_review_without_timezone(self, tmp_path: Path) -> None:
+        envelope = _strict_items_envelope()
+        envelope["_meta"]["category_decision"]["review"] = {  # type: ignore[index]
+            "status": "approved",
+            "evidence": {
+                "reference": "ticket-123",
+                "reviewer": "operator@example.invalid",
+                "reviewed_at": "2026-07-27T10:30:00",
+            },
+        }
+
+        with pytest.raises(InvalidPayloadError, match="UTC offset or Z suffix"):
+            JsonPayloadReader(strict_publisher_contract=True).read(
+                _write_payload(tmp_path, envelope)
+            )
+
+    def test_strict_contract_accepts_approved_review_with_utc_offset(self, tmp_path: Path) -> None:
+        envelope = _strict_items_envelope()
+        envelope["_meta"]["category_decision"]["review"] = {  # type: ignore[index]
+            "status": "approved",
+            "evidence": {
+                "reference": "ticket-123",
+                "reviewer": "operator@example.invalid",
+                "reviewed_at": "2026-07-27T10:30:00Z",
+            },
+        }
+
+        result = JsonPayloadReader(strict_publisher_contract=True).read(
+            _write_payload(tmp_path, envelope)
+        )
+
+        assert result.category_decision is not None
+        assert result.category_decision.review_evidence is not None
+        assert result.category_decision.review_evidence.reviewed_at.endswith("Z")
+
+    def test_strict_contract_rejects_retired_ai_flag(self, tmp_path: Path) -> None:
+        envelope = _strict_items_envelope()
+        envelope["_meta"]["category_ai_suggested"] = True
+
+        with pytest.raises(InvalidPayloadError, match="category_ai_suggested is retired"):
+            JsonPayloadReader(strict_publisher_contract=True).read(
+                _write_payload(tmp_path, envelope)
+            )
 
     def test_read_campos_completos(self, tmp_path: Path) -> None:
         path = _write_payload(tmp_path, _make_valid_payload())

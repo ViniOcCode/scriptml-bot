@@ -41,13 +41,28 @@ All require an explicit `--workspace`. Production also requires
 OAuth credential. Spreadsheet `upload`/`validate` and local `auth` commands are
 intentionally absent because they bypass the current publication chain.
 
-Example:
+Safe validation example (the default):
 
 ```bash
 ml-upload publish-manifest workspace/runs/RUN_ID/run_manifest.json \
   --workspace workspace \
   --publish-inactive
 ```
+
+Real publication additionally requires both explicit intent and the exact
+confirmation literal:
+
+```bash
+ml-upload publish-manifest workspace/runs/RUN_ID/run_manifest.json \
+  --workspace workspace \
+  --execute \
+  --confirm PUBLICAR \
+  --publish-inactive
+```
+
+The exported `PublishProductUseCase` follows the same boundary: it defaults to
+`dry_run=True`; callers that deliberately select `dry_run=False` must also pass
+`execute=True` and `confirmation="PUBLICAR"`.
 
 The dashboard remains the preferred interface because it owns candidate,
 snapshot, attempt, identity and audit relationships.

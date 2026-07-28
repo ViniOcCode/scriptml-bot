@@ -84,6 +84,13 @@ def _minimal_builder_payload() -> dict[str, object]:
         "description": "Descricao do produto",
         "fiscal": {"items": []},
         "_meta": {
+            "category_decision": {
+                "schema_version": 1,
+                "category_id": "MLB271599",
+                "source": "ai",
+                "resolution_mode": "llm_authoritative",
+                "review": {"status": "unreviewed", "evidence": None},
+            },
             "sku": "ABC-001",
             "publication": {
                 "seller_model": "items",
@@ -239,8 +246,8 @@ def test_publisher_runtime_reuses_prepared_payload_within_one_invocation(
     )
     runtime = PublisherRuntime(reader=reader, use_case=use_case)
 
-    first = runtime.publish(payload_path)
-    second = runtime.publish(payload_path)
+    first = runtime.publish(payload_path, dry_run=False, execute=True, confirmation="PUBLICAR")
+    second = runtime.publish(payload_path, dry_run=False, execute=True, confirmation="PUBLICAR")
 
     assert first.status == second.status == "published"
     assert reader.read.call_count == 1
@@ -269,6 +276,8 @@ def test_publish_payload_file_uses_mocked_use_case(tmp_path: Path, monkeypatch) 
         payload_path,
         report_dir=tmp_path / "reports",
         dry_run=False,
+        execute=True,
+        confirmation="PUBLICAR",
         publish_inactive=True,
         seller_config_path=tmp_path / "publisher.yaml",
         workspace_root=tmp_path / "workspace",
@@ -318,6 +327,9 @@ def test_publish_payload_outcome_keeps_typed_contract_until_boundary(
     outcome = publish_payload_api.publish_payload_outcome(
         payload_path,
         report_dir=tmp_path / "reports",
+        dry_run=False,
+        execute=True,
+        confirmation="PUBLICAR",
         seller_config_path=tmp_path / "publisher.yaml",
         workspace_root=tmp_path / "workspace",
     )
@@ -442,6 +454,9 @@ def test_publish_payload_report_keeps_validation_warnings(tmp_path: Path, monkey
     result = publish_payload_api.publish_payload_file(
         payload_path,
         report_dir=tmp_path / "reports",
+        dry_run=False,
+        execute=True,
+        confirmation="PUBLICAR",
         seller_config_path=tmp_path / "publisher.yaml",
         workspace_root=tmp_path / "workspace",
     )
@@ -474,6 +489,10 @@ def test_publish_payload_passes_resolved_config_and_workspace_to_auth(
         return mock_context
 
     monkeypatch.setattr(publish_payload_api, "build_publisher_auth_context", _fake_context)
+    remote_client = MagicMock()
+    remote_client.get_available_listing_types.return_value = [{"id": "gold_special"}]
+    remote_client.validate_item.return_value = {}
+    monkeypatch.setattr(publish_payload_api, "MLApiClient", MagicMock(return_value=remote_client))
     result = publish_payload_api.publish_payload_file(
         payload_path,
         dry_run=True,
@@ -528,6 +547,10 @@ def test_publish_payload_uses_explicit_config_from_unrelated_cwd(
         "build_publisher_auth_context",
         MagicMock(return_value=MagicMock(token_manager=MagicMock())),
     )
+    remote_client = MagicMock()
+    remote_client.get_available_listing_types.return_value = [{"id": "gold_special"}]
+    remote_client.validate_item.return_value = {}
+    monkeypatch.setattr(publish_payload_api, "MLApiClient", MagicMock(return_value=remote_client))
 
     result = publish_payload_api.publish_payload_file(
         payload_path,
@@ -539,9 +562,7 @@ def test_publish_payload_uses_explicit_config_from_unrelated_cwd(
     assert result["status"] == "skipped"
 
 
-def test_missing_runtime_secret_snapshot_fails_closed(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_missing_runtime_secret_snapshot_fails_closed(tmp_path: Path, monkeypatch) -> None:
     config = _publisher_config(tmp_path)
     _canonical_oauth_runtime(tmp_path, monkeypatch)
     monkeypatch.delenv("ML_CLIENT_SECRET_FILE")
@@ -953,9 +974,7 @@ def test_dashboard_fiscal_recovery_requires_terminal_invoice_confirmation(
                 {"seller_id": "seller-expected", "site_id": "MLB", "document_type": "CNPJ"},
             ),
         ),
-        patch(
-            "mercadolivre_upload.application.dashboard_api.FiscalService"
-        ) as fiscal_service,
+        patch("mercadolivre_upload.application.dashboard_api.FiscalService") as fiscal_service,
     ):
         fiscal_service.return_value.submit_fiscal_data_workflow.return_value = fiscal_result
         result = complete_existing_item_fiscal_file(
@@ -1159,7 +1178,51 @@ def test_publish_payload_cli_delegates_to_public_api(tmp_path: Path) -> None:
     mock_api_module.publish_payload_file.assert_called_once()
     call_args = mock_api_module.publish_payload_file.call_args
     assert call_args.args == (payload_path,)
-    assert call_args.kwargs["dry_run"] is False
-    assert call_args.kwargs["publish_inactive"] is False
+    assert call_args.kwargs["dry_run"] is True
+    assert call_args.kwargs["publish_inactive"] is True
+    assert call_args.kwargs["execute"] is False
+    assert call_args.kwargs["confirmation"] is None
     assert call_args.kwargs["seller_config_path"] == seller_config
     assert call_args.kwargs["workspace_root"] == tmp_path / "workspace"
+
+
+def test_public_api_rejects_real_publish_without_explicit_intent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    payload_path = tmp_path / "70_payload.json"
+    payload_path.write_text(json.dumps(_minimal_builder_payload()), encoding="utf-8")
+    runtime_builder = MagicMock()
+    monkeypatch.setattr(PublisherRuntime, "build", runtime_builder)
+
+    result = publish_payload_api.publish_payload_file(
+        payload_path,
+        dry_run=False,
+        seller_config_path=tmp_path / "publisher.yaml",
+        workspace_root=tmp_path / "workspace",
+    )
+
+    assert result["status"] == "failed"
+    assert "--execute" in result["errors"][0]
+    runtime_builder.assert_not_called()
+
+
+def test_public_api_requires_exact_publicar_confirmation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    payload_path = tmp_path / "70_payload.json"
+    payload_path.write_text(json.dumps(_minimal_builder_payload()), encoding="utf-8")
+    runtime_builder = MagicMock()
+    monkeypatch.setattr(PublisherRuntime, "build", runtime_builder)
+
+    result = publish_payload_api.publish_payload_file(
+        payload_path,
+        dry_run=False,
+        execute=True,
+        confirmation="publicar",
+        seller_config_path=tmp_path / "publisher.yaml",
+        workspace_root=tmp_path / "workspace",
+    )
+
+    assert result["status"] == "failed"
+    assert "PUBLICAR" in result["errors"][0]
+    runtime_builder.assert_not_called()

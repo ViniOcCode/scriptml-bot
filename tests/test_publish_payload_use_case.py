@@ -20,6 +20,7 @@ from mercadolivre_upload.api.client import MLApiClient
 from mercadolivre_upload.api.exceptions import MLApiError
 from mercadolivre_upload.application.publish_payload_use_case import (
     PublishPayloadUseCase,
+    _format_ml_api_error,
 )
 from mercadolivre_upload.application.validators.seller_policy import (
     BatchConfig,
@@ -34,6 +35,47 @@ from mercadolivre_upload.contracts.publication import PublicationOutcome
 
 def _grouped_up_response(**fields: Any) -> dict[str, Any]:
     return {"family_id": "FAM-1", **fields}
+
+
+def test_format_ml_api_error_preserves_blocking_causes_response_and_sanitization() -> None:
+    error = MLApiError(
+        "bad request",
+        response_body={
+            "status": 400,
+            "cause": [
+                {
+                    "type": "error",
+                    "code": "item.invalid",
+                    "references": ["item.title"],
+                    "message": "Invalid title",
+                },
+                {"type": "warning", "code": "item.warning", "message": "Ignored"},
+            ],
+        },
+    )
+
+    result = _format_ml_api_error(
+        error,
+        sanitization_metadata={"endpoint": "/items", "removed_fields": ["deprecated"]},
+    )
+
+    assert result == (
+        "[item.invalid] Invalid title | "
+        "[item.invalid] | references=item.title | Invalid title; "
+        'sanitized={"endpoint": "/items", "removed_fields": ["deprecated"]} | '
+        '{"cause": [{"code": "item.invalid", "message": "Invalid title", '
+        '"references": ["item.title"], "type": "error"}, {"code": "item.warning", '
+        '"message": "Ignored", "type": "warning"}], "status": 400}'
+    )
+
+
+def test_format_ml_api_error_uses_raw_response_text_when_json_is_unavailable() -> None:
+    response = MagicMock()
+    response.json.side_effect = ValueError("not json")
+    response.text = " raw API failure "
+    error = MLApiError("bad request", response=response)
+
+    assert _format_ml_api_error(error) == "raw API failure"
 
 
 def _make_seller_config(
@@ -210,6 +252,10 @@ def _make_use_case(
     publisher = MagicMock()
     publisher.validate_item.return_value = {}
     publisher.validate_user_product_item.return_value = {}
+    publisher.get_available_listing_types.return_value = [
+        {"id": "gold_special"},
+        {"id": "gold_pro"},
+    ]
     publisher.create_item.return_value = {"id": "MLB987654321"}
     publisher.create_user_product_item.return_value = {
         "id": "MLB987654321",
@@ -250,7 +296,7 @@ class TestPublishPayloadUseCase:
     def test_pause_failure_is_not_reported_as_success(self, tmp_path: Path) -> None:
         use_case, reader, publisher = _make_use_case(publish_inactive=True)
         reader.read.return_value = _make_read_result()
-        publisher.update_item.side_effect = RuntimeError("pause rejected")
+        publisher.update_item.side_effect = RuntimeError("access_token=must-not-escape")
 
         result = use_case.execute(tmp_path / "payload.json")
 
@@ -258,6 +304,7 @@ class TestPublishPayloadUseCase:
         assert result.side_effect_state == "partial"
         assert result.reconciliation_required is True
         assert result.item_ids == ["MLB987654321"]
+        assert "must-not-escape" not in (result.error or "")
         assert any(phase.name == "pause" and phase.status == "failed" for phase in result.phases)
 
     def test_pause_http_503_is_unknown_and_not_retried(self, tmp_path: Path) -> None:
@@ -490,7 +537,122 @@ class TestPublishPayloadUseCase:
 
         assert result.status == "skipped"
         assert result.item_id is None
+        assert result.validation_status == "validation_passed"
+        assert result.validation_report is not None
+        assert any(
+            phase.name == "remote_validation" and phase.status == "succeeded"
+            for phase in result.phases
+        )
+        publisher.get_available_listing_types.assert_called_once_with("MLB271599")
+        publisher.validate_item.assert_called_once()
         publisher.create_item.assert_not_called()
+        publisher.create_item_description.assert_not_called()
+
+    def test_dry_run_reports_unavailable_listing_type_without_item_validation_or_creation(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        use_case, reader, publisher = _make_use_case()
+        reader.read.return_value = _make_read_result()
+        publisher.get_available_listing_types.return_value = [{"id": "gold_pro"}]
+
+        result = use_case.execute(tmp_path / "payload.json", dry_run=True)
+
+        assert result.status == "failed"
+        assert result.side_effect_state == "none"
+        assert result.validation_status == "validation_not_executed"
+        assert result.validation_report == {
+            "listing_type_availability": [
+                {
+                    "index": 1,
+                    "category_id": "MLB271599",
+                    "listing_type_id": "gold_special",
+                    "available_listing_type_ids": ["gold_pro"],
+                    "available": False,
+                }
+            ]
+        }
+        assert "não está disponível" in (result.error or "")
+        publisher.validate_item.assert_not_called()
+        publisher.create_item.assert_not_called()
+
+    def test_dry_run_fails_closed_when_remote_validation_returns_no_response(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        use_case, reader, publisher = _make_use_case()
+        reader.read.return_value = _make_read_result()
+        publisher.validate_item.return_value = None
+
+        result = use_case.execute(tmp_path / "payload.json", dry_run=True)
+
+        assert result.status == "failed"
+        assert result.validation_status == "validation_not_completed"
+        assert "returned no response" in (result.error or "")
+        assert any(
+            phase.name == "remote_validation" and phase.status == "failed"
+            for phase in result.phases
+        )
+        publisher.create_item.assert_not_called()
+
+    def test_remote_preflight_does_not_expose_unexpected_exception_text(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        use_case, reader, publisher = _make_use_case()
+        reader.read.return_value = _make_read_result()
+        publisher.validate_item.side_effect = RuntimeError(
+            "https://provider.invalid/validate?access_token=must-not-escape"
+        )
+
+        result = use_case.execute(tmp_path / "payload.json", dry_run=True)
+
+        assert result.status == "failed"
+        assert result.validation_status == "validation_not_completed"
+        assert result.error == "Remote item validation failed unexpectedly"
+        assert "must-not-escape" not in (result.error or "")
+        publisher.create_item.assert_not_called()
+
+    def test_listing_type_preflight_does_not_expose_unexpected_exception_text(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        use_case, reader, publisher = _make_use_case()
+        reader.read.return_value = _make_read_result()
+        publisher.get_available_listing_types.side_effect = RuntimeError(
+            "https://provider.invalid/listing-types?access_token=must-not-escape"
+        )
+
+        result = use_case.execute(tmp_path / "payload.json", dry_run=True)
+
+        assert result.status == "failed"
+        assert result.validation_status == "validation_not_executed"
+        assert "must-not-escape" not in (result.error or "")
+        publisher.validate_item.assert_not_called()
+
+    @pytest.mark.parametrize("creation_response", [{}, {"id": "not-an-ml-item"}, {"id": 123}])
+    def test_successful_creation_response_without_valid_item_id_requires_reconciliation(
+        self,
+        tmp_path: Path,
+        creation_response: dict[str, Any],
+    ) -> None:
+        use_case, reader, publisher = _make_use_case()
+        reader.read.return_value = _make_read_result(description=None)
+        publisher.create_item.return_value = creation_response
+
+        result = use_case.execute(tmp_path / "payload.json")
+
+        assert result.status == "unknown"
+        assert result.side_effect_state == "partial"
+        assert result.reconciliation_required is True
+        assert result.item_id is None
+        assert result.item_ids == []
+        assert result.publish_endpoints == ["/items"]
+        assert "without a valid Mercado Livre item.id" in (result.error or "")
+        assert "response=" in (result.error or "")
+        assert any(
+            phase.name == "item_creation" and phase.status == "unknown" for phase in result.phases
+        )
         publisher.create_item_description.assert_not_called()
 
     def test_publish_schema_invalido(self, tmp_path: Path) -> None:
@@ -978,7 +1140,8 @@ class TestPublishPayloadUseCase:
         result = use_case.execute(tmp_path / "payload.json")
 
         assert result.status == "failed"
-        assert "API offline" in (result.error or "")
+        assert result.error == "Item creation failed unexpectedly"
+        assert "API offline" not in (result.error or "")
 
     def test_publish_user_products_multiple_items(self, tmp_path: Path) -> None:
         use_case, reader, publisher = _make_use_case()
@@ -1174,6 +1337,7 @@ class TestPublishPayloadUseCase:
                 {"id": "MLB2", "user_product_id": "MLBU123", "family_id": "FAM-1"},
             ]
         )
+        publisher.get_available_listing_types = MagicMock(return_value=[{"id": "gold_special"}])
         use_case = PublishPayloadUseCase(reader=reader, policy=policy, publisher=publisher)
         reader.read.return_value = _make_user_products_payload_array_read_result(
             description=None,
@@ -1415,8 +1579,8 @@ class TestPublishPayloadApiErrors:
         assert '"error": "validation_error"' in (result.error or "")
         assert '"references": ["item.attributes"]' in (result.error or "")
 
-    def test_400_without_ml_body_falls_back_to_http_error_str(self, tmp_path: Path) -> None:
-        """Plain HTTPError (no ML body) must still produce a failed result with error string."""
+    def test_400_without_ml_body_uses_stable_public_error(self, tmp_path: Path) -> None:
+        """Plain HTTPError text can contain a URL, so public results must not echo it."""
         plain_error = requests.HTTPError(
             "400 Client Error: Bad Request for url: https://api.mercadolibre.com/items"
         )
@@ -1428,7 +1592,8 @@ class TestPublishPayloadApiErrors:
         result = use_case.execute(tmp_path / "payload.json")
 
         assert result.status == "failed"
-        assert "400" in (result.error or "")
+        assert result.error == "Item creation failed unexpectedly"
+        assert "https://" not in (result.error or "")
 
 
 class TestPublishInactiveFlag:

@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from mercadolivre_upload.adapters.json_payload_reader import (
+    CategoryDecision,
+    CategoryReviewEvidence,
+)
 from mercadolivre_upload.application.validators.seller_policy import (
     BatchConfig,
     CategoriesConfig,
@@ -50,6 +54,26 @@ def _make_payload(**overrides: object) -> dict:
     }
     base.update(overrides)
     return base
+
+
+def _ai_category_decision(*, approved: bool) -> CategoryDecision:
+    return CategoryDecision(
+        schema_version=1,
+        category_id="MLB271599",
+        source="ai",
+        resolution_mode="llm_authoritative",
+        confidence=0.90,
+        review_status="approved" if approved else "unreviewed",
+        review_evidence=(
+            CategoryReviewEvidence(
+                reference="snapshot:sha256:abc",
+                reviewer="operator@example.test",
+                reviewed_at="2026-07-27T12:00:00Z",
+            )
+            if approved
+            else None
+        ),
+    )
 
 
 class TestSellerPolicyValidator:
@@ -112,6 +136,25 @@ class TestSellerPolicyValidator:
         config = _make_config(human_review_required=False)
         validator = SellerPolicyValidator(config)
         result = validator.validate(_make_payload(), ai_suggested=True)
+        assert not result.has_errors
+
+    def test_ai_category_decision_without_approval_is_blocked(self) -> None:
+        validator = SellerPolicyValidator(_make_config(human_review_required=True))
+
+        result = validator.validate(
+            _make_payload(), category_decision=_ai_category_decision(approved=False)
+        )
+
+        assert result.has_errors
+        assert any("auditável" in violation.message for violation in result.violations)
+
+    def test_ai_category_decision_with_auditable_approval_passes_review_gate(self) -> None:
+        validator = SellerPolicyValidator(_make_config(human_review_required=True))
+
+        result = validator.validate(
+            _make_payload(), category_decision=_ai_category_decision(approved=True)
+        )
+
         assert not result.has_errors
 
     def test_override_listing_type(self) -> None:

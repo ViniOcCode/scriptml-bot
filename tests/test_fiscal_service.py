@@ -1,5 +1,6 @@
 """Tests for fiscal submission workflow behavior."""
 
+import logging
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -51,6 +52,29 @@ def test_submit_workflow_marks_pending_when_invoice_not_ready():
     assert result.error_code == "INVOICE_PENDING"
     assert api_client.verify_invoice_readiness.call_count == 3
     assert sleep_mock.call_count == 2
+
+
+def test_fiscal_payload_and_provider_response_are_not_logged_in_full(caplog) -> None:
+    """Operational logs keep metadata only; fiscal values stay out of caplog."""
+    api_client = MagicMock()
+    api_client.check_fiscal_data_exists.return_value = (False, None)
+    api_client.register_fiscal_data.return_value = {"ok": True}
+    api_client.link_fiscal_sku_to_item.return_value = {"status": "active"}
+    api_client.verify_invoice_readiness.return_value = (
+        False,
+        {"private_response": "RESPONSE_SENTINEL"},
+    )
+    fiscal_data = _build_valid_fiscal_data()
+    fiscal_data.ncm = "FISCAL_SENTINEL"
+    service = FiscalService(
+        api_client=api_client, can_invoice_wait_delay=0.0, can_invoice_max_retries=0
+    )
+
+    with caplog.at_level(logging.DEBUG, logger="mercadolivre_upload"):
+        service.submit_fiscal_data_workflow("MLB123", fiscal_data)
+
+    assert "FISCAL_SENTINEL" not in caplog.text
+    assert "RESPONSE_SENTINEL" not in caplog.text
 
 
 def test_submit_workflow_links_sku_after_registering_fiscal_data():
@@ -437,12 +461,15 @@ def test_fiscal_data_unknown_origin_type_is_invalid_and_not_blank():
 
 
 def test_fiscal_data_does_not_override_non_empty_origin_type_with_blank_default():
-    with patch(
-        "mercadolivre_upload.domain.fiscal.data._load_fiscal_defaults",
-        return_value={"origin_type": "", "type": "single", "measurement_unit": "UN"},
-    ), patch(
-        "mercadolivre_upload.domain.fiscal.data._load_field_value_mappings",
-        return_value={},
+    with (
+        patch(
+            "mercadolivre_upload.domain.fiscal.data._load_fiscal_defaults",
+            return_value={"origin_type": "", "type": "single", "measurement_unit": "UN"},
+        ),
+        patch(
+            "mercadolivre_upload.domain.fiscal.data._load_field_value_mappings",
+            return_value={},
+        ),
     ):
         fiscal_data = FiscalData(
             sku="SKU-123",

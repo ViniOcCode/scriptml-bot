@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime
+from math import isfinite
 from pathlib import Path
 from typing import Any, Literal
 
@@ -77,10 +79,53 @@ UP_SELLING_CONDITION_REQUIRED_FIELDS: frozenset[str] = frozenset(
 VALIDATE_UP_ENVELOPE: bool = True
 
 _SUPPORTED_UPLOAD_MODES: frozenset[str] = frozenset({"legacy_items", "user_products"})
+_CATEGORY_DECISION_SOURCES: frozenset[str] = frozenset({"ai", "operator", "marketplace_metadata"})
+_CATEGORY_RESOLUTION_MODES: frozenset[str] = frozenset(
+    {
+        "marketplace_search_consensus",
+        "ml_evidence_fusion",
+        "evidence_resolver",
+        "llm_authoritative",
+        "manual_review_required",
+    }
+)
 
 
 class InvalidPayloadError(Exception):
     """Raised when a payload.json is missing required fields or is structurally invalid."""
+
+
+@dataclass(frozen=True)
+class CategoryReviewEvidence:
+    """Auditable evidence required to approve a category for publication."""
+
+    reference: str
+    reviewer: str
+    reviewed_at: str
+
+
+@dataclass(frozen=True)
+class CategoryDecision:
+    """Typed provenance for the category bound to every strict publish body."""
+
+    schema_version: Literal[1]
+    category_id: str
+    source: Literal["ai", "operator", "marketplace_metadata"]
+    resolution_mode: Literal[
+        "marketplace_search_consensus",
+        "ml_evidence_fusion",
+        "evidence_resolver",
+        "llm_authoritative",
+        "manual_review_required",
+    ]
+    confidence: float | None
+    review_status: Literal["unreviewed", "approved"]
+    review_evidence: CategoryReviewEvidence | None
+
+    @property
+    def is_approved(self) -> bool:
+        """Whether the decision carries explicit, auditable approval."""
+        return self.review_status == "approved"
 
 
 @dataclass
@@ -100,6 +145,7 @@ class ReadPayloadResult:
     category_confidence: float | None = (
         None  # _meta.category_confidence / _meta.category.confidence
     )
+    category_decision: CategoryDecision | None = None
     reviewed_fiscal: bool | None = None  # _meta.reviewed_fiscal / _meta.publication.reviewed_fiscal
     fiscal_items: list[dict[str, Any]] = field(default_factory=list)  # root fiscal.items
     publish_item_skus: list[str] = field(
@@ -149,6 +195,215 @@ def _extract_traceability_publish_item_skus(meta: dict[str, Any]) -> list[str]:
         if normalized:
             publish_item_skus.append(normalized)
     return publish_item_skus
+
+
+def _require_nonblank_string(value: object, *, field: str, path_name: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise InvalidPayloadError(
+            f"Invalid category decision in {path_name}: {field} must be non-empty"
+        )
+    return value.strip()
+
+
+def _parse_reviewed_at(value: object, *, path_name: str) -> str:
+    reviewed_at = _require_nonblank_string(
+        value, field="review.evidence.reviewed_at", path_name=path_name
+    )
+    try:
+        parsed = datetime.fromisoformat(reviewed_at.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise InvalidPayloadError(
+            f"Invalid category decision in {path_name}: "
+            "review.evidence.reviewed_at must be ISO-8601"
+        ) from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise InvalidPayloadError(
+            f"Invalid category decision in {path_name}: "
+            "review.evidence.reviewed_at must include a UTC offset or Z suffix"
+        )
+    return reviewed_at
+
+
+def _parse_category_decision(
+    raw: object,
+    *,
+    path_name: str,
+    required: bool,
+) -> CategoryDecision | None:
+    """Parse the versioned category-decision contract without legacy defaults."""
+    if raw is None:
+        if required:
+            raise InvalidPayloadError(
+                f"Invalid publisher envelope in {path_name}: _meta.category_decision is required"
+            )
+        return None
+    if not isinstance(raw, dict):
+        raise InvalidPayloadError(f"Invalid category decision in {path_name}: must be an object")
+
+    allowed_fields = {
+        "schema_version",
+        "category_id",
+        "source",
+        "resolution_mode",
+        "confidence",
+        "review",
+    }
+    unknown_fields = sorted(set(raw) - allowed_fields)
+    missing_fields = sorted(
+        {"schema_version", "category_id", "source", "resolution_mode", "review"} - set(raw)
+    )
+    if unknown_fields or missing_fields:
+        detail = []
+        if missing_fields:
+            detail.append(f"missing={missing_fields}")
+        if unknown_fields:
+            detail.append(f"unknown={unknown_fields}")
+        raise InvalidPayloadError(f"Invalid category decision in {path_name}: {', '.join(detail)}")
+    if raw["schema_version"] != 1:
+        raise InvalidPayloadError(
+            f"Invalid category decision in {path_name}: schema_version must be 1"
+        )
+
+    category_id = _require_nonblank_string(
+        raw["category_id"], field="category_id", path_name=path_name
+    )
+    source = raw["source"]
+    if source not in _CATEGORY_DECISION_SOURCES:
+        raise InvalidPayloadError(f"Invalid category decision in {path_name}: unsupported source")
+    resolution_mode = raw["resolution_mode"]
+    if resolution_mode not in _CATEGORY_RESOLUTION_MODES:
+        raise InvalidPayloadError(
+            f"Invalid category decision in {path_name}: unsupported resolution_mode"
+        )
+
+    confidence_raw = raw.get("confidence")
+    confidence: float | None
+    if confidence_raw is None:
+        confidence = None
+    elif isinstance(confidence_raw, bool) or not isinstance(confidence_raw, (int, float)):
+        raise InvalidPayloadError(
+            f"Invalid category decision in {path_name}: confidence must be a number in [0.0, 1.0]"
+        )
+    else:
+        confidence = float(confidence_raw)
+        if not isfinite(confidence) or not 0.0 <= confidence <= 1.0:
+            raise InvalidPayloadError(
+                f"Invalid category decision in {path_name}: "
+                "confidence must be a finite value in [0.0, 1.0]"
+            )
+
+    review_raw = raw["review"]
+    if not isinstance(review_raw, dict) or set(review_raw) != {"status", "evidence"}:
+        raise InvalidPayloadError(
+            f"Invalid category decision in {path_name}: "
+            "review must contain only status and evidence"
+        )
+    review_status = review_raw["status"]
+    if review_status not in {"unreviewed", "approved"}:
+        raise InvalidPayloadError(
+            f"Invalid category decision in {path_name}: "
+            "review.status must be unreviewed or approved"
+        )
+    evidence_raw = review_raw["evidence"]
+    evidence: CategoryReviewEvidence | None = None
+    if review_status == "unreviewed":
+        if evidence_raw is not None:
+            raise InvalidPayloadError(
+                f"Invalid category decision in {path_name}: "
+                "unreviewed decision must not contain evidence"
+            )
+    else:
+        if not isinstance(evidence_raw, dict) or set(evidence_raw) != {
+            "reference",
+            "reviewer",
+            "reviewed_at",
+        }:
+            raise InvalidPayloadError(
+                f"Invalid category decision in {path_name}: "
+                "approved review requires auditable evidence"
+            )
+        evidence = CategoryReviewEvidence(
+            reference=_require_nonblank_string(
+                evidence_raw["reference"], field="review.evidence.reference", path_name=path_name
+            ),
+            reviewer=_require_nonblank_string(
+                evidence_raw["reviewer"], field="review.evidence.reviewer", path_name=path_name
+            ),
+            reviewed_at=_parse_reviewed_at(evidence_raw["reviewed_at"], path_name=path_name),
+        )
+
+    return CategoryDecision(
+        schema_version=1,
+        category_id=category_id,
+        source=source,
+        resolution_mode=resolution_mode,
+        confidence=confidence,
+        review_status=review_status,
+        review_evidence=evidence,
+    )
+
+
+def _body_category_ids(
+    payload: object,
+    *,
+    seller_model: str,
+    path_name: str,
+) -> list[str]:
+    """Return all body category IDs, rejecting inheritance that cannot be verified."""
+    if seller_model == "items":
+        if not isinstance(payload, dict):
+            raise InvalidPayloadError(
+                f"Invalid publisher envelope in {path_name}: items model requires object payload"
+            )
+        return [
+            _require_nonblank_string(
+                payload.get("category_id"), field="payload.category_id", path_name=path_name
+            )
+        ]
+
+    if not isinstance(payload, list) or not payload:
+        raise InvalidPayloadError(
+            f"Invalid publisher envelope in {path_name}: "
+            "user_products model requires non-empty array payload"
+        )
+    category_ids: list[str] = []
+    for index, item in enumerate(payload, start=1):
+        if not isinstance(item, dict):
+            raise InvalidPayloadError(
+                f"Invalid publisher envelope in {path_name}: payload[{index}] must be an object"
+            )
+        category_ids.append(
+            _require_nonblank_string(
+                item.get("category_id"),
+                field=f"payload[{index}].category_id",
+                path_name=path_name,
+            )
+        )
+    return category_ids
+
+
+def _validate_category_decision_binding(
+    meta: dict[str, Any],
+    payload: object,
+    *,
+    seller_model: str,
+    path_name: str,
+) -> CategoryDecision:
+    """Fail closed unless the declared decision binds every outbound body."""
+    decision = _parse_category_decision(
+        meta.get("category_decision"), path_name=path_name, required=True
+    )
+    assert decision is not None
+    body_category_ids = _body_category_ids(payload, seller_model=seller_model, path_name=path_name)
+    mismatched = sorted(
+        {category_id for category_id in body_category_ids if category_id != decision.category_id}
+    )
+    if mismatched:
+        raise InvalidPayloadError(
+            "Invalid publisher envelope in "
+            f"{path_name}: _meta.category_decision.category_id must match every payload category_id"
+        )
+    return decision
 
 
 def _extract_root_description(raw: dict[str, Any]) -> str | None:
@@ -470,6 +725,17 @@ def _validate_publisher_envelope(raw: dict[str, Any], path_name: str) -> None:
         raise InvalidPayloadError(
             f"Invalid publisher envelope in {path_name}: unsupported seller_model"
         )
+    if "category_ai_suggested" in meta:
+        raise InvalidPayloadError(
+            "Invalid publisher envelope in "
+            f"{path_name}: category_ai_suggested is retired; use _meta.category_decision"
+        )
+    _validate_category_decision_binding(
+        meta,
+        payload,
+        seller_model=seller_model,
+        path_name=path_name,
+    )
     traceability = meta.get("traceability")
     publish_item_skus = (
         traceability.get("publish_item_skus") if isinstance(traceability, dict) else None
@@ -530,12 +796,25 @@ class JsonPayloadReader:
             description = _extract_root_description(raw)
         description_by_sku = _extract_meta_description_by_sku(meta)
         sku: str | None = meta.get("sku")
+        category_decision = _parse_category_decision(
+            meta.get("category_decision"),
+            path_name=path.name,
+            required=self._strict_publisher_contract,
+        )
         ai_suggested_raw = meta.get("category_ai_suggested", False)
         if not isinstance(ai_suggested_raw, bool):
             raise InvalidPayloadError(
                 f"'_meta.category_ai_suggested' deve ser booleano em {path.name}"
             )
-        ai_suggested = ai_suggested_raw
+        if category_decision is not None:
+            ai_suggested = category_decision.source == "ai"
+            if "category_ai_suggested" in meta and ai_suggested_raw != ai_suggested:
+                raise InvalidPayloadError(
+                    "'_meta.category_ai_suggested' diverge de "
+                    f"category_decision.source em {path.name}"
+                )
+        else:
+            ai_suggested = ai_suggested_raw
         publication = meta.get("publication")
         if not isinstance(publication, dict):
             publication = {}
@@ -559,8 +838,11 @@ class JsonPayloadReader:
             category_meta = {}
         category_confidence_raw = meta.get("category_confidence", category_meta.get("confidence"))
         category_confidence: float | None = (
-            float(category_confidence_raw)
+            category_decision.confidence
+            if category_decision is not None
+            else float(category_confidence_raw)
             if isinstance(category_confidence_raw, (int, float))
+            and not isinstance(category_confidence_raw, bool)
             else None
         )
         reviewed_fiscal_raw = meta.get("reviewed_fiscal", publication.get("reviewed_fiscal"))
@@ -613,6 +895,7 @@ class JsonPayloadReader:
             publication_ready=publication_ready,
             blocking_reasons=blocking_reasons,
             category_confidence=category_confidence,
+            category_decision=category_decision,
             reviewed_fiscal=reviewed_fiscal,
             fiscal_items=fiscal_items,
             publish_item_skus=publish_item_skus,

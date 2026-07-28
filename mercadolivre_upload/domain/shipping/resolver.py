@@ -7,6 +7,7 @@ Uses configuration from config/shipping.yaml as the single source of truth.
 import logging
 from typing import Any, Protocol
 
+from mercadolivre_upload.infrastructure.logging import log_safe_event
 from mercadolivre_upload.shared.utils.config_loader import (
     SHIPPING_CONFIG_PATH,
     load_yaml_config,
@@ -300,7 +301,14 @@ class ShippingResolver:
             self._cached_logistic_type_by_mode = {}
             self._cached_runtime_policy_by_mode = {}
             user_info = self.provider.get_users_me()
-            logger.debug(f"User info from ML API: {user_info}")
+            log_safe_event(
+                logger,
+                logging.DEBUG,
+                "shipping_user_context_loaded",
+                operation="users_me",
+                has_user_id=bool(user_info.get("id")),
+                user_info=user_info,
+            )
             user_id = user_info.get("id")
 
             available_modes: list[str] = []

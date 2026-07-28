@@ -10,6 +10,7 @@ Suporta carregamento de:
 from __future__ import annotations
 
 import json
+import math
 import os
 from enum import Enum, StrEnum
 from pathlib import Path
@@ -128,9 +129,21 @@ class Settings(BaseSettings):
     # =========================================================================
     # Configurações de HTTP/Retry
     # =========================================================================
-    http_timeout: int = Field(default=30, description="Timeout de requisições HTTP")
-    http_max_retries: int = Field(default=3, description="Número máximo de retries")
-    http_backoff_factor: float = Field(default=0.5, description="Fator de backoff")
+    http_timeout: int = Field(
+        default=30,
+        ge=1,
+        description="Timeout de requisições HTTP",
+    )
+    http_max_retries: int = Field(
+        default=3,
+        ge=0,
+        description="Número máximo de retries",
+    )
+    http_backoff_factor: float = Field(
+        default=0.5,
+        ge=0,
+        description="Fator de backoff",
+    )
     http_pool_connections: int = Field(default=10, description="Conexões no pool")
     http_pool_maxsize: int = Field(default=10, description="Tamanho máximo do pool")
 
@@ -156,7 +169,7 @@ class Settings(BaseSettings):
         default=2.0,
         description="Requisições por segundo",
     )
-    rate_limit_burst: int = Field(default=5, description="Burst de requisições")
+    rate_limit_burst: int = Field(default=5, ge=1, description="Burst de requisições")
 
     # =========================================================================
     # Configurações de Planilhas
@@ -216,6 +229,23 @@ class Settings(BaseSettings):
         """Valida configuração do Redis quando necessário."""
         if self.cache_backend == CacheBackend.REDIS and not self.cache_redis_url:
             raise ValueError("cache_redis_url é obrigatório quando cache_backend='redis'")
+        return self
+
+    @model_validator(mode="after")
+    def _validate_http_resilience(self) -> Self:
+        """Reject unsafe HTTP settings before an API client can issue a request."""
+        if not isinstance(self.http_max_retries, int) or isinstance(self.http_max_retries, bool):
+            raise ValueError("http_max_retries must be a finite non-negative integer")
+        if not math.isfinite(self.http_backoff_factor) or self.http_backoff_factor < 0:
+            raise ValueError("http_backoff_factor must be finite and non-negative")
+        if self.rate_limit_enabled and (
+            not math.isfinite(self.rate_limit_requests_per_second)
+            or self.rate_limit_requests_per_second <= 0
+        ):
+            raise ValueError(
+                "rate_limit_requests_per_second must be finite and greater than zero "
+                "when rate limiting is enabled"
+            )
         return self
 
     # =========================================================================

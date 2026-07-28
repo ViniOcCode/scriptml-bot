@@ -134,7 +134,10 @@ def test_publish_mode_continues_to_publish_on_warning_only_validation() -> None:
         publisher=publisher,  # type: ignore[arg-type]
         image_uploader=_ImageUploader(),  # type: ignore[arg-type]
         config=_base_config(),
+        dry_run=False,
         validation_only=False,
+        execute=True,
+        confirmation="PUBLICAR",
         enable_feedback=False,
         enable_fiscal_submission=False,
     )
@@ -164,7 +167,10 @@ def test_publish_mode_blocks_on_mixed_warning_and_error_validation() -> None:
         publisher=publisher,  # type: ignore[arg-type]
         image_uploader=_ImageUploader(),  # type: ignore[arg-type]
         config=_base_config(),
+        dry_run=False,
         validation_only=False,
+        execute=True,
+        confirmation="PUBLICAR",
         enable_feedback=False,
         enable_fiscal_submission=False,
     )

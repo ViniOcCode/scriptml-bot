@@ -51,10 +51,9 @@ def validate_item(client: "MLApiClient", item: dict[str, Any]) -> dict[str, Any]
 
 
 def validate_user_product_item(client: "MLApiClient", item: dict[str, Any]) -> dict[str, Any]:
-    """Validate user-products payload using current MVP endpoint routing."""
+    """Validate every user-products payload through the non-mutating item endpoint."""
     if _is_existing_user_product_selling_condition_request(item):
         _require_existing_user_product_selling_condition_request(item)
-        return {}
     return client.validate_item(dict(item))
 
 

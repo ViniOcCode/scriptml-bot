@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from mercadolivre_upload.application.publish_product import PublishProductUseCase
 from tests.support.upload_alignment import (
     _build_product,
@@ -52,6 +54,8 @@ def _make_use_case(
         clip_uploader=None,
         config=_MINIMAL_CONFIG,
         dry_run=False,
+        execute=True,
+        confirmation="PUBLICAR",
         min_attribute_score=0,
         enable_feedback=False,
         enable_fiscal_submission=False,
@@ -98,8 +102,8 @@ def test_publish_inactive_false_does_not_call_update_item() -> None:
     assert publisher.updated_items == []
 
 
-def test_publish_inactive_update_failure_does_not_fail_item() -> None:
-    """If update_item raises, the item is still counted as published (warn-only)."""
+def test_publish_inactive_update_failure_is_partial_and_requires_reconciliation() -> None:
+    """A created item that could not be paused is never reported as successful."""
 
     class _FailingUpdatePublisher(_FakePublisher):
         def update_item(self, item_id: str, data: dict[str, Any]) -> dict[str, Any]:
@@ -110,7 +114,37 @@ def test_publish_inactive_update_failure_does_not_fail_item() -> None:
 
     result = use_case._publish_one(_build_product({}), "MLB123")
 
-    # Item was published (create succeeded), even though pause failed
-    assert result is True
-    assert use_case.published == 1
-    assert use_case.failed == 0
+    assert result is False
+    assert use_case.published == 0
+    assert use_case.failed == 1
+    assert use_case._current_side_effect_state == "partial"
+    assert use_case._current_reconciliation_required is True
+    assert "reconciliation is required" in use_case.errors[0]
+
+
+@pytest.mark.parametrize("create_response", [{}, {"id": ""}, None])
+def test_invalid_create_response_is_unknown_and_requires_reconciliation(
+    create_response: object,
+) -> None:
+    """A malformed success response cannot prove whether the remote mutation happened."""
+
+    class _InvalidCreateResponsePublisher(_FakePublisher):
+        def create_item(self, item: dict[str, Any]) -> dict[str, Any]:
+            self.created_items.append(item)
+            return create_response  # type: ignore[return-value]
+
+    publisher = _InvalidCreateResponsePublisher(
+        listing_types=[{"id": "gold_special"}],
+        sale_terms=[],
+    )
+    use_case = _make_use_case(publisher)
+
+    result = use_case._publish_one(_build_product({}), "MLB123")
+
+    assert result is False
+    assert use_case.published == 0
+    assert use_case.failed == 1
+    assert use_case._current_published_item_id is None
+    assert use_case._current_side_effect_state == "unknown"
+    assert use_case._current_reconciliation_required is True
+    assert "reconciliation is required" in use_case.errors[0]

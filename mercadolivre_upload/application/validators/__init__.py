@@ -9,7 +9,6 @@ from .seller_policy import (
     PricingConfig,
     SellerConfig,
     SellerPolicyValidator,
-    default_seller_config,
     load_seller_config,
 )
 
@@ -22,6 +21,5 @@ __all__ = [
     "PricingConfig",
     "SellerConfig",
     "SellerPolicyValidator",
-    "default_seller_config",
     "load_seller_config",
 ]

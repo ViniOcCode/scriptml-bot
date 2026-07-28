@@ -43,6 +43,9 @@ def test_publish_mode_surfaces_taxonomy_for_publish_exception() -> None:
         publisher=publisher,  # type: ignore[arg-type]
         image_uploader=_ImageUploader(),  # type: ignore[arg-type]
         config=_base_config(),
+        dry_run=False,
+        execute=True,
+        confirmation="PUBLICAR",
         enable_feedback=False,
         enable_fiscal_submission=False,
     )

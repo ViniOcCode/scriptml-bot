@@ -251,9 +251,21 @@ def _build_item_result(
         "index": index,
         "sku": product.sku,
         "title": product.title,
-        "status": "success" if success else "failed",
+        "status": (
+            "success"
+            if success
+            else "unknown"
+            if use_case._current_side_effect_state == "unknown"
+            else "failed"
+        ),
         "rollout_flags": deepcopy(use_case._rollout_flags_artifact),
     }
+    if use_case._current_side_effect_state != "none":
+        item_result["side_effect_state"] = use_case._current_side_effect_state
+    if use_case._current_reconciliation_required:
+        item_result["reconciliation_required"] = True
+    if use_case._current_published_item_id:
+        item_result["item_id"] = use_case._current_published_item_id
     if use_case._current_cause_codes:
         item_result["cause_codes"] = list(dict.fromkeys(use_case._current_cause_codes))
     if use_case._current_preflight_artifact:
@@ -345,6 +357,9 @@ def _build_execution_summary(
         and fiscal_summary["skipped_invalid"] == 0
     )
 
+    reconciliation_required = any(
+        bool(item.get("reconciliation_required")) for item in use_case.item_results
+    )
     return {
         "success": publish_success,
         "publish_success": publish_success,
@@ -363,6 +378,7 @@ def _build_execution_summary(
         "flow_routing": flow_routing,
         "rollout_flags": deepcopy(use_case._rollout_flags_artifact),
         "category_resolution": deepcopy(category_resolution_artifact),
+        "reconciliation_required": reconciliation_required,
     }
 
 
