@@ -167,13 +167,17 @@ def _canonical_oauth_runtime(
         expires_at=9_999_999_999,
     )
     repository.promote_pending("flow-1", expected_row_version=pending.row_version)
+    client_id_file = tmp_path / "ml-client-id"
+    client_id_file.write_text("app-current", encoding="utf-8")
     client_secret_file = tmp_path / "ml-client-secret"
     client_secret_file.write_text("client-secret-from-snapshot", encoding="utf-8")
     encryption_key_file = tmp_path / "oauth-encryption-key"
     encryption_key_file.write_text(encryption_key, encoding="utf-8")
     monkeypatch.setenv("MLBOT_SETTINGS_DB", str(database))
+    monkeypatch.setenv("ML_CLIENT_ID_FILE", str(client_id_file))
     monkeypatch.setenv("ML_CLIENT_SECRET_FILE", str(client_secret_file))
     monkeypatch.setenv("OAUTH_TOKEN_ENCRYPTION_KEY_FILE", str(encryption_key_file))
+    monkeypatch.delenv("ML_CLIENT_ID", raising=False)
     monkeypatch.delenv("ML_CLIENT_SECRET", raising=False)
     monkeypatch.delenv("OAUTH_TOKEN_ENCRYPTION_KEY", raising=False)
     return database, encryption_key

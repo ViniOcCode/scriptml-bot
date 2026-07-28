@@ -35,18 +35,15 @@ def _read_config(settings_file: Path) -> dict[str, Any]:
 
 
 def _load_client_id(settings_file: Path, explicit_client_id: str | None = None) -> str:
-    if explicit_client_id is not None and explicit_client_id.strip():
-        return explicit_client_id.strip()
-    payload = _read_config(settings_file)
-    auth = payload.get("auth")
-    auth_payload = auth if isinstance(auth, dict) else {}
+    del settings_file
+    try:
+        from ml_app_settings_core import RuntimeSecretError, RuntimeSecretReader
 
-    raw_client_id = auth_payload.get("ml_app_id", auth_payload.get("ml_client_id"))
-    client_id = raw_client_id.strip() if isinstance(raw_client_id, str) else ""
-    if not client_id:
-        raise AuthError(
-            f"Missing Mercado Livre OAuth client_id for publisher config {settings_file.resolve()}"
-        )
+        client_id = RuntimeSecretReader().require("ML_CLIENT_ID").strip()
+    except (ImportError, RuntimeSecretError) as exc:
+        raise AuthError("Mercado Livre client id is unavailable in the runtime snapshot") from exc
+    if explicit_client_id is not None and explicit_client_id.strip() != client_id:
+        raise AuthError("Requested Mercado Livre client id does not match the runtime snapshot")
     return client_id
 
 

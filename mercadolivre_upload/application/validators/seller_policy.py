@@ -29,8 +29,8 @@ class ListingConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    allowed_types: list[str]
-    default_type: str
+    allowed_types: list[str] = Field(default_factory=list)
+    default_type: str | None = None
 
 
 class PricingConfig(BaseModel):
@@ -38,8 +38,8 @@ class PricingConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    min_price: float
-    max_price: float
+    min_price: float | None = None
+    max_price: float | None = None
 
 
 class CategoriesConfig(BaseModel):
@@ -202,7 +202,10 @@ class SellerPolicyValidator:
 
         # listing_type check
         listing_type = payload.get("listing_type_id", "")
-        if listing_type not in self._config.listing.allowed_types:
+        if (
+            self._config.listing.allowed_types
+            and listing_type not in self._config.listing.allowed_types
+        ):
             violations.append(
                 PolicyViolation(
                     field="listing_type_id",
@@ -216,7 +219,10 @@ class SellerPolicyValidator:
 
         # Price range checks — for variation items, use minimum variation price
         price = _effective_price(payload)
-        if price < self._config.pricing.min_price:
+        if (
+            self._config.pricing.min_price is not None
+            and price < self._config.pricing.min_price
+        ):
             violations.append(
                 PolicyViolation(
                     field="price",
@@ -227,7 +233,10 @@ class SellerPolicyValidator:
                     severity="error",
                 )
             )
-        if price > self._config.pricing.max_price:
+        if (
+            self._config.pricing.max_price is not None
+            and price > self._config.pricing.max_price
+        ):
             violations.append(
                 PolicyViolation(
                     field="price",

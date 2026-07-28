@@ -2,15 +2,8 @@
 # config/publisher.yaml is git-ignored (per-tenant, never commit real values).
 #
 # Publisher-owned settings for manifest/payload publishing policy.
-
-auth:
-  # Client ID from Mercado Livre Developer Portal
-  # https://developers.mercadolivre.com.br/
-  # Can also be stored in ./secrets/meli_client_id
-  ml_client_id: ""
-
-  # Client Secret - can also be stored in ./secrets/meli_client_secret
-  ml_client_secret: ""
+# Runtime credentials and operator identifiers come exclusively from the
+# Bitwarden snapshot described by ml_app_settings_core/secret_catalog.py.
 
 runtime:
   workspace_root: "./workspace"
@@ -26,14 +19,12 @@ runtime:
 
 seller:
   listing:
-    allowed_types:
-      - "gold_special"
-      - "gold_pro"
-    default_type: "gold_special"
+    allowed_types: []
+    default_type: ""
 
   pricing:
-    min_price: 5.00
-    max_price: 999.00
+    min_price: null
+    max_price: null
 
   categories:
     blocked: []
