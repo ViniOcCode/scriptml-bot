@@ -1428,6 +1428,9 @@ class PublishPayloadUseCase:
         fallback_sku: str | None,
     ) -> tuple[dict[str, Any], str | None, bool, bool]:
         """Submit one fiscal entry and return its report, error, unknown and pending flags."""
+        fiscal_service = self._fiscal_service
+        if fiscal_service is None:
+            raise RuntimeError("FiscalService is required to submit fiscal data")
         try:
             fiscal_data = _build_fiscal_data(
                 fiscal_item=fiscal_item,
@@ -1435,12 +1438,12 @@ class PublishPayloadUseCase:
                 fallback_sku=fallback_sku,
             )
             if target.variation_id is None:
-                fiscal_result = self._fiscal_service.submit_fiscal_data_workflow(
+                fiscal_result = fiscal_service.submit_fiscal_data_workflow(
                     target.item_id,
                     fiscal_data,
                 )
             else:
-                fiscal_result = self._fiscal_service.submit_fiscal_data_workflow(
+                fiscal_result = fiscal_service.submit_fiscal_data_workflow(
                     target.item_id,
                     fiscal_data,
                     variation_id=target.variation_id,

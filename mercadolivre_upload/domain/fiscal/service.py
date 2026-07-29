@@ -274,7 +274,6 @@ class FiscalService:
 
         check_exists_retry_count = 0
         registration_retry_count = 0
-        fiscal_status = FiscalSubmissionStatus.ALREADY_EXISTS
 
         try:
             (exists, _), check_exists_retry_count = self._execute_with_retry(
@@ -306,7 +305,6 @@ class FiscalService:
             )
 
         if not exists:
-            fiscal_status = FiscalSubmissionStatus.REGISTERED
             try:
                 payload = fiscal_data.to_api_payload()
                 logger.info(f"Registering fiscal data for SKU {sku} (item {item_id})")
@@ -411,7 +409,6 @@ class FiscalService:
             item_id,
             sku,
             fiscal_data,
-            fiscal_status,
             total_retry_count,
         )
 
@@ -420,7 +417,6 @@ class FiscalService:
         item_id: str,
         sku: str,
         fiscal_data: FiscalData,
-        previous_status: FiscalSubmissionStatus,
         previous_retry_count: int = 0,
     ) -> FiscalSubmissionResult:
         """Verify invoice readiness for an item.
@@ -429,7 +425,6 @@ class FiscalService:
             item_id: Mercado Livre item ID
             sku: Product SKU
             fiscal_data: Fiscal data
-            previous_status: Status from previous step
             previous_retry_count: Retry count from previous operations
 
         Returns:

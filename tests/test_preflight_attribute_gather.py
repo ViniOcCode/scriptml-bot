@@ -61,7 +61,7 @@ def test_resolve_attribute_value_list_exact_token_to_value_id() -> None:
         ],
     }
 
-    resolved = resolve_attribute_value(attribute, "Azul", enable_translate=False)
+    resolved = resolve_attribute_value(attribute, "Azul")
 
     assert resolved["status"] == "resolved"
     assert resolved["primary"] == {"value_id": "1", "value_name": "Azul"}
@@ -76,7 +76,7 @@ def test_resolve_attribute_value_number_unit_uses_default_unit() -> None:
         "allowed_units": [{"id": "cm", "name": "cm"}],
     }
 
-    resolved = resolve_attribute_value(attribute, "25", enable_translate=False)
+    resolved = resolve_attribute_value(attribute, "25")
 
     assert resolved["status"] == "resolved"
     assert resolved["primary"] == {"value_id": None, "value_name": "25 cm"}

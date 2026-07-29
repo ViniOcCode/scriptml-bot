@@ -120,11 +120,11 @@ class CategoryAdapter(CategoryApiPort):
             if isinstance(result, dict) and "required_attributes" in result:
                 required = result["required_attributes"]
                 if isinstance(required, list):
-                    return cast(list[dict[str, Any]], required)
+                    return required
                 raise TypeError("required_attributes is not a list")
             if not isinstance(result, list):
                 raise TypeError(f"unexpected conditional response {type(result).__name__}")
-            return cast(list[dict[str, Any]], result)
+            return result
         except RECOVERABLE_API_ERRORS as e:
             message = f"Failed to get conditional attributes for {category_id}: {e}"
             logger.warning(message)

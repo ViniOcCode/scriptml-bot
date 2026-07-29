@@ -10,7 +10,7 @@ import math
 import os
 import re
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
 from mercadolivre_upload.api.domains import categories as category_endpoints
 from mercadolivre_upload.api.domains import fiscal as fiscal_endpoints
@@ -32,6 +32,17 @@ BASE_URL = "https://api.mercadolibre.com"
 DEFAULT_PREDICTION_LIMIT = 3
 
 ITEM_ID_PATTERN = re.compile(r"^ML[A-Z]\d+$")
+
+
+class _HTTPSettings(Protocol):
+    """Configuration fields required to construct the resilient HTTP client."""
+
+    http_timeout: int
+    http_max_retries: int
+    http_backoff_factor: float
+    rate_limit_enabled: bool
+    rate_limit_requests_per_second: float
+    rate_limit_burst: int
 
 
 def validate_item_id(item_id: str | None) -> None:
@@ -65,10 +76,8 @@ def _validate_http_settings(settings: Any) -> None:
     rate_enabled = settings.rate_limit_enabled
     rate = settings.rate_limit_requests_per_second
 
-    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0:
-        raise ValueError("http_timeout must be greater than zero")
-    if not math.isfinite(float(timeout)):
-        raise ValueError("http_timeout must be finite")
+    if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout <= 0:
+        raise ValueError("http_timeout must be a positive integer")
     if isinstance(retries, bool) or not isinstance(retries, int) or retries < 0:
         raise ValueError("http_max_retries must be a finite non-negative integer")
     if (
@@ -92,7 +101,7 @@ def _validate_http_settings(settings: Any) -> None:
         )
 
 
-def _snapshot_http_settings(snapshot: str) -> SimpleNamespace:
+def _snapshot_http_settings(snapshot: str) -> _HTTPSettings:
     """Read validated HTTP values from ``runtime.http`` in a publisher snapshot."""
     try:
         raw = json.loads(snapshot)
@@ -149,6 +158,7 @@ def _snapshot_http_settings(snapshot: str) -> SimpleNamespace:
 def _build_http_client() -> ResilientHTTPClient:
     """Build a validated HTTP client; never fall back after configuration errors."""
     snapshot = os.getenv("MLBOT_PUBLISHER_CONFIG_SNAPSHOT")
+    settings: _HTTPSettings
     if snapshot is not None:
         settings = _snapshot_http_settings(snapshot)
     else:

@@ -107,16 +107,14 @@ def _canonical_oauth_runtime(
 ) -> tuple[Path, str]:
     database = tmp_path / "settings.sqlite3"
     with closing(sqlite3.connect(database)) as connection:
-        connection.executescript(
-            """
+        connection.executescript("""
             CREATE TABLE integration_profiles (
                 id TEXT PRIMARY KEY, slug TEXT NOT NULL, active INTEGER NOT NULL
             );
             CREATE TABLE dashboard_settings (
                 key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL
             );
-            """
-        )
+            """)
         connection.execute(
             "INSERT INTO integration_profiles(id,slug,active) VALUES (?,?,1)",
             ("profile-default", "default"),

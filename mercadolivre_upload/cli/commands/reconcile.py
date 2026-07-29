@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Literal, cast
 
 import requests
 import typer
@@ -62,7 +63,10 @@ def _print_table(report: ReconcileReport) -> None:
     table_console = Console(
         width=max(console.width, 240),
         force_terminal=console.is_terminal,
-        color_system=console.color_system,
+        color_system=cast(
+            Literal["auto", "standard", "256", "truecolor", "windows"] | None,
+            console.color_system,
+        ),
     )
     table_console.print(table)
     summary = ", ".join(f"{key}={value}" for key, value in report.summary.items())

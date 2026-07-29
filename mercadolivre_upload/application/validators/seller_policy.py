@@ -219,10 +219,7 @@ class SellerPolicyValidator:
 
         # Price range checks — for variation items, use minimum variation price
         price = _effective_price(payload)
-        if (
-            self._config.pricing.min_price is not None
-            and price < self._config.pricing.min_price
-        ):
+        if self._config.pricing.min_price is not None and price < self._config.pricing.min_price:
             violations.append(
                 PolicyViolation(
                     field="price",
@@ -233,10 +230,7 @@ class SellerPolicyValidator:
                     severity="error",
                 )
             )
-        if (
-            self._config.pricing.max_price is not None
-            and price > self._config.pricing.max_price
-        ):
+        if self._config.pricing.max_price is not None and price > self._config.pricing.max_price:
             violations.append(
                 PolicyViolation(
                     field="price",

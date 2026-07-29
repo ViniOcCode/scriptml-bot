@@ -840,10 +840,12 @@ class JsonPayloadReader:
         category_confidence: float | None = (
             category_decision.confidence
             if category_decision is not None
-            else float(category_confidence_raw)
-            if isinstance(category_confidence_raw, (int, float))
-            and not isinstance(category_confidence_raw, bool)
-            else None
+            else (
+                float(category_confidence_raw)
+                if isinstance(category_confidence_raw, (int, float))
+                and not isinstance(category_confidence_raw, bool)
+                else None
+            )
         )
         reviewed_fiscal_raw = meta.get("reviewed_fiscal", publication.get("reviewed_fiscal"))
         if reviewed_fiscal_raw is not None and not isinstance(reviewed_fiscal_raw, bool):

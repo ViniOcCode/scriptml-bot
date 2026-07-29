@@ -21,4 +21,3 @@ def test_publisher_has_no_builder_imports() -> None:
                 if module.startswith("ml_listing_builder"):
                     violations.append(f"{path.relative_to(root)} -> {module}")
     assert not violations, "Publisher imports builder package:\n" + "\n".join(sorted(violations))
-

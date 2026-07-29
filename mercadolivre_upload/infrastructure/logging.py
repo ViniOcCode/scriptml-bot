@@ -248,7 +248,6 @@ def _configure_third_party_loggers() -> None:
     # Reduz verbosidade de bibliotecas comuns
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("requests").setLevel(logging.WARNING)
-    logging.getLogger("aiohttp").setLevel(logging.WARNING)
     logging.getLogger("asyncio").setLevel(logging.WARNING)
 
 

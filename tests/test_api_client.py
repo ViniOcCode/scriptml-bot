@@ -106,6 +106,7 @@ def test_canonical_snapshot_ignores_legacy_http_shapes(
     "snapshot, message",
     [
         ('{"runtime":{"http":{"timeout":0}}}', "http_timeout"),
+        ('{"runtime":{"http":{"timeout":1.5}}}', "http_timeout"),
         ('{"runtime":{"http":{"unknown":1}}}', "unsupported fields"),
         (
             '{"runtime":{"http":{"rate_limit":{"enabled":true,"burst":false}}}}',

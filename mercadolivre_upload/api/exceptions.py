@@ -12,7 +12,7 @@ from typing import Any
 import requests
 
 
-class MLApiError(requests.HTTPError):  # type: ignore[misc]
+class MLApiError(requests.HTTPError):
     """HTTPError enriched with the ML API JSON error body.
 
     Attributes:

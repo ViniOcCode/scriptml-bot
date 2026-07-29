@@ -354,29 +354,6 @@ def resolve_header(
     }
 
 
-def _maybe_translate_candidates(tokens: list[str]) -> list[str]:
-    """Try optional translation for unresolved tokens.
-
-    Translation is intentionally optional and best-effort to avoid hard dependency.
-    """
-    try:
-        import argostranslate.translate  # type: ignore[import-not-found]
-    except Exception:
-        return []
-
-    translated_tokens: list[str] = []
-    for token in tokens:
-        try:
-            translated = argostranslate.translate.translate(token, "en", "pt")
-        except Exception as exc:
-            logger.debug("Translation failed for token '%s': %s", token, exc)
-            continue
-        translated_text = str(translated).strip()
-        if translated_text:
-            translated_tokens.append(translated_text)
-    return translated_tokens
-
-
 def _score_value_name(candidate: str, allowed_name: str) -> float:
     normalized_candidate = _normalize(candidate)
     normalized_allowed = _normalize(allowed_name)
@@ -486,8 +463,6 @@ def _resolve_list_token(
 def resolve_attribute_value(
     attribute: dict[str, Any],
     raw_value: Any,
-    *,
-    enable_translate: bool = False,
 ) -> dict[str, Any]:
     """Resolve a raw spreadsheet value against one attribute definition."""
     value_type = str(attribute.get("value_type", "string"))
@@ -504,20 +479,6 @@ def resolve_attribute_value(
         allowed_values = [value for value in attribute["values"] if isinstance(value, dict)]
         tokens = _split_cell_values(text)
         token_results = [_resolve_list_token(token, allowed_values) for token in tokens]
-
-        unresolved_tokens = [
-            result.raw_token for result in token_results if result.status != "resolved"
-        ]
-        if unresolved_tokens and enable_translate:
-            translated = _maybe_translate_candidates(unresolved_tokens)
-            if translated:
-                translated_results = [
-                    _resolve_list_token(token, allowed_values) for token in translated
-                ]
-                resolved_translations = [
-                    result for result in translated_results if result.status == "resolved"
-                ]
-                token_results.extend(resolved_translations)
 
         resolved = [result for result in token_results if result.status == "resolved"]
         unresolved_count = len([result for result in token_results if result.status != "resolved"])
@@ -697,7 +658,7 @@ def build_item_context(
         if attr_def is None:
             continue
 
-        resolved_value = resolve_attribute_value(attr_def, row.get(column), enable_translate=False)
+        resolved_value = resolve_attribute_value(attr_def, row.get(column))
         if resolved_value.get("status") not in {"resolved", "partial"}:
             continue
 
@@ -871,7 +832,6 @@ def run_preflight(
     out_dir: Path,
     sheet_name: str | int | None,
     strict: bool,
-    enable_translate: bool,
     cache_dir: Path,
 ) -> dict[str, Any]:
     """Run deterministic preflight gatherer and persist artifacts."""
@@ -967,7 +927,6 @@ def run_preflight(
             resolved = resolve_attribute_value(
                 attribute,
                 raw,
-                enable_translate=enable_translate,
             )
             status = str(resolved.get("status"))
             if status in {"unresolved", "partial"}:
@@ -1179,12 +1138,6 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Downgrade blocking issues to warnings.",
     )
     parser.add_argument(
-        "--enable-translate",
-        action="store_true",
-        default=False,
-        help="Enable optional best-effort translation fallback for unresolved enum tokens.",
-    )
-    parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -1223,7 +1176,6 @@ def main(argv: list[str] | None = None) -> int:
             out_dir=out_dir,
             sheet_name=sheet_name,
             strict=bool(args.strict),
-            enable_translate=bool(args.enable_translate),
             cache_dir=cache_dir,
         )
     except Exception as exc:

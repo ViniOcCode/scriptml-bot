@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -134,9 +134,18 @@ class RunManifest(BaseModel):
         return self
 
 
+class _ManifestPolicy(TypedDict):
+    """Trust and execution fields derived from a legacy profile."""
+
+    manifest_version: Literal[2]
+    trust_profile: Literal["production", "development"]
+    run_mode: Literal["autonomous", "diagnostic"]
+    model_policy: Literal["free_only", "quality_first"]
+
+
 def _legacy_execution_profile_manifest_policy(
     execution_profile: Literal["dev", "paid"],
-) -> dict[str, object]:
+) -> _ManifestPolicy:
     if execution_profile == "paid":
         return {
             "manifest_version": 2,
@@ -162,9 +171,7 @@ def read_run_manifest(raw: dict[str, Any]) -> RunManifest:
     generation_outcome: Literal["complete", "needs_input", "failed"] = (
         "complete"
         if legacy.status == "success"
-        else "needs_input"
-        if legacy.status == "partial_success"
-        else "failed"
+        else "needs_input" if legacy.status == "partial_success" else "failed"
     )
     return RunManifest(
         run_id=legacy.run_id,
