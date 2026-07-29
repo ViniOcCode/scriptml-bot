@@ -199,7 +199,9 @@ def validate_effective_payload_file(
     status = (
         "validation_failed"
         if blocking
-        else "validation_passed_with_warnings" if warning else "validation_passed"
+        else "validation_passed_with_warnings"
+        if warning
+        else "validation_passed"
     )
     return {
         **prepared,

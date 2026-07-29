@@ -192,9 +192,9 @@ def _merge_resolver_selection(use_case: Any, state: dict[str, Any], default_mode
                         normalized_mode = str(mode).strip()
                         normalized_logistic = str(logistic_type).strip()
                         if normalized_mode and normalized_logistic:
-                            state["resolved_logistic_type_by_mode"][
-                                normalized_mode
-                            ] = normalized_logistic
+                            state["resolved_logistic_type_by_mode"][normalized_mode] = (
+                                normalized_logistic
+                            )
 
                 runtime_policy_by_mode_raw = selection_payload.get("runtime_policy_by_mode")
                 if isinstance(runtime_policy_by_mode_raw, dict):

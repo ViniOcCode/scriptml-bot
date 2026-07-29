@@ -14,7 +14,7 @@ def test_oauth_handler_reads_only_client_id_from_development_config(
     config_dir = tmp_path / "config"
     config_dir.mkdir(parents=True, exist_ok=True)
     (config_dir / "publisher.yaml").write_text(
-        "auth:\n" "  ml_app_id: app-123\n",
+        "auth:\n  ml_app_id: app-123\n",
         encoding="utf-8",
     )
     secrets_dir = tmp_path / "secrets"
@@ -36,7 +36,7 @@ def test_oauth_handler_prefers_explicit_args_over_file_defaults(
     config_dir = tmp_path / "config"
     config_dir.mkdir(parents=True, exist_ok=True)
     (config_dir / "publisher.yaml").write_text(
-        "auth:\n" "  ml_app_id: app-file\n",
+        "auth:\n  ml_app_id: app-file\n",
         encoding="utf-8",
     )
     secrets_dir = tmp_path / "secrets"
@@ -58,7 +58,7 @@ def test_oauth_handler_never_reads_secret_relative_to_settings_file(
     config_dir.mkdir(parents=True, exist_ok=True)
     settings_file = config_dir / "publisher.yaml"
     settings_file.write_text(
-        "auth:\n" "  ml_app_id: app-789\n",
+        "auth:\n  ml_app_id: app-789\n",
         encoding="utf-8",
     )
     secrets_dir = repo_root / "secrets"
@@ -79,7 +79,7 @@ def test_oauth_handler_production_ignores_legacy_secret_environment(
     config_dir.mkdir(parents=True, exist_ok=True)
     settings_file = config_dir / "publisher.yaml"
     settings_file.write_text(
-        "auth:\n" "  ml_app_id: app-vault\n",
+        "auth:\n  ml_app_id: app-vault\n",
         encoding="utf-8",
     )
     secrets_dir = tmp_path / "secrets"

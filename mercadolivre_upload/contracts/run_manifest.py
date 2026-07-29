@@ -171,7 +171,9 @@ def read_run_manifest(raw: dict[str, Any]) -> RunManifest:
     generation_outcome: Literal["complete", "needs_input", "failed"] = (
         "complete"
         if legacy.status == "success"
-        else "needs_input" if legacy.status == "partial_success" else "failed"
+        else "needs_input"
+        if legacy.status == "partial_success"
+        else "failed"
     )
     return RunManifest(
         run_id=legacy.run_id,

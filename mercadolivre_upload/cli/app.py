@@ -50,9 +50,7 @@ def setup_logging(verbose: bool = False) -> None:
 @app.command()
 def publish_payload(
     path: Path = typer.Argument(..., help="Path to payload.json or 70_payload.json"),  # noqa: B008
-    dry_run: bool = typer.Option(
-        True, "--dry-run", help="Validate without publishing."
-    ),  # noqa: B008
+    dry_run: bool = typer.Option(True, "--dry-run", help="Validate without publishing."),  # noqa: B008
     execute: bool = typer.Option(
         False,
         "--execute",
@@ -106,9 +104,7 @@ def publish_payload(
 @app.command()
 def publish_manifest(
     manifest_path: Path = typer.Argument(..., help="Path to run_manifest.json"),  # noqa: B008
-    dry_run: bool = typer.Option(
-        True, "--dry-run", help="Validate without publishing."
-    ),  # noqa: B008
+    dry_run: bool = typer.Option(True, "--dry-run", help="Validate without publishing."),  # noqa: B008
     execute: bool = typer.Option(
         False,
         "--execute",
@@ -207,12 +203,8 @@ def main() -> None:
 
 @app.callback()
 def main_callback(
-    verbose: bool = typer.Option(
-        False, "--verbose", "-v", help="Enable verbose logging"
-    ),  # noqa: B008
-    output: str = typer.Option(
-        "text", "--output", "-o", help="Output format: text or json"
-    ),  # noqa: B008
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),  # noqa: B008
+    output: str = typer.Option("text", "--output", "-o", help="Output format: text or json"),  # noqa: B008
 ) -> None:
     """Mercado Livre Bulk Upload Tool."""
     state["verbose"] = verbose

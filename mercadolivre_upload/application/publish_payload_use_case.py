@@ -1613,7 +1613,9 @@ class PublishPayloadUseCase:
                 fiscal_status=(
                     "unknown"
                     if fiscal_unknown
-                    else "pending_verification" if fiscal_pending else "failed"
+                    else "pending_verification"
+                    if fiscal_pending
+                    else "failed"
                 ),
                 fiscal_report=fiscal_report,
                 reconciliation_required=True,

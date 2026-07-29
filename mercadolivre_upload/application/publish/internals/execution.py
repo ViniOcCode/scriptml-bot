@@ -254,7 +254,9 @@ def _build_item_result(
         "status": (
             "success"
             if success
-            else "unknown" if use_case._current_side_effect_state == "unknown" else "failed"
+            else "unknown"
+            if use_case._current_side_effect_state == "unknown"
+            else "failed"
         ),
         "rollout_flags": deepcopy(use_case._rollout_flags_artifact),
     }
