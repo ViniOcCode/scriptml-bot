@@ -599,6 +599,12 @@ provides-extras = ["dev"]
 name = "ml-app-settings-core"
 version = "0.1.0"
 source = { editable = "../../ml_app_settings_core" }
+dependencies = [
+    { name = "cryptography" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "cryptography", specifier = ">=48.0.1" }]
 
 [[package]]
 name = "more-itertools"
